@@ -31,6 +31,9 @@ class SyncService {
   bool _syncing = false;
   bool get isSyncing => _syncing;
 
+  /// Disabled in widget/screenshot tests to keep them offline.
+  bool autoSyncOnLaunch = true;
+
   static const _userAgent =
       'Mozilla/5.0 (compatible; einkreader/0.1; +https://github.com/xdamman/einkreader)';
 

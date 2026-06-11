@@ -36,14 +36,15 @@ ThemeData buildEinkTheme() {
       TargetPlatform.linux: _NoTransitionsBuilder(),
       TargetPlatform.windows: _NoTransitionsBuilder(),
     }),
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       backgroundColor: white,
       foregroundColor: black,
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
-      shape: Border(bottom: BorderSide(color: black, width: 1)),
-      titleTextStyle: TextStyle(
+      shape: const Border(bottom: BorderSide(color: black, width: 1)),
+      // Derive from the base typography so the platform font family is kept.
+      titleTextStyle: base.textTheme.titleLarge?.copyWith(
         color: black,
         fontSize: 20,
         fontWeight: FontWeight.w600,
@@ -60,7 +61,8 @@ ThemeData buildEinkTheme() {
         side: const BorderSide(color: black, width: 1.5),
         shape: const RoundedRectangleBorder(),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        textStyle: base.textTheme.labelLarge
+            ?.copyWith(fontSize: 16, fontWeight: FontWeight.w600),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
@@ -85,11 +87,12 @@ ThemeData buildEinkTheme() {
       labelStyle: TextStyle(color: black),
       hintStyle: TextStyle(color: Color(0xFF666666)),
     ),
-    snackBarTheme: const SnackBarThemeData(
+    snackBarTheme: SnackBarThemeData(
       backgroundColor: black,
-      contentTextStyle: TextStyle(color: white, fontSize: 15),
+      contentTextStyle:
+          base.textTheme.bodyMedium?.copyWith(color: white, fontSize: 15),
       behavior: SnackBarBehavior.fixed,
-      shape: RoundedRectangleBorder(),
+      shape: const RoundedRectangleBorder(),
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: black,

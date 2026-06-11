@@ -34,7 +34,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!p.running) _load();
     });
     // Refresh everything on launch so content is ready for offline reading.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _sync(silent: true));
+    if (SyncService.instance.autoSyncOnLaunch) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _sync(silent: true));
+    }
   }
 
   @override

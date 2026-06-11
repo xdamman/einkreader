@@ -255,6 +255,17 @@ class _MarkdownViewState extends State<MarkdownView> {
         continue;
       }
 
+      // Indented continuation of a wrapped list item.
+      if (line.startsWith('  ') &&
+          paragraph.isEmpty &&
+          blocks.isNotEmpty &&
+          blocks.last.type == _BlockType.listItem) {
+        final last = blocks.removeLast();
+        blocks.add(_Block(last.type, '${last.text} $trimmed',
+            level: last.level, marker: last.marker));
+        continue;
+      }
+
       paragraph.add(trimmed);
     }
     flushParagraph();

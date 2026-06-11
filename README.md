@@ -10,6 +10,19 @@ It pulls articles from:
 
 Everything is downloaded while you're online and stored locally in SQLite, so the whole library reads fine offline.
 
+## Screenshots
+
+| Home | Reader (with highlights) | Highlights |
+|---|---|---|
+| ![Home](docs/screenshots/home_tablet.png) | ![Reader](docs/screenshots/reader_tablet.png) | ![Highlights](docs/screenshots/highlights_tablet.png) |
+
+More in [`docs/screenshots/`](docs/screenshots/), including phone-sized variants. They are generated from the real widgets — no emulator needed — by the golden test in `test/screenshots/`:
+
+```bash
+flutter test test/screenshots/screenshot_test.dart \
+  --update-goldens --dart-define=screenshots=true
+```
+
 ## How content is prepared
 
 When a feed already ships the full article (`content:encoded`), it is converted straight to Markdown. Otherwise the linked page is downloaded and run through an on-device readability-style extractor + HTML→Markdown converter (`html2md`) — a lightweight pandoc equivalent. Tweets and Nostr notes that link to an article get the original post quoted above the extracted article.
