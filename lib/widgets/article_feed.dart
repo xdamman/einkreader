@@ -5,15 +5,24 @@ import '../db/app_database.dart';
 import '../models.dart';
 import '../screens/article_screen.dart';
 
-/// Article list grouped by day with date subheadings and a "read later"
-/// toggle on every row. Used by the Feed, To Read and Favorites tabs and
-/// the per-source list.
+/// Per-row action shown on the trailing edge of a feed tile.
+enum FeedRowAction {
+  /// Bookmark toggle that saves the article to the To Read tab.
+  readLater,
+
+  /// Filled star that removes the article from Favorites.
+  unfavorite,
+}
+
+/// Article list grouped by day with date subheadings and a per-row action.
+/// Used by the Feed, To Read and Favorites tabs and the per-source list.
 class ArticleFeed extends StatelessWidget {
   final List<Article> articles;
 
   /// Source id → source title, shown in each row's meta line.
   final Map<int, String> sourceTitles;
   final String emptyMessage;
+  final FeedRowAction rowAction;
   final VoidCallback onChanged;
 
   const ArticleFeed({
@@ -21,6 +30,7 @@ class ArticleFeed extends StatelessWidget {
     required this.articles,
     this.sourceTitles = const {},
     required this.emptyMessage,
+    this.rowAction = FeedRowAction.readLater,
     required this.onChanged,
   });
 
@@ -66,6 +76,7 @@ class ArticleFeed extends StatelessWidget {
         return _ArticleTile(
           article: entry as Article,
           sourceTitle: sourceTitles[(entry).sourceId],
+          rowAction: rowAction,
           onChanged: onChanged,
         );
       },
@@ -110,17 +121,44 @@ class _DayHeader extends StatelessWidget {
 class _ArticleTile extends StatelessWidget {
   final Article article;
   final String? sourceTitle;
+  final FeedRowAction rowAction;
   final VoidCallback onChanged;
 
   const _ArticleTile({
     required this.article,
     this.sourceTitle,
+    required this.rowAction,
     required this.onChanged,
   });
 
+  Widget _actionButton() {
+    switch (rowAction) {
+      case FeedRowAction.readLater:
+        final saved = article.readLater == 1;
+        return IconButton(
+          tooltip: saved ? 'Remove from To Read' : 'Read later',
+          iconSize: 26,
+          icon: Icon(saved ? Icons.bookmark : Icons.bookmark_add_outlined),
+          onPressed: () async {
+            await AppDatabase.instance.setReadLater(article.id!, !saved);
+            onChanged();
+          },
+        );
+      case FeedRowAction.unfavorite:
+        return IconButton(
+          tooltip: 'Remove from Favorites',
+          iconSize: 26,
+          icon: const Icon(Icons.star),
+          onPressed: () async {
+            await AppDatabase.instance.setFavorite(article.id!, false);
+            onChanged();
+          },
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final saved = article.readLater == 1;
     final meta = [
       if (sourceTitle != null) sourceTitle!,
       if (article.author != null && article.author!.isNotEmpty)
@@ -147,15 +185,7 @@ class _ArticleTile extends StatelessWidget {
               padding: const EdgeInsets.only(top: 4),
               child: Text(meta, style: const TextStyle(fontSize: 13)),
             ),
-      trailing: IconButton(
-        tooltip: saved ? 'Remove from To Read' : 'Read later',
-        iconSize: 26,
-        icon: Icon(saved ? Icons.bookmark : Icons.bookmark_add_outlined),
-        onPressed: () async {
-          await AppDatabase.instance.setReadLater(article.id!, !saved);
-          onChanged();
-        },
-      ),
+      trailing: _actionButton(),
       onTap: () async {
         await Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => ArticleScreen(articleId: article.id!)));

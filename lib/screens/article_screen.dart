@@ -185,8 +185,8 @@ class _ArticleScreenState extends State<ArticleScreen> {
                   Center(
                     child: OutlinedButton.icon(
                       icon: Icon(article.favorite == 1
-                          ? Icons.favorite
-                          : Icons.favorite_border),
+                          ? Icons.star
+                          : Icons.star_border),
                       label: Text(article.favorite == 1
                           ? 'Favorited'
                           : 'Add to favorites'),

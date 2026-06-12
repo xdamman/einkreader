@@ -167,6 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
           sourceTitles: _sourceTitles,
           emptyMessage: 'No favorites yet.\n\nUse the favorite button at '
               'the end of an article.',
+          rowAction: FeedRowAction.unfavorite,
           onChanged: _load,
         );
     }
