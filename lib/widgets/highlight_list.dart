@@ -3,65 +3,43 @@ import 'package:intl/intl.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
-import 'article_screen.dart';
+import '../screens/article_screen.dart';
 
-/// All saved highlights across every article, newest first.
-/// Tapping one opens the article it came from.
-class HighlightsScreen extends StatefulWidget {
-  const HighlightsScreen({super.key});
+/// All saved highlights, newest first. Tapping one opens its article;
+/// a long-press deletes it.
+class HighlightList extends StatelessWidget {
+  final List<Highlight> highlights;
+  final VoidCallback onChanged;
 
-  @override
-  State<HighlightsScreen> createState() => _HighlightsScreenState();
-}
-
-class _HighlightsScreenState extends State<HighlightsScreen> {
-  final _db = AppDatabase.instance;
-  List<Highlight> _highlights = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final highlights = await _db.getHighlights();
-    if (!mounted) return;
-    setState(() {
-      _highlights = highlights;
-      _loading = false;
-    });
-  }
+  const HighlightList({
+    super.key,
+    required this.highlights,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Highlights')),
-      body: _loading
-          ? const SizedBox.shrink()
-          : _highlights.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Text(
-                      'No highlights yet.\n\nSelect text while reading and '
-                      'choose "Highlight" to save it here.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 16),
-                    ),
-                  ),
-                )
-              : ListView.separated(
-                  itemCount: _highlights.length,
-                  separatorBuilder: (_, __) => const Divider(),
-                  itemBuilder: (context, index) =>
-                      _highlightTile(_highlights[index]),
-                ),
+    if (highlights.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            'No highlights yet.\n\nSelect text while reading and choose '
+            '"Highlight" to save it here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16),
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      itemCount: highlights.length,
+      separatorBuilder: (_, __) => const Divider(),
+      itemBuilder: (context, index) => _tile(context, highlights[index]),
     );
   }
 
-  Widget _highlightTile(Highlight highlight) {
+  Widget _tile(BuildContext context, Highlight highlight) {
     final date = DateFormat.yMMMd()
         .format(DateTime.fromMillisecondsSinceEpoch(highlight.createdAt));
     return ListTile(
@@ -92,13 +70,14 @@ class _HighlightsScreenState extends State<HighlightsScreen> {
             builder: (_) => ArticleScreen(
                 articleId: highlight.articleId,
                 focusHighlight: highlight.text)));
-        _load();
+        onChanged();
       },
-      onLongPress: () => _confirmDelete(highlight),
+      onLongPress: () => _confirmDelete(context, highlight),
     );
   }
 
-  Future<void> _confirmDelete(Highlight highlight) async {
+  Future<void> _confirmDelete(
+      BuildContext context, Highlight highlight) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -115,8 +94,8 @@ class _HighlightsScreenState extends State<HighlightsScreen> {
       ),
     );
     if (confirmed == true) {
-      await _db.deleteHighlight(highlight.id!);
-      _load();
+      await AppDatabase.instance.deleteHighlight(highlight.id!);
+      onChanged();
     }
   }
 }

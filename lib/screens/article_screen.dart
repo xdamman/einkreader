@@ -48,6 +48,15 @@ class _ArticleScreenState extends State<ArticleScreen> {
     }
   }
 
+  Future<void> _toggleFavorite() async {
+    final article = _article;
+    if (article == null) return;
+    await _db.setFavorite(article.id!, article.favorite == 0);
+    final updated = await _db.getArticle(article.id!);
+    if (!mounted) return;
+    setState(() => _article = updated);
+  }
+
   Future<void> _saveHighlight() async {
     final text = _selectedText.trim();
     if (text.isEmpty || _article == null) return;
@@ -168,6 +177,21 @@ class _ArticleScreenState extends State<ArticleScreen> {
                     markdown: content,
                     fontSize: _fontSize,
                     highlights: [for (final h in _highlights) h.text],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Divider(),
+                  ),
+                  Center(
+                    child: OutlinedButton.icon(
+                      icon: Icon(article.favorite == 1
+                          ? Icons.favorite
+                          : Icons.favorite_border),
+                      label: Text(article.favorite == 1
+                          ? 'Favorited'
+                          : 'Add to favorites'),
+                      onPressed: _toggleFavorite,
+                    ),
                   ),
                 ],
               ),

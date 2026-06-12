@@ -81,6 +81,8 @@ class Article {
   /// 0 = content still needs to be fetched, 1 = content is final.
   final int fetched;
   final int read;
+  final int readLater;
+  final int favorite;
   final int createdAt;
 
   const Article({
@@ -95,6 +97,8 @@ class Article {
     this.contentMarkdown,
     this.fetched = 0,
     this.read = 0,
+    this.readLater = 0,
+    this.favorite = 0,
     required this.createdAt,
   });
 
@@ -110,6 +114,8 @@ class Article {
         'content_markdown': contentMarkdown,
         'fetched': fetched,
         'read': read,
+        'read_later': readLater,
+        'favorite': favorite,
         'created_at': createdAt,
       };
 
@@ -125,6 +131,8 @@ class Article {
         contentMarkdown: m['content_markdown'] as String?,
         fetched: (m['fetched'] as int?) ?? 0,
         read: (m['read'] as int?) ?? 0,
+        readLater: (m['read_later'] as int?) ?? 0,
+        favorite: (m['favorite'] as int?) ?? 0,
         createdAt: m['created_at'] as int,
       );
 }

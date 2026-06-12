@@ -14,8 +14,18 @@ class AppDatabase {
   Future<Database> get database async {
     if (_db != null) return _db!;
     final path = join(await getDatabasesPath(), 'einkreader.db');
-    _db = await openDatabase(path, version: 1, onCreate: _onCreate);
+    _db = await openDatabase(path,
+        version: 2, onCreate: _onCreate, onUpgrade: _onUpgrade);
     return _db!;
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute(
+          'ALTER TABLE articles ADD COLUMN read_later INTEGER NOT NULL DEFAULT 0');
+      await db.execute(
+          'ALTER TABLE articles ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -42,6 +52,8 @@ class AppDatabase {
         content_markdown TEXT,
         fetched INTEGER NOT NULL DEFAULT 0,
         read INTEGER NOT NULL DEFAULT 0,
+        read_later INTEGER NOT NULL DEFAULT 0,
+        favorite INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         UNIQUE(source_id, guid)
       )
@@ -114,16 +126,38 @@ class AppDatabase {
     return id != 0;
   }
 
-  Future<List<Article>> getArticles({int? sourceId, int limit = 500}) async {
+  Future<List<Article>> getArticles({
+    int? sourceId,
+    bool readLaterOnly = false,
+    bool favoritesOnly = false,
+    int limit = 500,
+  }) async {
     final db = await database;
+    final where = <String>[
+      if (sourceId != null) 'source_id = ?',
+      if (readLaterOnly) 'read_later = 1',
+      if (favoritesOnly) 'favorite = 1',
+    ];
     final rows = await db.query(
       'articles',
-      where: sourceId != null ? 'source_id = ?' : null,
+      where: where.isEmpty ? null : where.join(' AND '),
       whereArgs: sourceId != null ? [sourceId] : null,
       orderBy: 'COALESCE(published_at, created_at) DESC',
       limit: limit,
     );
     return rows.map(Article.fromMap).toList();
+  }
+
+  Future<void> setReadLater(int id, bool readLater) async {
+    final db = await database;
+    await db.update('articles', {'read_later': readLater ? 1 : 0},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> setFavorite(int id, bool favorite) async {
+    final db = await database;
+    await db.update('articles', {'favorite': favorite ? 1 : 0},
+        where: 'id = ?', whereArgs: [id]);
   }
 
   Future<Article?> getArticle(int id) async {

@@ -10,11 +10,10 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/add_source_screen.dart';
-import 'package:einkreader/screens/article_list_screen.dart';
 import 'package:einkreader/screens/article_screen.dart';
-import 'package:einkreader/screens/highlights_screen.dart';
 import 'package:einkreader/screens/home_screen.dart';
 import 'package:einkreader/screens/settings_screen.dart';
+import 'package:einkreader/screens/sources_screen.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:flutter/material.dart';
@@ -28,7 +27,6 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 const _enabled = bool.fromEnvironment('screenshots');
 
 late int _featuredArticleId;
-Source? _featuredSource;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -51,14 +49,28 @@ void main() {
     await _loadFonts();
   });
 
+  Future<void> tapTab(WidgetTester tester, String label) async {
+    await tester.tap(find.text(label));
+  }
+
   group('screenshots', () {
-    testWidgets('home tablet', (tester) async {
+    testWidgets('feed tablet', (tester) async {
       await _capture(tester, const HomeScreen(), 'home_tablet', _tablet);
     });
 
-    testWidgets('article list tablet', (tester) async {
-      await _capture(tester, ArticleListScreen(source: _featuredSource),
-          'article_list_tablet', _tablet);
+    testWidgets('to read tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'to_read_tablet', _tablet,
+          setup: (t) => tapTab(t, 'To Read'));
+    });
+
+    testWidgets('highlights tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'highlights_tablet', _tablet,
+          setup: (t) => tapTab(t, 'Highlights'));
+    });
+
+    testWidgets('favorites tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'favorites_tablet', _tablet,
+          setup: (t) => tapTab(t, 'Favorites'));
     });
 
     testWidgets('reader with highlights tablet', (tester) async {
@@ -66,9 +78,9 @@ void main() {
           'reader_tablet', _tablet);
     });
 
-    testWidgets('highlights tablet', (tester) async {
+    testWidgets('sources tablet', (tester) async {
       await _capture(
-          tester, const HighlightsScreen(), 'highlights_tablet', _tablet);
+          tester, const SourcesScreen(), 'sources_tablet', _tablet);
     });
 
     testWidgets('settings tablet', (tester) async {
@@ -81,7 +93,7 @@ void main() {
           tester, const AddSourceScreen(), 'add_source_tablet', _tablet);
     });
 
-    testWidgets('home phone', (tester) async {
+    testWidgets('feed phone', (tester) async {
       await _capture(tester, const HomeScreen(), 'home_phone', _phone);
     });
 
@@ -97,20 +109,29 @@ const _tablet = (Size(600, 800), 2.0);
 const _phone = (Size(390, 844), 3.0);
 
 Future<void> _capture(WidgetTester tester, Widget screen, String name,
-    (Size, double) shape) async {
+    (Size, double) shape,
+    {Future<void> Function(WidgetTester)? setup}) async {
   tester.view.physicalSize = shape.$1 * shape.$2;
   tester.view.devicePixelRatio = shape.$2;
   addTearDown(tester.view.reset);
+
+  Future<void> settle() async {
+    // Let real async work (sqflite, prefs) complete, then rebuild.
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 400)));
+    await tester.pumpAndSettle();
+  }
 
   await tester.pumpWidget(MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: buildEinkTheme(),
     home: screen,
   ));
-  // Let real async work (sqflite ffi isolate, prefs) complete.
-  await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 400)));
-  await tester.pumpAndSettle();
+  await settle();
+  if (setup != null) {
+    await setup(tester);
+    await settle();
+  }
   await expectLater(
       find.byType(MaterialApp), matchesGoldenFile('goldens/$name.png'));
 }
@@ -148,12 +169,14 @@ Future<void> _loadFonts() async {
 
 Future<void> _seed() async {
   final db = AppDatabase.instance;
-  final day = DateTime(2026, 6, 10, 9).millisecondsSinceEpoch;
+  // Relative to now so the feed shows "Today" / "Yesterday" headers.
+  final now = DateTime.now().millisecondsSinceEpoch;
   const hour = 3600 * 1000;
+  const day = 24 * hour;
 
   Future<Source> source(SourceType type, String title, String url) =>
       db.insertSource(
-          Source(type: type, title: title, url: url, createdAt: day));
+          Source(type: type, title: title, url: url, createdAt: now));
 
   final stratechery = await source(
       SourceType.rss, 'Stratechery', 'https://stratechery.com/feed/');
@@ -166,11 +189,10 @@ Future<void> _seed() async {
   await source(SourceType.twitterLikes, 'Twitter Likes', 'xdamman');
   await source(SourceType.nostrBookmarks, 'Nostr Bookmarks', 'npub1sg6…');
 
-  _featuredSource = stratechery;
-
   Future<void> article(Source s, String guid, String title, String author,
       int published, String? content,
-      {bool read = false, String? url}) async {
+      {bool read = false, bool readLater = false, bool favorite = false,
+      String? url}) async {
     await db.insertArticleIfNew(Article(
       sourceId: s.id!,
       guid: guid,
@@ -182,47 +204,52 @@ Future<void> _seed() async {
       contentMarkdown: content,
       fetched: content == null ? 0 : 1,
       read: read ? 1 : 0,
+      readLater: readLater ? 1 : 0,
+      favorite: favorite ? 1 : 0,
       createdAt: published,
     ));
   }
 
   await article(stratechery, 'aggregation-redux', 'Aggregation Theory, Redux',
-      'Ben Thompson', day - 2 * hour, _featuredMarkdown);
-  await article(
-      stratechery,
-      'ai-distribution',
-      'AI and the Future of Distribution',
-      'Ben Thompson',
-      day - 30 * hour,
-      '## A new gatekeeper\n\nDistribution used to be scarce.',
-      read: true);
-  await article(
-      acx,
-      'book-review-progress',
-      'Book Review: The Roots of Progress',
-      'Scott Alexander',
-      day - 8 * hour,
-      '# Progress studies\n\nWhy did growth take off in 1750?');
-  await article(acx, 'links-june', 'Links For June', 'Scott Alexander',
-      day - 50 * hour, '1. First link\n2. Second link',
-      read: true);
+      'Ben Thompson', now - 2 * hour, _featuredMarkdown,
+      favorite: true);
   await article(
       hn,
       'eink-displays',
       'Why e-ink displays are having a moment',
       'jandeboevrie',
-      day - 5 * hour,
-      '## Reflective screens\n\nE-paper only draws power when it changes.');
-  await article(hn, 'sqlite-vfs', 'SQLite as a file system', 'pwg',
-      day - 26 * hour, null);
+      now - 5 * hour,
+      '## Reflective screens\n\nE-paper only draws power when it changes.',
+      readLater: true);
+  await article(
+      acx,
+      'book-review-progress',
+      'Book Review: The Roots of Progress',
+      'Scott Alexander',
+      now - day - 4 * hour,
+      '# Progress studies\n\nWhy did growth take off in 1750?',
+      readLater: true);
   await article(
       twBookmarks,
       '1932810021',
       'The case for reading on paper-like screens',
       'Readwise',
-      day - 12 * hour,
+      now - day - 8 * hour,
       '> Bookmarked tweet\n\n---\n\nLong-form reading on emissive screens '
           'competes with every notification you have ever allowed.');
+  await article(
+      stratechery,
+      'ai-distribution',
+      'AI and the Future of Distribution',
+      'Ben Thompson',
+      now - 2 * day - 3 * hour,
+      '## A new gatekeeper\n\nDistribution used to be scarce.',
+      read: true);
+  await article(acx, 'links-june', 'Links For June', 'Scott Alexander',
+      now - 2 * day - 6 * hour, '1. First link\n2. Second link',
+      read: true);
+  await article(hn, 'sqlite-vfs', 'SQLite as a file system', 'pwg',
+      now - 2 * day - 9 * hour, null);
 
   final articles = await db.getArticles(sourceId: stratechery.id);
   _featuredArticleId =
@@ -237,7 +264,7 @@ Future<void> _seed() async {
     await db.insertHighlight(Highlight(
         articleId: _featuredArticleId,
         text: text,
-        createdAt: day - hour));
+        createdAt: now - hour));
   }
 }
 
