@@ -1,3 +1,4 @@
+import 'package:einkreader/models.dart';
 import 'package:einkreader/services/extractor.dart';
 import 'package:einkreader/services/feed_parser.dart';
 import 'package:einkreader/services/nostr_service.dart';
@@ -74,6 +75,40 @@ void main() {
               'look https://a.com/pic.jpg and https://b.com/post'),
           'https://b.com/post');
       expect(NostrService.firstUrl('no links here'), isNull);
+    });
+  });
+
+  group('Article.canonicalUrl', () {
+    test('ignores scheme, www, fragment and trailing slash', () {
+      expect(
+        Article.canonicalUrl('https://www.Example.com/Post/#section'),
+        'example.com/Post',
+      );
+      expect(
+        Article.canonicalUrl('http://example.com/post'),
+        Article.canonicalUrl('https://example.com/post/'),
+      );
+    });
+
+    test('strips tracking parameters but keeps meaningful ones', () {
+      expect(
+        Article.canonicalUrl(
+            'https://example.com/p?utm_source=tw&id=42&fbclid=x'),
+        'example.com/p?id=42',
+      );
+    });
+
+    test('returns null for empty or non-http input', () {
+      expect(Article.canonicalUrl(null), isNull);
+      expect(Article.canonicalUrl(''), isNull);
+      expect(Article.canonicalUrl('not a url'), isNull);
+    });
+
+    test('matches the same story from a feed and a tweet link', () {
+      expect(
+        Article.canonicalUrl('https://blog.dev/great-post'),
+        Article.canonicalUrl('https://blog.dev/great-post?utm_campaign=x'),
+      );
     });
   });
 

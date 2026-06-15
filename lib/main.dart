@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
+import 'services/image_store.dart';
 import 'theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Resolve the offline images directory up front so stored images render on
+  // a cold start, before any sync runs.
+  await ImageStore.instance.ensureInitialized();
   runApp(const EinkReaderApp());
 }
 

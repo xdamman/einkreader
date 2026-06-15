@@ -81,14 +81,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           createdAt: now,
         ),
       );
-      await _db.insertSource(
-        Source(
-          type: SourceType.twitterLikes,
-          title: 'Twitter Likes',
-          url: username,
-          createdAt: now,
-        ),
-      );
       _toast('Connected as @$username');
       await _load();
     } catch (e) {
@@ -166,7 +158,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Text('Twitter / X', style: sectionStyle),
             const SizedBox(height: 8),
             const Text(
-              'Creates two feeds: your Bookmarks and your Likes. You need a '
+              'Creates a feed from your Bookmarks. You need a '
               'free OAuth 2.0 Client ID from developer.x.com with callback '
               'URL einkreader://callback (see README).',
               style: TextStyle(fontSize: 14),

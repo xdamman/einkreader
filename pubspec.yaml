@@ -24,6 +24,10 @@ dependencies:
   shared_preferences: ^2.5.2
   url_launcher: ^6.3.1
   intl: ^0.20.2
+  # Decode/resize downloaded images for offline storage.
+  image: ^4.3.0
+  # Native share sheet for sharing a highlight.
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_test:

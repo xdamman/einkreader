@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/image_store.dart';
 import '../theme.dart';
 
 /// Renders Markdown as Flutter widgets with full control over text spans so
@@ -15,11 +16,16 @@ class MarkdownView extends StatefulWidget {
   final List<String> highlights;
   final double fontSize;
 
+  /// Called with the full highlight text when the user taps a painted
+  /// highlight, so the reader can offer to share or remove it.
+  final void Function(String highlightText)? onHighlightTap;
+
   const MarkdownView({
     super.key,
     required this.markdown,
     this.highlights = const [],
     this.fontSize = 18,
+    this.onHighlightTap,
   });
 
   @override
@@ -144,16 +150,7 @@ class _MarkdownViewState extends State<MarkdownView> {
           padding: const EdgeInsets.only(bottom: 14),
           child: Column(
             children: [
-              Image.network(
-                block.url ?? '',
-                // Offline or broken images degrade to their caption.
-                errorBuilder: (_, __, ___) => block.text.isEmpty
-                    ? const SizedBox.shrink()
-                    : Text('[image: ${block.text}]',
-                        style: _bodyStyle.copyWith(
-                            fontStyle: FontStyle.italic,
-                            fontSize: widget.fontSize - 3)),
-              ),
+              _image(block),
               if (block.text.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
@@ -171,6 +168,23 @@ class _MarkdownViewState extends State<MarkdownView> {
           child: Divider(),
         );
     }
+  }
+
+  /// Renders an image block, preferring the offline copy when one was stored.
+  Widget _image(_Block block) {
+    final url = block.url ?? '';
+    Widget caption() => block.text.isEmpty
+        ? const SizedBox.shrink()
+        : Text('[image: ${block.text}]',
+            style: _bodyStyle.copyWith(
+                fontStyle: FontStyle.italic, fontSize: widget.fontSize - 3));
+
+    final local = ImageStore.localFile(url);
+    if (local != null) {
+      return Image.file(local, errorBuilder: (_, __, ___) => caption());
+    }
+    // Images that were not downloaded (e.g. failed) still try the network.
+    return Image.network(url, errorBuilder: (_, __, ___) => caption());
   }
 
   static final _imageOnly =
@@ -327,26 +341,28 @@ class _MarkdownViewState extends State<MarkdownView> {
   }
 
   /// Highlights may span several blocks; selections are stored with
-  /// newlines, so match each line separately.
-  Iterable<String> get _highlightNeedles sync* {
+  /// newlines, so match each line separately. Each needle remembers the full
+  /// highlight text it came from, so a tap can act on the whole highlight.
+  Iterable<(String needle, String full)> get _highlightNeedles sync* {
     for (final highlight in widget.highlights) {
       for (final line in highlight.split('\n')) {
         final needle = line.trim();
-        if (needle.length > 2) yield needle;
+        if (needle.length > 2) yield (needle, highlight);
       }
     }
   }
 
-  /// Splits [text] so every saved highlight occurrence gets a grey wash.
+  /// Splits [text] so every saved highlight occurrence gets a grey wash, and
+  /// (unless the span is already a link) makes it tappable to manage it.
   List<InlineSpan> _highlighted(String text, TextStyle style,
       {TapGestureRecognizer? recognizer}) {
-    final ranges = <(int, int)>[];
-    for (final needle in _highlightNeedles) {
+    final ranges = <(int, int, String)>[];
+    for (final (needle, full) in _highlightNeedles) {
       var from = 0;
       while (true) {
         final at = text.indexOf(needle, from);
         if (at == -1) break;
-        ranges.add((at, at + needle.length));
+        ranges.add((at, at + needle.length, full));
         from = at + needle.length;
       }
     }
@@ -354,12 +370,12 @@ class _MarkdownViewState extends State<MarkdownView> {
       return [TextSpan(text: text, style: style, recognizer: recognizer)];
     }
     ranges.sort((a, b) => a.$1.compareTo(b.$1));
-    // Merge overlapping ranges.
-    final merged = <(int, int)>[];
+    // Merge overlapping ranges, keeping the first range's highlight text.
+    final merged = <(int, int, String)>[];
     for (final range in ranges) {
       if (merged.isNotEmpty && range.$1 <= merged.last.$2) {
         final last = merged.removeLast();
-        merged.add((last.$1, range.$2 > last.$2 ? range.$2 : last.$2));
+        merged.add((last.$1, range.$2 > last.$2 ? range.$2 : last.$2, last.$3));
       } else {
         merged.add(range);
       }
@@ -373,10 +389,19 @@ class _MarkdownViewState extends State<MarkdownView> {
             style: style,
             recognizer: recognizer));
       }
+      // A link keeps its own tap; otherwise tapping manages the highlight.
+      var spanRecognizer = recognizer;
+      if (recognizer == null && widget.onHighlightTap != null) {
+        final full = range.$3;
+        final tap = TapGestureRecognizer()
+          ..onTap = () => widget.onHighlightTap!(full);
+        _recognizers.add(tap);
+        spanRecognizer = tap;
+      }
       spans.add(TextSpan(
           text: text.substring(range.$1, range.$2),
           style: style.copyWith(backgroundColor: highlightBackground),
-          recognizer: recognizer));
+          recognizer: spanRecognizer));
       index = range.$2;
     }
     if (index < text.length) {

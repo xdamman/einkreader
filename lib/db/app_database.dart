@@ -17,7 +17,7 @@ class AppDatabase {
     final path = join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -32,6 +32,26 @@ class AppDatabase {
       await db.execute(
         'ALTER TABLE articles ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0',
       );
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE articles ADD COLUMN url_key TEXT');
+      await db.execute(
+        'CREATE INDEX idx_articles_url_key ON articles(url_key)',
+      );
+      // Backfill the canonical key for existing rows so dedup works against
+      // already-stored articles.
+      final rows = await db.query('articles', columns: ['id', 'url']);
+      for (final row in rows) {
+        final key = Article.canonicalUrl(row['url'] as String?);
+        if (key != null) {
+          await db.update(
+            'articles',
+            {'url_key': key},
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+        }
+      }
     }
   }
 
@@ -57,6 +77,7 @@ class AppDatabase {
         published_at INTEGER,
         summary TEXT,
         content_markdown TEXT,
+        url_key TEXT,
         fetched INTEGER NOT NULL DEFAULT 0,
         read INTEGER NOT NULL DEFAULT 0,
         read_later INTEGER NOT NULL DEFAULT 0,
@@ -65,6 +86,9 @@ class AppDatabase {
         UNIQUE(source_id, guid)
       )
     ''');
+    await db.execute(
+      'CREATE INDEX idx_articles_url_key ON articles(url_key)',
+    );
     await db.execute('''
       CREATE TABLE highlights (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,10 +196,23 @@ class AppDatabase {
 
   // --------------------------------------------------------------- articles
 
-  /// Inserts the article unless one with the same (source, guid) exists.
-  /// Returns true if a new row was inserted.
+  /// Inserts the article unless a duplicate already exists. A duplicate is
+  /// either the same (source, guid) or — across any source — the same
+  /// canonical URL, so the same story linked from a feed and a tweet only
+  /// appears once. Returns true if a new row was inserted.
   Future<bool> insertArticleIfNew(Article article) async {
     final db = await database;
+    final urlKey = article.urlKey;
+    if (urlKey != null) {
+      final existing = await db.query(
+        'articles',
+        columns: ['id'],
+        where: 'url_key = ?',
+        whereArgs: [urlKey],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) return false;
+    }
     final id = await db.insert(
       'articles',
       article.toMap()..remove('id'),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,7 @@ import '../models.dart';
 import 'app_log.dart';
 import 'extractor.dart';
 import 'feed_parser.dart';
+import 'image_store.dart';
 import 'nostr_service.dart';
 import 'twitter_service.dart';
 
@@ -26,6 +28,7 @@ class SyncService {
   final _db = AppDatabase.instance;
   final twitter = TwitterService();
   final nostr = NostrService();
+  final _images = ImageStore.instance;
 
   final progress = StreamController<SyncProgress>.broadcast(sync: true);
   bool _syncing = false;
@@ -93,6 +96,16 @@ class SyncService {
     return errors.isEmpty ? summary : '$summary · ${errors.first}';
   }
 
+  /// Longest screen edge in physical pixels, used to cap stored image size.
+  /// The device can rotate, so we take the larger of width/height.
+  int get _maxImageDimension {
+    final views = ui.PlatformDispatcher.instance.views;
+    if (views.isEmpty) return 2048;
+    final size = views.first.physicalSize;
+    final longest = size.width > size.height ? size.width : size.height;
+    return longest < 100 ? 2048 : longest.round();
+  }
+
   Future<int> _syncSource(Source source) async {
     switch (source.type) {
       case SourceType.rss:
@@ -100,7 +113,8 @@ class SyncService {
       case SourceType.twitterBookmarks:
         return _insertTweets(source, await twitter.fetchBookmarks());
       case SourceType.twitterLikes:
-        return _insertTweets(source, await twitter.fetchLikes());
+        // Likes are no longer synced; legacy sources are simply skipped.
+        return 0;
       case SourceType.nostrBookmarks:
         return _insertNostrItems(
           source,
@@ -146,10 +160,16 @@ class SyncService {
       } else if (item.link != null) {
         needsFetch++;
       }
-      final markdown =
+      var markdown =
           hasFullContent
               ? ArticleExtractor.convertHtmlToMarkdown(item.contentHtml!)
               : null;
+      if (markdown != null) {
+        markdown = await _images.localizeMarkdown(
+          markdown,
+          maxDimension: _maxImageDimension,
+        );
+      }
       final isNew = await _db.insertArticleIfNew(
         Article(
           sourceId: source.id!,
@@ -189,18 +209,25 @@ class SyncService {
       final author =
           tweet.authorName ??
           (tweet.authorUsername != null ? '@${tweet.authorUsername}' : null);
+      // A native long-form post is itself the article — keep its full text and
+      // don't download a linked page. A short tweet that links to a blog post
+      // gets the linked article downloaded (fetched = 0).
+      final downloadsArticle = tweet.articleUrl != null && !tweet.isLongForm;
       final isNew = await _db.insertArticleIfNew(
         Article(
           sourceId: source.id!,
           guid: tweet.id,
           title: _titleFromText(tweet.text),
           author: author,
-          url: tweet.articleUrl ?? tweet.tweetUrl,
+          // Long-form posts keep the tweet permalink so the body stays;
+          // others point at the linked article when there is one.
+          url: tweet.isLongForm
+              ? tweet.tweetUrl
+              : (tweet.articleUrl ?? tweet.tweetUrl),
           publishedAt: tweet.createdAt?.millisecondsSinceEpoch,
           summary: tweet.text,
-          contentMarkdown: tweet.articleUrl == null ? tweet.text : null,
-          // Only linked external articles need a content download.
-          fetched: tweet.articleUrl == null ? 1 : 0,
+          contentMarkdown: downloadsArticle ? null : tweet.text,
+          fetched: downloadsArticle ? 0 : 1,
           createdAt: now,
         ),
       );
@@ -300,14 +327,19 @@ class SyncService {
     try {
       final markdown = ArticleExtractor.extract(body, baseUrl: url);
       if (markdown != null) {
-        var content = markdown;
+        // Pull images onto the device so the article reads fully offline.
+        final localized = await _images.localizeMarkdown(
+          markdown,
+          maxDimension: _maxImageDimension,
+        );
+        var content = localized;
         // Keep the original note/tweet above the extracted article.
         if (article.summary != null &&
             article.contentMarkdown == null &&
             article.summary != article.title) {
           final intro = _plainSummary(article.summary)!;
           if (!_looksLikeHtml(article.summary!) && intro.length < 600) {
-            content = '> $intro\n\n---\n\n$markdown';
+            content = '> $intro\n\n---\n\n$localized';
           }
         }
         await _db.updateArticleContent(article.id!, content, fetched: true);

@@ -17,6 +17,10 @@ class TweetItem {
   /// First non-twitter URL in the tweet, used to fetch the full article.
   final String? articleUrl;
 
+  /// True when this is a native long-form post (note tweet / X Article):
+  /// [text] already holds the full body, so it is the article itself.
+  final bool isLongForm;
+
   const TweetItem({
     required this.id,
     required this.text,
@@ -24,6 +28,7 @@ class TweetItem {
     this.authorUsername,
     this.createdAt,
     this.articleUrl,
+    this.isLongForm = false,
   });
 
   String get tweetUrl => 'https://x.com/${authorUsername ?? 'i'}/status/$id';
@@ -41,7 +46,7 @@ class TwitterService {
   static const _tokenUrl = 'https://api.x.com/2/oauth2/token';
   static const _apiBase = 'https://api.x.com/2';
   static const _scopes =
-      'tweet.read users.read bookmark.read like.read offline.access';
+      'tweet.read users.read bookmark.read offline.access';
 
   static const _storage = FlutterSecureStorage();
   static const _kAccessToken = 'twitter_access_token';
@@ -120,14 +125,13 @@ class TwitterService {
 
   Future<List<TweetItem>> fetchBookmarks() => _fetchTimeline('bookmarks');
 
-  Future<List<TweetItem>> fetchLikes() => _fetchTimeline('liked_tweets');
-
   Future<List<TweetItem>> _fetchTimeline(String endpoint) async {
     final userId = await _storage.read(key: _kUserId);
     if (userId == null) throw Exception('Twitter is not connected');
     final json = await _get('/users/$userId/$endpoint', query: {
       'max_results': '50',
-      'tweet.fields': 'created_at,entities,author_id',
+      // note_tweet carries the full body of native long-form posts.
+      'tweet.fields': 'created_at,entities,author_id,note_tweet',
       'expansions': 'author_id',
       'user.fields': 'name,username',
     });
@@ -142,22 +146,29 @@ class TwitterService {
     for (final t in (json['data'] as List?) ?? const []) {
       final tweet = t as Map<String, dynamic>;
       final author = users[tweet['author_id']];
+      // Long-form ("note") tweets keep the full text and its own entities in
+      // a note_tweet object; the top-level text is truncated to 280 chars.
+      final note = tweet['note_tweet'] as Map<String, dynamic>?;
+      final isLongForm = note != null && (note['text'] as String?) != null;
+      final body = isLongForm ? note! : tweet;
       items.add(TweetItem(
         id: tweet['id'] as String,
-        text: _expandUrls(tweet),
+        text: _expandUrls(body),
         authorName: author?['name'] as String?,
         authorUsername: author?['username'] as String?,
         createdAt: DateTime.tryParse(tweet['created_at'] as String? ?? ''),
-        articleUrl: _firstExternalUrl(tweet),
+        articleUrl: _firstExternalUrl(body),
+        isLongForm: isLongForm,
       ));
     }
     return items;
   }
 
-  /// Replaces t.co links in the tweet text with their expanded form.
-  static String _expandUrls(Map<String, dynamic> tweet) {
-    var text = tweet['text'] as String? ?? '';
-    final urls = (tweet['entities']?['urls'] as List?) ?? const [];
+  /// Replaces t.co links in the text with their expanded form. Works for both
+  /// a tweet object and a note_tweet object (both expose entities.urls).
+  static String _expandUrls(Map<String, dynamic> body) {
+    var text = body['text'] as String? ?? '';
+    final urls = (body['entities']?['urls'] as List?) ?? const [];
     for (final u in urls) {
       final shortUrl = u['url'] as String?;
       final expanded = (u['expanded_url'] ?? u['unwound_url']) as String?;
@@ -168,8 +179,8 @@ class TwitterService {
     return text;
   }
 
-  static String? _firstExternalUrl(Map<String, dynamic> tweet) {
-    final urls = (tweet['entities']?['urls'] as List?) ?? const [];
+  static String? _firstExternalUrl(Map<String, dynamic> body) {
+    final urls = (body['entities']?['urls'] as List?) ?? const [];
     for (final u in urls) {
       final expanded = (u['unwound_url'] ?? u['expanded_url']) as String?;
       if (expanded == null) continue;

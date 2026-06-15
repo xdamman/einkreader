@@ -102,6 +102,11 @@ class Article {
     required this.createdAt,
   });
 
+  /// Normalized form of [url] used to detect the same story arriving from
+  /// different sources (e.g. an RSS item and a tweet linking to it). Null when
+  /// there is no URL to compare.
+  String? get urlKey => canonicalUrl(url);
+
   Map<String, Object?> toMap() => {
         'id': id,
         'source_id': sourceId,
@@ -109,6 +114,7 @@ class Article {
         'title': title,
         'author': author,
         'url': url,
+        'url_key': urlKey,
         'published_at': publishedAt,
         'summary': summary,
         'content_markdown': contentMarkdown,
@@ -118,6 +124,38 @@ class Article {
         'favorite': favorite,
         'created_at': createdAt,
       };
+
+  /// Canonicalizes a URL for deduplication: lowercases the host, drops
+  /// `www.`, the scheme, the fragment, common tracking query parameters and
+  /// any trailing slash. Returns null for empty/invalid input.
+  static String? canonicalUrl(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null || uri.host.isEmpty) return null;
+    var host = uri.host.toLowerCase();
+    if (host.startsWith('www.')) host = host.substring(4);
+    final params = Map<String, String>.fromEntries(
+      uri.queryParameters.entries.where((e) {
+        final k = e.key.toLowerCase();
+        return !k.startsWith('utm_') &&
+            k != 'fbclid' &&
+            k != 'gclid' &&
+            k != 'igshid' &&
+            k != 'ref' &&
+            k != 'ref_src' &&
+            k != 's' &&
+            k != 'cmpid';
+      }),
+    );
+    var path = uri.path;
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    final query = params.isEmpty
+        ? ''
+        : '?${(params.entries.toList()..sort((a, b) => a.key.compareTo(b.key))).map((e) => '${e.key}=${e.value}').join('&')}';
+    return '$host$path$query';
+  }
 
   static Article fromMap(Map<String, Object?> m) => Article(
         id: m['id'] as int?,

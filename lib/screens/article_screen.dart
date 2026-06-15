@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
@@ -8,7 +9,8 @@ import '../theme.dart';
 import '../widgets/markdown_view.dart';
 
 /// Reader screen. Select any text and choose "Highlight" from the selection
-/// menu to save it; saved highlights are painted inline with a grey wash.
+/// menu to save it; saved highlights are painted inline with a grey wash and
+/// can be tapped to share or remove them.
 class ArticleScreen extends StatefulWidget {
   final int articleId;
 
@@ -70,6 +72,63 @@ class _ArticleScreenState extends State<ArticleScreen> {
     setState(() => _highlights = highlights);
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('Highlight saved')));
+  }
+
+  /// Tapping a painted highlight offers to share or remove it.
+  Future<void> _manageHighlight(String text) async {
+    Highlight? match;
+    for (final h in _highlights) {
+      if (h.text == text) {
+        match = h;
+        break;
+      }
+    }
+    if (match == null) return;
+    final highlight = match;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text(
+                highlight.text,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15, fontStyle: FontStyle.italic),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.share_outlined),
+              title: const Text('Share'),
+              onTap: () => Navigator.pop(context, 'share'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Remove highlight'),
+              onTap: () => Navigator.pop(context, 'remove'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'share') {
+      final title = _article?.title;
+      final shareText = title == null ? highlight.text
+          : '"${highlight.text}"\n\n— $title';
+      await Share.share(shareText);
+    } else if (action == 'remove') {
+      await _db.deleteHighlight(highlight.id!);
+      final highlights = await _db.getHighlights(articleId: widget.articleId);
+      if (!mounted) return;
+      setState(() => _highlights = highlights);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Highlight removed')));
+    }
   }
 
   @override
@@ -177,6 +236,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
                     markdown: content,
                     fontSize: _fontSize,
                     highlights: [for (final h in _highlights) h.text],
+                    onHighlightTap: _manageHighlight,
                   ),
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 20),
