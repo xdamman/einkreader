@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
+import '../services/app_log.dart';
 import '../services/nostr_service.dart';
 import '../services/sync_service.dart';
 
@@ -23,6 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _twitterConnected = false;
   String? _twitterUsername;
   bool _busy = false;
+  bool _developerMode = false;
 
   @override
   void initState() {
@@ -41,19 +43,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     final connected = await _twitter.isConnected;
     final username = await _twitter.username;
+    final developerMode = await AppLogService.instance.isDeveloperModeEnabled();
     if (!mounted) return;
     setState(() {
       _twitterConnected = connected;
       _twitterUsername = username;
       _clientIdController.text = prefs.getString('twitter_client_id') ?? '';
       _npubController.text = prefs.getString('nostr_npub') ?? '';
+      _developerMode = developerMode;
     });
   }
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _connectTwitter() async {
@@ -68,16 +73,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setString('twitter_client_id', clientId);
       final username = await _twitter.connect(clientId);
       final now = DateTime.now().millisecondsSinceEpoch;
-      await _db.insertSource(Source(
+      await _db.insertSource(
+        Source(
           type: SourceType.twitterBookmarks,
           title: 'Twitter Bookmarks',
           url: username,
-          createdAt: now));
-      await _db.insertSource(Source(
+          createdAt: now,
+        ),
+      );
+      await _db.insertSource(
+        Source(
           type: SourceType.twitterLikes,
           title: 'Twitter Likes',
           url: username,
-          createdAt: now));
+          createdAt: now,
+        ),
+      );
       _toast('Connected as @$username');
       await _load();
     } catch (e) {
@@ -123,23 +134,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     await prefs.setString('nostr_npub', npub);
     final now = DateTime.now().millisecondsSinceEpoch;
-    await _db.insertSource(Source(
+    await _db.insertSource(
+      Source(
         type: SourceType.nostrBookmarks,
         title: 'Nostr Bookmarks',
         url: npub,
-        createdAt: now));
-    await _db.insertSource(Source(
+        createdAt: now,
+      ),
+    );
+    await _db.insertSource(
+      Source(
         type: SourceType.nostrLikes,
         title: 'Nostr Likes',
         url: npub,
-        createdAt: now));
+        createdAt: now,
+      ),
+    );
     _toast('Nostr sources added — sync to load them');
   }
 
   @override
   Widget build(BuildContext context) {
-    const sectionStyle =
-        TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
+    const sectionStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SingleChildScrollView(
@@ -157,9 +173,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 12),
             if (_twitterConnected) ...[
-              Text('Connected as @${_twitterUsername ?? '?'}',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600)),
+              Text(
+                'Connected as @${_twitterUsername ?? '?'}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: _disconnectTwitter,
@@ -170,7 +190,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 controller: _clientIdController,
                 autocorrect: false,
                 decoration: const InputDecoration(
-                    labelText: 'OAuth 2.0 Client ID'),
+                  labelText: 'OAuth 2.0 Client ID',
+                ),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
@@ -203,6 +224,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: const Text('Save Nostr sources'),
             ),
             const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+            const Text('Developer', style: sectionStyle),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Developer mode'),
+              subtitle: const Text('Show the Debug tab on the reader screen.'),
+              value: _developerMode,
+              onChanged: (value) async {
+                setState(() => _developerMode = value);
+                await AppLogService.instance.setDeveloperModeEnabled(value);
+              },
+            ),
+            const SizedBox(height: 24),
             const Divider(),
             const SizedBox(height: 16),
             const Text(

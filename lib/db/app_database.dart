@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models.dart';
+import '../services/app_log.dart';
 
 /// Single SQLite database holding sources, offline article content and
 /// highlights.
@@ -14,17 +15,23 @@ class AppDatabase {
   Future<Database> get database async {
     if (_db != null) return _db!;
     final path = join(await getDatabasesPath(), 'einkreader.db');
-    _db = await openDatabase(path,
-        version: 2, onCreate: _onCreate, onUpgrade: _onUpgrade);
+    _db = await openDatabase(
+      path,
+      version: 2,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+    );
     return _db!;
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute(
-          'ALTER TABLE articles ADD COLUMN read_later INTEGER NOT NULL DEFAULT 0');
+        'ALTER TABLE articles ADD COLUMN read_later INTEGER NOT NULL DEFAULT 0',
+      );
       await db.execute(
-          'ALTER TABLE articles ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0');
+        'ALTER TABLE articles ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0',
+      );
     }
   }
 
@@ -67,7 +74,8 @@ class AppDatabase {
       )
     ''');
     await db.execute(
-        'CREATE INDEX idx_articles_source ON articles(source_id, published_at)');
+      'CREATE INDEX idx_articles_source ON articles(source_id, published_at)',
+    );
   }
 
   // ---------------------------------------------------------------- sources
@@ -75,41 +83,88 @@ class AppDatabase {
   Future<List<Source>> getSources() async {
     final db = await database;
     final rows = await db.query('sources', orderBy: 'created_at ASC');
+    await AppLogService.instance.debug(
+      'Loaded ${rows.length} source${rows.length == 1 ? '' : 's'}',
+    );
     return rows.map(Source.fromMap).toList();
   }
 
   Future<Source?> getSourceByTypeAndUrl(SourceType type, String url) async {
     final db = await database;
-    final rows = await db.query('sources',
-        where: 'type = ? AND url = ?', whereArgs: [type.name, url], limit: 1);
+    final rows = await db.query(
+      'sources',
+      where: 'type = ? AND url = ?',
+      whereArgs: [type.name, url],
+      limit: 1,
+    );
     return rows.isEmpty ? null : Source.fromMap(rows.first);
   }
 
   Future<Source> insertSource(Source source) async {
     final db = await database;
-    final id = await db.insert('sources', source.toMap()..remove('id'),
-        conflictAlgorithm: ConflictAlgorithm.ignore);
+    final id = await db.insert(
+      'sources',
+      source.toMap()..remove('id'),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
     if (id == 0) {
-      return (await getSourceByTypeAndUrl(source.type, source.url))!;
+      final existing = (await getSourceByTypeAndUrl(source.type, source.url))!;
+      await AppLogService.instance.info(
+        'Source already exists: ${existing.title} '
+        '(${existing.type.label}) ${existing.url}',
+      );
+      return existing;
     }
-    return source.copyWith(id: id);
+    final inserted = source.copyWith(id: id);
+    await AppLogService.instance.info(
+      'Added source #$id: ${inserted.title} '
+      '(${inserted.type.label}) ${inserted.url}',
+    );
+    return inserted;
   }
 
   Future<void> updateSourceTitle(int id, String title) async {
     final db = await database;
-    await db.update('sources', {'title': title},
-        where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'sources',
+      {'title': title},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await AppLogService.instance.info('Edited source #$id title: $title');
   }
 
   Future<void> deleteSource(int id) async {
     final db = await database;
+    final sourceRows = await db.query(
+      'sources',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    final articleCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM articles WHERE source_id = ?',
+            [id],
+          ),
+        ) ??
+        0;
     // sqflite does not enable foreign keys by default; delete manually.
-    await db.delete('highlights',
-        where:
-            'article_id IN (SELECT id FROM articles WHERE source_id = ?)',
-        whereArgs: [id]);
+    await db.delete(
+      'highlights',
+      where: 'article_id IN (SELECT id FROM articles WHERE source_id = ?)',
+      whereArgs: [id],
+    );
     await db.delete('articles', where: 'source_id = ?', whereArgs: [id]);
     await db.delete('sources', where: 'id = ?', whereArgs: [id]);
+    final source = sourceRows.isEmpty ? null : Source.fromMap(sourceRows.first);
+    await AppLogService.instance.info(
+      source == null
+          ? 'Removed source #$id with $articleCount articles'
+          : 'Removed source #$id: ${source.title} '
+              '(${source.type.label}) with $articleCount articles',
+    );
   }
 
   Future<List<SourceType>> sourceTypesOf(List<Source> sources) async =>
@@ -121,8 +176,11 @@ class AppDatabase {
   /// Returns true if a new row was inserted.
   Future<bool> insertArticleIfNew(Article article) async {
     final db = await database;
-    final id = await db.insert('articles', article.toMap()..remove('id'),
-        conflictAlgorithm: ConflictAlgorithm.ignore);
+    final id = await db.insert(
+      'articles',
+      article.toMap()..remove('id'),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
     return id != 0;
   }
 
@@ -150,66 +208,97 @@ class AppDatabase {
 
   Future<void> setReadLater(int id, bool readLater) async {
     final db = await database;
-    await db.update('articles', {'read_later': readLater ? 1 : 0},
-        where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'articles',
+      {'read_later': readLater ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> setFavorite(int id, bool favorite) async {
     final db = await database;
-    await db.update('articles', {'favorite': favorite ? 1 : 0},
-        where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'articles',
+      {'favorite': favorite ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<Article?> getArticle(int id) async {
     final db = await database;
-    final rows =
-        await db.query('articles', where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows = await db.query(
+      'articles',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
     return rows.isEmpty ? null : Article.fromMap(rows.first);
   }
 
   Future<List<Article>> getUnfetchedArticles() async {
     final db = await database;
-    final rows = await db.query('articles',
-        where: 'fetched = 0', orderBy: 'created_at DESC', limit: 200);
+    final rows = await db.query(
+      'articles',
+      where: 'fetched = 0',
+      orderBy: 'created_at DESC',
+      limit: 200,
+    );
     return rows.map(Article.fromMap).toList();
   }
 
-  Future<void> updateArticleContent(int id, String markdown,
-      {required bool fetched}) async {
+  Future<void> updateArticleContent(
+    int id,
+    String markdown, {
+    required bool fetched,
+  }) async {
     final db = await database;
     await db.update(
-        'articles',
-        {'content_markdown': markdown, 'fetched': fetched ? 1 : 0},
-        where: 'id = ?',
-        whereArgs: [id]);
+      'articles',
+      {'content_markdown': markdown, 'fetched': fetched ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> updateArticleTitle(int id, String title) async {
     final db = await database;
-    await db
-        .update('articles', {'title': title}, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'articles',
+      {'title': title},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> markArticleFetched(int id) async {
     final db = await database;
-    await db
-        .update('articles', {'fetched': 1}, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'articles',
+      {'fetched': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> markArticleRead(int id, {bool read = true}) async {
     final db = await database;
-    await db.update('articles', {'read': read ? 1 : 0},
-        where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'articles',
+      {'read': read ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<Map<int, int>> unreadCountsBySource() async {
     final db = await database;
     final rows = await db.rawQuery(
-        'SELECT source_id, COUNT(*) AS c FROM articles WHERE read = 0 '
-        'GROUP BY source_id');
-    return {
-      for (final row in rows) row['source_id'] as int: row['c'] as int,
-    };
+      'SELECT source_id, COUNT(*) AS c FROM articles WHERE read = 0 '
+      'GROUP BY source_id',
+    );
+    return {for (final row in rows) row['source_id'] as int: row['c'] as int};
   }
 
   // ------------------------------------------------------------- highlights

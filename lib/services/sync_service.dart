@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
+import 'app_log.dart';
 import 'extractor.dart';
 import 'feed_parser.dart';
 import 'nostr_service.dart';
@@ -26,8 +27,7 @@ class SyncService {
   final twitter = TwitterService();
   final nostr = NostrService();
 
-  final progress =
-      StreamController<SyncProgress>.broadcast(sync: true);
+  final progress = StreamController<SyncProgress>.broadcast(sync: true);
   bool _syncing = false;
   bool get isSyncing => _syncing;
 
@@ -40,32 +40,56 @@ class SyncService {
   /// Updates all sources, then fetches missing article content.
   /// Returns a human-readable summary.
   Future<String> syncAll() async {
-    if (_syncing) return 'Sync already running';
+    if (_syncing) {
+      await AppLogService.instance.warn('Refresh requested while sync running');
+      return 'Sync already running';
+    }
     _syncing = true;
     var newArticles = 0;
     final errors = <String>[];
     try {
       final sources = await _db.getSources();
+      await AppLogService.instance.info(
+        'Refresh started: ${sources.length} sources',
+      );
       for (final source in sources) {
         progress.add(SyncProgress('Updating ${source.title}…'));
         try {
-          newArticles += await _syncSource(source);
+          await AppLogService.instance.info(
+            'Refreshing source #${source.id}: ${source.title} '
+            '(${source.type.label}) ${source.url}',
+          );
+          final inserted = await _syncSource(source);
+          newArticles += inserted;
+          await AppLogService.instance.info(
+            'Finished refreshing source #${source.id}: '
+            '$inserted new articles',
+          );
         } catch (e) {
           errors.add('${source.title}: $e');
+          await AppLogService.instance.error(
+            'Refresh failed for source #${source.id} ${source.title}: $e',
+          );
         }
       }
       progress.add(const SyncProgress('Downloading articles…'));
       await _fetchPendingContent();
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(
-          'last_sync', DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt('last_sync', DateTime.now().millisecondsSinceEpoch);
     } finally {
       _syncing = false;
       progress.add(const SyncProgress('', running: false));
     }
-    final summary = newArticles == 0
-        ? 'Up to date'
-        : '$newArticles new article${newArticles == 1 ? '' : 's'}';
+    final summary =
+        newArticles == 0
+            ? 'Up to date'
+            : '$newArticles new article${newArticles == 1 ? '' : 's'}';
+    await AppLogService.instance.info(
+      errors.isEmpty
+          ? 'Refresh finished: $summary'
+          : 'Refresh finished with ${errors.length} error(s): $summary; '
+              '${errors.join(' | ')}',
+    );
     return errors.isEmpty ? summary : '$summary · ${errors.first}';
   }
 
@@ -79,104 +103,164 @@ class SyncService {
         return _insertTweets(source, await twitter.fetchLikes());
       case SourceType.nostrBookmarks:
         return _insertNostrItems(
-            source, await nostr.fetchBookmarks(source.url));
+          source,
+          await nostr.fetchBookmarks(source.url),
+        );
       case SourceType.nostrLikes:
         return _insertNostrItems(source, await nostr.fetchLikes(source.url));
     }
   }
 
   Future<int> _syncRss(Source source) async {
-    final response = await http.get(Uri.parse(source.url),
-        headers: {'User-Agent': _userAgent}).timeout(
-        const Duration(seconds: 25));
+    await AppLogService.instance.info(
+      'Loading RSS feed #${source.id}: ${source.url}',
+    );
+    final response = await http
+        .get(Uri.parse(source.url), headers: {'User-Agent': _userAgent})
+        .timeout(const Duration(seconds: 25));
+    await AppLogService.instance.info(
+      'Loaded RSS feed #${source.id}: HTTP ${response.statusCode}, '
+      '${response.body.length} bytes',
+    );
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode}');
     }
     final feed = FeedParser.parse(response.body);
+    await AppLogService.instance.info(
+      'Parsed RSS feed #${source.id}: "${feed.title}", '
+      '${feed.items.length} item${feed.items.length == 1 ? '' : 's'}',
+    );
     if (source.title.isEmpty || source.title == source.url) {
       await _db.updateSourceTitle(source.id!, feed.title);
     }
     var inserted = 0;
+    var skipped = 0;
+    var fullContent = 0;
+    var needsFetch = 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final item in feed.items) {
       // Feeds that ship full content need no page download.
       final hasFullContent = (item.contentHtml ?? '').length > 600;
-      final markdown = hasFullContent
-          ? ArticleExtractor.convertHtmlToMarkdown(item.contentHtml!)
-          : null;
-      final isNew = await _db.insertArticleIfNew(Article(
-        sourceId: source.id!,
-        guid: item.guid,
-        title: item.title,
-        author: item.author,
-        url: item.link,
-        publishedAt: item.published?.millisecondsSinceEpoch,
-        summary: _plainSummary(item.summaryHtml),
-        contentMarkdown: markdown,
-        fetched: (hasFullContent || item.link == null) ? 1 : 0,
-        createdAt: now,
-      ));
-      if (isNew) inserted++;
+      if (hasFullContent) {
+        fullContent++;
+      } else if (item.link != null) {
+        needsFetch++;
+      }
+      final markdown =
+          hasFullContent
+              ? ArticleExtractor.convertHtmlToMarkdown(item.contentHtml!)
+              : null;
+      final isNew = await _db.insertArticleIfNew(
+        Article(
+          sourceId: source.id!,
+          guid: item.guid,
+          title: item.title,
+          author: item.author,
+          url: item.link,
+          publishedAt: item.published?.millisecondsSinceEpoch,
+          summary: _plainSummary(item.summaryHtml),
+          contentMarkdown: markdown,
+          fetched: (hasFullContent || item.link == null) ? 1 : 0,
+          createdAt: now,
+        ),
+      );
+      if (isNew) {
+        inserted++;
+      } else {
+        skipped++;
+      }
     }
+    await AppLogService.instance.info(
+      'Processed RSS feed #${source.id}: ${feed.items.length} items, '
+      '$inserted inserted, $skipped skipped, $fullContent with feed '
+      'content, $needsFetch queued for article download',
+    );
     return inserted;
   }
 
   Future<int> _insertTweets(Source source, List<TweetItem> tweets) async {
+    await AppLogService.instance.info(
+      'Processing ${tweets.length} tweets for source #${source.id}: '
+      '${source.title}',
+    );
     var inserted = 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final tweet in tweets) {
-      final author = tweet.authorName ??
+      final author =
+          tweet.authorName ??
           (tweet.authorUsername != null ? '@${tweet.authorUsername}' : null);
-      final isNew = await _db.insertArticleIfNew(Article(
-        sourceId: source.id!,
-        guid: tweet.id,
-        title: _titleFromText(tweet.text),
-        author: author,
-        url: tweet.articleUrl ?? tweet.tweetUrl,
-        publishedAt: tweet.createdAt?.millisecondsSinceEpoch,
-        summary: tweet.text,
-        contentMarkdown: tweet.articleUrl == null ? tweet.text : null,
-        // Only linked external articles need a content download.
-        fetched: tweet.articleUrl == null ? 1 : 0,
-        createdAt: now,
-      ));
+      final isNew = await _db.insertArticleIfNew(
+        Article(
+          sourceId: source.id!,
+          guid: tweet.id,
+          title: _titleFromText(tweet.text),
+          author: author,
+          url: tweet.articleUrl ?? tweet.tweetUrl,
+          publishedAt: tweet.createdAt?.millisecondsSinceEpoch,
+          summary: tweet.text,
+          contentMarkdown: tweet.articleUrl == null ? tweet.text : null,
+          // Only linked external articles need a content download.
+          fetched: tweet.articleUrl == null ? 1 : 0,
+          createdAt: now,
+        ),
+      );
       if (isNew) inserted++;
     }
+    await AppLogService.instance.info(
+      'Processed tweets for source #${source.id}: '
+      '$inserted inserted, ${tweets.length - inserted} skipped',
+    );
     return inserted;
   }
 
   Future<int> _insertNostrItems(Source source, List<NostrItem> items) async {
+    await AppLogService.instance.info(
+      'Processing ${items.length} Nostr items for source #${source.id}: '
+      '${source.title}',
+    );
     var inserted = 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final item in items) {
       final isUrlOnly = item.content == item.articleUrl;
-      final isNew = await _db.insertArticleIfNew(Article(
-        sourceId: source.id!,
-        guid: item.id,
-        title: _titleFromText(
-            isUrlOnly ? (item.articleUrl ?? item.content) : item.content),
-        author: item.authorPubkey != null
-            ? 'nostr:${item.authorPubkey!.substring(0, 12)}…'
-            : null,
-        url: item.articleUrl,
-        publishedAt: item.createdAt?.millisecondsSinceEpoch,
-        summary: item.content,
-        contentMarkdown: item.articleUrl == null ? item.content : null,
-        fetched: item.articleUrl == null ? 1 : 0,
-        createdAt: now,
-      ));
+      final isNew = await _db.insertArticleIfNew(
+        Article(
+          sourceId: source.id!,
+          guid: item.id,
+          title: _titleFromText(
+            isUrlOnly ? (item.articleUrl ?? item.content) : item.content,
+          ),
+          author:
+              item.authorPubkey != null
+                  ? 'nostr:${item.authorPubkey!.substring(0, 12)}…'
+                  : null,
+          url: item.articleUrl,
+          publishedAt: item.createdAt?.millisecondsSinceEpoch,
+          summary: item.content,
+          contentMarkdown: item.articleUrl == null ? item.content : null,
+          fetched: item.articleUrl == null ? 1 : 0,
+          createdAt: now,
+        ),
+      );
       if (isNew) inserted++;
     }
+    await AppLogService.instance.info(
+      'Processed Nostr items for source #${source.id}: '
+      '$inserted inserted, ${items.length - inserted} skipped',
+    );
     return inserted;
   }
 
   /// Downloads and extracts content for all articles still missing it.
   Future<void> _fetchPendingContent() async {
     final pending = await _db.getUnfetchedArticles();
+    await AppLogService.instance.info(
+      'Loading pending article content: ${pending.length} articles',
+    );
     for (var i = 0; i < pending.length; i++) {
       final article = pending[i];
-      progress.add(SyncProgress(
-          'Downloading articles… ${i + 1}/${pending.length}'));
+      progress.add(
+        SyncProgress('Downloading articles… ${i + 1}/${pending.length}'),
+      );
       await _fetchArticleContent(article);
     }
   }
@@ -184,20 +268,33 @@ class SyncService {
   Future<void> _fetchArticleContent(Article article) async {
     final url = article.url;
     if (url == null) {
+      await AppLogService.instance.debug(
+        'Skipping article #${article.id} content fetch: no URL',
+      );
       await _db.markArticleFetched(article.id!);
       return;
     }
     String body;
     try {
-      final response = await http.get(Uri.parse(url),
-          headers: {'User-Agent': _userAgent}).timeout(
-          const Duration(seconds: 25));
+      await AppLogService.instance.debug(
+        'Loading article #${article.id}: ${article.title} <$url>',
+      );
+      final response = await http
+          .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
+          .timeout(const Duration(seconds: 25));
+      await AppLogService.instance.debug(
+        'Loaded article #${article.id}: HTTP ${response.statusCode}, '
+        '${response.body.length} bytes',
+      );
       if (response.statusCode != 200) {
         throw Exception('HTTP ${response.statusCode}');
       }
       body = response.body;
-    } catch (_) {
+    } catch (e) {
       // Network failure: keep fetched = 0 so the next sync retries.
+      await AppLogService.instance.warn(
+        'Could not load article #${article.id} ${article.title}: $e',
+      );
       return;
     }
     try {
@@ -214,6 +311,10 @@ class SyncService {
           }
         }
         await _db.updateArticleContent(article.id!, content, fetched: true);
+        await AppLogService.instance.debug(
+          'Processed article #${article.id}: extracted '
+          '${content.length} markdown characters',
+        );
         // Tweets/notes get a placeholder title cut from their text; replace
         // it with the real page title once we have it.
         if (article.title.endsWith('…') || article.title == article.url) {
@@ -224,11 +325,19 @@ class SyncService {
         }
       } else {
         // Page had no extractable article; fall back to the summary.
-        final fallback = _plainSummary(article.summary) ??
+        final fallback =
+            _plainSummary(article.summary) ??
             'Could not extract this page. Open it in the browser instead.';
         await _db.updateArticleContent(article.id!, fallback, fetched: true);
+        await AppLogService.instance.warn(
+          'Processed article #${article.id}: no extractable content, '
+          'stored fallback summary',
+        );
       }
-    } catch (_) {
+    } catch (e) {
+      await AppLogService.instance.error(
+        'Processing failed for article #${article.id} ${article.title}: $e',
+      );
       await _db.markArticleFetched(article.id!);
     }
   }
@@ -237,16 +346,17 @@ class SyncService {
 
   static String? _plainSummary(String? html) {
     if (html == null) return null;
-    final text = html
-        .replaceAll(RegExp(r'<[^>]+>'), ' ')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    final text =
+        html
+            .replaceAll(RegExp(r'<[^>]+>'), ' ')
+            .replaceAll('&amp;', '&')
+            .replaceAll('&lt;', '<')
+            .replaceAll('&gt;', '>')
+            .replaceAll('&quot;', '"')
+            .replaceAll('&#39;', "'")
+            .replaceAll('&nbsp;', ' ')
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim();
     return text.isEmpty ? null : text;
   }
 
