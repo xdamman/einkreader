@@ -34,10 +34,16 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _db = AppDatabase.instance;
   _HomeTab _tab = _HomeTab.feed;
+
+  /// Selected source on the Feed tab; null means "All".
+  int? _feedSourceId;
   List<Article> _articles = [];
   List<Highlight> _highlights = [];
   Map<int, String> _sourceTitles = {};
-  String _syncMessage = '';
+
+  /// Sources currently being synced, shown with a spinner in the feed strip.
+  /// Several refresh concurrently, so this is a set rather than a single id.
+  final Set<int> _syncingSourceIds = {};
   bool _developerMode = false;
   StreamSubscription<SyncProgress>? _progressSub;
   StreamSubscription<void>? _logSub;
@@ -48,8 +54,20 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
     _progressSub = SyncService.instance.progress.stream.listen((p) {
       if (!mounted) return;
-      setState(() => _syncMessage = p.running ? p.message : '');
-      if (!p.running) _load();
+      setState(() {
+        if (!p.running) {
+          _syncingSourceIds.clear();
+        } else if (p.sourceId != null) {
+          if (p.done) {
+            _syncingSourceIds.remove(p.sourceId);
+          } else {
+            _syncingSourceIds.add(p.sourceId!);
+          }
+        }
+      });
+      // Refresh the feed mid-sync as sources and downloads land, and once more
+      // when the sync finishes.
+      if (p.reload || !p.running) _load();
     });
     _logSub = AppLogService.instance.changes.stream.listen((_) {
       if (mounted) _loadDeveloperMode();
@@ -67,25 +85,45 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  bool _loading = false;
+  bool _loadAgain = false;
+
+  /// Reloads all home data. Frequent mid-sync reloads are coalesced: a request
+  /// arriving while a load is in flight schedules exactly one more load after
+  /// it, so the final state is always up to date without overlapping queries.
   Future<void> _load() async {
-    final articles = await _db.getArticles();
-    final highlights = await _db.getHighlights();
-    final sources = await _db.getSources();
-    final developerMode = await AppLogService.instance.isDeveloperModeEnabled();
-    await AppLogService.instance.debug(
-      'Loaded home data: ${articles.length} articles, '
-      '${highlights.length} highlights, ${sources.length} sources',
-    );
-    if (!mounted) return;
-    setState(() {
-      _articles = articles;
-      _highlights = highlights;
-      _sourceTitles = {for (final s in sources) s.id!: s.title};
-      _developerMode = developerMode;
-      if (!_developerMode && _tab == _HomeTab.debug) {
-        _tab = _HomeTab.feed;
+    if (_loading) {
+      _loadAgain = true;
+      return;
+    }
+    _loading = true;
+    try {
+      final articles = await _db.getArticles();
+      final highlights = await _db.getHighlights();
+      final sources = await _db.getSources();
+      final developerMode =
+          await AppLogService.instance.isDeveloperModeEnabled();
+      await AppLogService.instance.debug(
+        'Loaded home data: ${articles.length} articles, '
+        '${highlights.length} highlights, ${sources.length} sources',
+      );
+      if (!mounted) return;
+      setState(() {
+        _articles = articles;
+        _highlights = highlights;
+        _sourceTitles = {for (final s in sources) s.id!: s.title};
+        _developerMode = developerMode;
+        if (!_developerMode && _tab == _HomeTab.debug) {
+          _tab = _HomeTab.feed;
+        }
+      });
+    } finally {
+      _loading = false;
+      if (_loadAgain) {
+        _loadAgain = false;
+        _load();
       }
-    });
+    }
   }
 
   Future<void> _loadDeveloperMode() async {
@@ -163,20 +201,6 @@ class _HomeScreenState extends State<HomeScreen> {
             tabs: tabs.toList(),
             onSelected: (tab) => setState(() => _tab = tab),
           ),
-          if (_syncMessage.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(width: 1)),
-              ),
-              child: Text(
-                _syncMessage,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
           Expanded(child: _body()),
         ],
       ),
@@ -186,14 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _body() {
     switch (_tab) {
       case _HomeTab.feed:
-        return ArticleFeed(
-          articles: _articles,
-          sourceTitles: _sourceTitles,
-          emptyMessage:
-              'No articles yet.\n\nAdd sources with the feed '
-              'button above, then sync.',
-          onChanged: _load,
-        );
+        return _buildFeed();
       case _HomeTab.toRead:
         return ArticleFeed(
           articles: _articles.where((a) => a.readLater == 1).toList(),
@@ -218,6 +235,204 @@ class _HomeScreenState extends State<HomeScreen> {
       case _HomeTab.debug:
         return const _DebugLogView();
     }
+  }
+
+  /// Feed tab: a swipable source filter strip above the article list. Sources
+  /// are ordered by unread count, then total items; tapping one filters the
+  /// feed to that source, with "All" showing everything.
+  Widget _buildFeed() {
+    final total = <int, int>{};
+    final unread = <int, int>{};
+    for (final article in _articles) {
+      total[article.sourceId] = (total[article.sourceId] ?? 0) + 1;
+      if (article.read == 0) {
+        unread[article.sourceId] = (unread[article.sourceId] ?? 0) + 1;
+      }
+    }
+    final sources = total.keys
+        .map((id) => _SourceFilter(
+              id: id,
+              title: _sourceTitles[id] ?? 'Unknown',
+              unread: unread[id] ?? 0,
+              total: total[id] ?? 0,
+            ))
+        .toList()
+      ..sort((a, b) {
+        final byUnread = b.unread.compareTo(a.unread);
+        return byUnread != 0 ? byUnread : b.total.compareTo(a.total);
+      });
+
+    // Fall back to "All" if the selected source no longer has any articles.
+    final selectedId =
+        sources.any((s) => s.id == _feedSourceId) ? _feedSourceId : null;
+    final articles = selectedId == null
+        ? _articles
+        : _articles.where((a) => a.sourceId == selectedId).toList();
+    final allUnread = unread.values.fold(0, (sum, value) => sum + value);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (sources.isNotEmpty)
+          _SourceFilterBar(
+            sources: sources,
+            selectedId: selectedId,
+            allUnread: allUnread,
+            syncingSourceIds: _syncingSourceIds,
+            onSelected: (id) => setState(() => _feedSourceId = id),
+          ),
+        Expanded(
+          child: ArticleFeed(
+            articles: articles,
+            sourceTitles: _sourceTitles,
+            emptyMessage:
+                'No articles yet.\n\nAdd sources with the feed '
+                'button above, then sync.',
+            onChanged: _load,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One selectable source in the Feed filter strip, with its unread and total
+/// item counts.
+class _SourceFilter {
+  final int id;
+  final String title;
+  final int unread;
+  final int total;
+
+  const _SourceFilter({
+    required this.id,
+    required this.title,
+    required this.unread,
+    required this.total,
+  });
+}
+
+/// Horizontally swipable strip of source chips shown above the feed. "All" is
+/// always first; the rest are supplied already ordered.
+class _SourceFilterBar extends StatelessWidget {
+  final List<_SourceFilter> sources;
+  final int? selectedId;
+  final int allUnread;
+  final Set<int> syncingSourceIds;
+  final ValueChanged<int?> onSelected;
+
+  const _SourceFilterBar({
+    required this.sources,
+    required this.selectedId,
+    required this.allUnread,
+    required this.syncingSourceIds,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(width: 1)),
+      ),
+      child: SizedBox(
+        height: 52,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          children: [
+            _SourceChip(
+              label: 'All',
+              count: allUnread,
+              selected: selectedId == null,
+              syncing: false,
+              onTap: () => onSelected(null),
+            ),
+            for (final source in sources) ...[
+              const SizedBox(width: 8),
+              _SourceChip(
+                label: source.title,
+                count: source.unread,
+                selected: selectedId == source.id,
+                syncing: syncingSourceIds.contains(source.id),
+                onTap: () => onSelected(source.id),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Flat, e-ink friendly pill: solid black when selected, outlined otherwise,
+/// with a trailing unread count when there is one.
+class _SourceChip extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool selected;
+
+  /// While true, a spinner replaces the unread count to show this source is
+  /// being updated.
+  final bool syncing;
+  final VoidCallback onTap;
+
+  const _SourceChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.syncing,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = selected ? Colors.white : Colors.black;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: selected ? Colors.black : Colors.white,
+          border: Border.all(width: 1.5),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: foreground,
+              ),
+            ),
+            if (syncing) ...[
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 13,
+                height: 13,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: foreground,
+                ),
+              ),
+            ] else if (count > 0) ...[
+              const SizedBox(width: 6),
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: foreground,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 

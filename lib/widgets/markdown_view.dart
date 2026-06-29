@@ -2,7 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../services/image_store.dart';
+import '../services/archive_store.dart';
 import '../theme.dart';
 
 /// Renders Markdown as Flutter widgets with full control over text spans so
@@ -179,7 +179,7 @@ class _MarkdownViewState extends State<MarkdownView> {
             style: _bodyStyle.copyWith(
                 fontStyle: FontStyle.italic, fontSize: widget.fontSize - 3));
 
-    final local = ImageStore.localFile(url);
+    final local = ArchiveStore.localFile(url);
     if (local != null) {
       return Image.file(local, errorBuilder: (_, __, ___) => caption());
     }

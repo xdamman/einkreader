@@ -170,7 +170,7 @@ class _ArticleTile extends StatelessWidget {
       contentPadding: const EdgeInsets.only(left: 16, right: 4, top: 6,
           bottom: 6),
       title: Text(
-        article.title,
+        article.displayTitle,
         maxLines: 3,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(

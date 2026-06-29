@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -73,7 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setString('twitter_client_id', clientId);
       final username = await _twitter.connect(clientId);
       final now = DateTime.now().millisecondsSinceEpoch;
-      await _db.insertSource(
+      final source = await _db.insertSource(
         Source(
           type: SourceType.twitterBookmarks,
           title: 'Twitter Bookmarks',
@@ -83,6 +85,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       _toast('Connected as @$username');
       await _load();
+      // Pull in this source's items right away.
+      unawaited(SyncService.instance.syncSources([source]));
     } catch (e) {
       _toast('$e');
     } finally {
@@ -126,7 +130,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     await prefs.setString('nostr_npub', npub);
     final now = DateTime.now().millisecondsSinceEpoch;
-    await _db.insertSource(
+    final bookmarks = await _db.insertSource(
       Source(
         type: SourceType.nostrBookmarks,
         title: 'Nostr Bookmarks',
@@ -134,7 +138,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         createdAt: now,
       ),
     );
-    await _db.insertSource(
+    final likes = await _db.insertSource(
       Source(
         type: SourceType.nostrLikes,
         title: 'Nostr Likes',
@@ -142,7 +146,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         createdAt: now,
       ),
     );
-    _toast('Nostr sources added — sync to load them');
+    _toast('Nostr sources added');
+    // Pull in the new sources' items right away.
+    unawaited(SyncService.instance.syncSources([bookmarks, likes]));
   }
 
   @override

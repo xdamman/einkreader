@@ -30,6 +30,17 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // Force the legacy v1 (JAR) signature on in addition to v2/v3. AGP
+            // drops v1 by default when minSdk >= 24, but some locked-down e-ink
+            // firmwares (e.g. iFLYTEK) reject v2/v3-only APKs as "invalid".
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

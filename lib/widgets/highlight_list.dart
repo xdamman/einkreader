@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../screens/article_screen.dart';
+import '../services/archive_store.dart';
 
 /// All saved highlights, newest first. Tapping one opens its article;
 /// a long-press deletes it.
@@ -95,6 +96,8 @@ class HighlightList extends StatelessWidget {
     );
     if (confirmed == true) {
       await AppDatabase.instance.deleteHighlight(highlight.id!);
+      await ArchiveStore.instance
+          .writeHighlights(await AppDatabase.instance.getHighlights());
       onChanged();
     }
   }

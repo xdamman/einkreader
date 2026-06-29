@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
@@ -6,6 +8,7 @@ import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
 import '../services/feed_parser.dart';
+import '../services/sync_service.dart';
 
 /// Adds an RSS/Atom source. Accepts either a feed URL directly or a website
 /// URL — in that case the feed is discovered from the page's <link> tags.
@@ -51,6 +54,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
       await AppLogService.instance.info(
         'Finished adding RSS source: ${source.title} ${source.url}',
       );
+      // Fetch this feed's articles right away; the feed updates as they land.
+      unawaited(SyncService.instance.syncSources([source]));
       if (!mounted) return;
       Navigator.of(context).pop(source);
     } catch (e) {

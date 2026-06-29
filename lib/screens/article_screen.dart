@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
+import '../services/archive_store.dart';
+import '../services/sync_service.dart';
 import '../theme.dart';
 import '../widgets/markdown_view.dart';
 
@@ -30,6 +32,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
   List<Highlight> _highlights = [];
   String _selectedText = '';
   double _fontSize = 18;
+  bool _reprocessing = false;
 
   @override
   void initState() {
@@ -53,10 +56,12 @@ class _ArticleScreenState extends State<ArticleScreen> {
   Future<void> _toggleFavorite() async {
     final article = _article;
     if (article == null) return;
-    await _db.setFavorite(article.id!, article.favorite == 0);
+    final favorite = article.favorite == 0;
+    await _db.setFavorite(article.id!, favorite);
     final updated = await _db.getArticle(article.id!);
     if (!mounted) return;
     setState(() => _article = updated);
+    if (favorite && updated != null) await _archiveFavorite(updated);
   }
 
   Future<void> _saveHighlight() async {
@@ -70,8 +75,48 @@ class _ArticleScreenState extends State<ArticleScreen> {
     final highlights = await _db.getHighlights(articleId: widget.articleId);
     if (!mounted) return;
     setState(() => _highlights = highlights);
+    // A highlighted article is worth keeping: copy it to favorites and refresh
+    // the time-independent highlights file.
+    await _archiveFavorite(_article!);
+    await _rewriteHighlights();
+    if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('Highlight saved')));
+  }
+
+  /// Re-downloads and re-processes the article, then re-renders it.
+  Future<void> _reprocess() async {
+    if (_reprocessing) return;
+    setState(() => _reprocessing = true);
+    String message = 'Article reprocessed';
+    try {
+      await SyncService.instance.reprocessArticle(widget.articleId);
+    } catch (e) {
+      message = 'Couldn\'t reprocess: $e';
+    }
+    // Drop cached images so re-downloaded versions show.
+    PaintingBinding.instance.imageCache.clear();
+    if (!mounted) return;
+    setState(() => _reprocessing = false);
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Copies an article's markdown + images into YYYY/MM/favorites/ so it
+  /// survives even if its source is later removed.
+  Future<void> _archiveFavorite(Article article) async {
+    final markdown = article.contentMarkdown;
+    if (markdown == null) return;
+    final source = await _db.getSource(article.sourceId);
+    if (source == null) return;
+    await ArchiveStore.instance
+        .copyToFavorites(source: source, article: article, markdown: markdown);
+  }
+
+  Future<void> _rewriteHighlights() async {
+    await ArchiveStore.instance.writeHighlights(await _db.getHighlights());
   }
 
   /// Tapping a painted highlight offers to share or remove it.
@@ -124,6 +169,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     } else if (action == 'remove') {
       await _db.deleteHighlight(highlight.id!);
       final highlights = await _db.getHighlights(articleId: widget.articleId);
+      await _rewriteHighlights();
       if (!mounted) return;
       setState(() => _highlights = highlights);
       ScaffoldMessenger.of(context)
@@ -170,6 +216,17 @@ class _ArticleScreenState extends State<ArticleScreen> {
             icon: const Icon(Icons.text_increase),
             onPressed: () => setState(
                 () => _fontSize = (_fontSize + 2).clamp(14, 30)),
+          ),
+          IconButton(
+            tooltip: 'Reload & reprocess',
+            icon: _reprocessing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: _reprocessing ? null : _reprocess,
           ),
           if (article.url != null)
             IconButton(

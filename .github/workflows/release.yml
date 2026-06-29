@@ -1,0 +1,67 @@
+name: Release APK
+
+# Builds the Android APK on GitHub's runners (no local build needed) and, when
+# triggered by a version tag, publishes it as a GitHub Release asset.
+#
+# To cut a release:
+#   1. Bump `version:` in pubspec.yaml
+#   2. git tag v0.1.0 && git push origin v0.1.0
+# The tagged run attaches einkreader-v0.1.0.apk to the release at
+# https://github.com/xdamman/einkreader/releases/latest
+#
+# A manual run (workflow_dispatch) only uploads the APK as a build artifact.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Needed for softprops/action-gh-release to create the release.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.2
+          cache: true
+
+      - run: flutter pub get
+
+      # Gate the release on a green analyzer + test suite (the screenshot
+      # golden tests are skipped unless --dart-define=screenshots=true).
+      - run: flutter analyze
+      - run: flutter test
+
+      - run: flutter build apk --release
+
+      - name: Stage APK with a versioned name
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "dist/einkreader-${{ github.ref_name }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: einkreader-apk
+          path: dist/*.apk
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -34,13 +34,22 @@ class ArticleExtractor {
     return markdown.trim().length < 140 ? null : markdown;
   }
 
+  /// A linked image `[ ![alt](src) ](href)`, which html2md emits (often split
+  /// across lines) for an `<img>` wrapped in an `<a>`. Whitespace and the URLs
+  /// may contain newlines, so this spans lines.
+  static final _linkedImage =
+      RegExp(r'\[\s*(!\[[^\]]*\]\([^)]*\))\s*\]\([^)]*\)');
+
   /// Converts an HTML fragment (e.g. content:encoded from a feed) to Markdown.
   static String convertHtmlToMarkdown(String fragment) {
-    final markdown = html2md.convert(fragment, styleOptions: {
+    var markdown = html2md.convert(fragment, styleOptions: {
       'headingStyle': 'atx',
       'codeBlockStyle': 'fenced',
       'emDelimiter': '*',
     });
+    // Reduce a linked image to just the image, otherwise the wrapping link's
+    // `](href)` lands on its own line and renders as a literal text fragment.
+    markdown = markdown.replaceAllMapped(_linkedImage, (m) => m.group(1)!);
     // Collapse runs of blank lines left behind by stripped elements.
     return markdown.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
   }

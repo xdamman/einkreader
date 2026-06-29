@@ -112,6 +112,32 @@ void main() {
     });
   });
 
+  group('Article.plainTitle', () {
+    test('strips emphasis, code and heading markers', () {
+      expect(Article.plainTitle('## **Bold** and `code`'), 'Bold and code');
+      expect(Article.plainTitle('> a quoted ~~line~~'), 'a quoted line');
+    });
+
+    test('keeps link text but drops the url', () {
+      expect(
+        Article.plainTitle('Read [this post](https://blog.dev/x) now'),
+        'Read this post now',
+      );
+      expect(Article.plainTitle('![](https://cdn/cover.jpg)Hello'), 'Hello');
+    });
+
+    test('removes bare urls and collapses leftover whitespace', () {
+      expect(
+        Article.plainTitle('Check this out https://t.co/abc today'),
+        'Check this out today',
+      );
+    });
+
+    test('falls back to the original when nothing readable remains', () {
+      expect(Article.plainTitle('https://t.co/abc'), 'https://t.co/abc');
+    });
+  });
+
   group('ArticleExtractor', () {
     test('extracts the article body and converts it to markdown', () {
       final paragraph = 'Sentence with enough length to count. ' * 5;

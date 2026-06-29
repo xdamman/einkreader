@@ -6,6 +6,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
 
+import 'twitter_markdown.dart';
+
 /// A tweet reduced to what the reader needs.
 class TweetItem {
   final String id;
@@ -21,6 +23,10 @@ class TweetItem {
   /// [text] already holds the full body, so it is the article itself.
   final bool isLongForm;
 
+  /// Status id of another X post this tweet links to, when present. Used to
+  /// inline a referenced native article below the tweet.
+  final String? linkedTweetId;
+
   const TweetItem({
     required this.id,
     required this.text,
@@ -29,9 +35,23 @@ class TweetItem {
     this.createdAt,
     this.articleUrl,
     this.isLongForm = false,
+    this.linkedTweetId,
   });
 
   String get tweetUrl => 'https://x.com/${authorUsername ?? 'i'}/status/$id';
+
+  /// Returns a copy whose [text] is this tweet followed by a horizontal rule
+  /// and the full body of a native article it links to.
+  TweetItem withArticle(String articleText) => TweetItem(
+        id: id,
+        text: '$text\n\n---\n\n$articleText',
+        authorName: authorName,
+        authorUsername: authorUsername,
+        createdAt: createdAt,
+        articleUrl: articleUrl,
+        isLongForm: isLongForm,
+        linkedTweetId: linkedTweetId,
+      );
 }
 
 /// Twitter / X API v2 client using OAuth 2.0 with PKCE.
@@ -55,6 +75,16 @@ class TwitterService {
   static const _kClientId = 'twitter_client_id';
   static const _kUserId = 'twitter_user_id';
   static const _kUsername = 'twitter_username';
+
+  final http.Client _client;
+
+  /// Test seam: when set, used instead of the stored OAuth token so the API
+  /// layer can be driven by a fake [http.Client] without a real connection.
+  final Future<String> Function()? _accessTokenOverride;
+
+  TwitterService({http.Client? client, Future<String> Function()? accessToken})
+      : _client = client ?? http.Client(),
+        _accessTokenOverride = accessToken;
 
   Future<bool> get isConnected async =>
       (await _storage.read(key: _kRefreshToken)) != null;
@@ -101,7 +131,7 @@ class TwitterService {
           'Authorization was denied');
     }
 
-    final tokenResponse = await http.post(Uri.parse(_tokenUrl), headers: {
+    final tokenResponse = await _client.post(Uri.parse(_tokenUrl), headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     }, body: {
       'grant_type': 'authorization_code',
@@ -125,70 +155,101 @@ class TwitterService {
 
   Future<List<TweetItem>> fetchBookmarks() => _fetchTimeline('bookmarks');
 
+  /// Standard fields needed to render a tweet, including the long-form body.
+  static const _tweetQuery = {
+    // note_tweet carries the full body of "longer tweets"; article carries the
+    // full body (plain_text) of native X Articles.
+    'tweet.fields':
+        'created_at,entities,author_id,note_tweet,referenced_tweets,article',
+    'expansions': 'author_id,referenced_tweets.id,attachments.media_keys',
+    'user.fields': 'name,username',
+    'media.fields': 'url,preview_image_url,type',
+  };
+
   Future<List<TweetItem>> _fetchTimeline(String endpoint) async {
     final userId = await _storage.read(key: _kUserId);
     if (userId == null) throw Exception('Twitter is not connected');
     final json = await _get('/users/$userId/$endpoint', query: {
       'max_results': '50',
-      // note_tweet carries the full body of native long-form posts.
-      'tweet.fields': 'created_at,entities,author_id,note_tweet',
-      'expansions': 'author_id',
-      'user.fields': 'name,username',
+      ..._tweetQuery,
     });
 
+    final users = _usersFrom(json);
+    final media = _mediaFrom(json);
+    final items = <TweetItem>[];
+    for (final t in (json['data'] as List?) ?? const []) {
+      items.add(_parseTweet(t as Map<String, dynamic>, users, media));
+    }
+    // Inline any referenced native article below the tweet that links to it.
+    return Future.wait(items.map(_withLinkedArticle));
+  }
+
+  /// Fetches a single tweet by id. When the tweet links to another X post that
+  /// is a native long-form article, the returned item's [text] holds the tweet
+  /// followed by a horizontal rule and the full article body.
+  Future<TweetItem> fetchTweet(String id) async =>
+      _withLinkedArticle(await _fetchTweet(id));
+
+  Future<TweetItem> _fetchTweet(String id) async {
+    final json = await _get('/tweets/$id', query: _tweetQuery);
+    return _parseTweet(
+        json['data'] as Map<String, dynamic>, _usersFrom(json), _mediaFrom(json));
+  }
+
+  /// If [item] links to another X post that is a native article, fetches it and
+  /// appends its full body below a horizontal rule. Network errors are ignored
+  /// so a missing reference never breaks a sync.
+  Future<TweetItem> _withLinkedArticle(TweetItem item) async {
+    final linkedId = item.linkedTweetId;
+    if (linkedId == null || linkedId == item.id) return item;
+    try {
+      final article = await _fetchTweet(linkedId);
+      if (!article.isLongForm) return item;
+      return item.withArticle(article.text);
+    } catch (_) {
+      return item;
+    }
+  }
+
+  static Map<String, Map<String, dynamic>> _usersFrom(
+      Map<String, dynamic> json) {
     final users = <String, Map<String, dynamic>>{};
     final includes = json['includes'] as Map<String, dynamic>?;
     for (final u in (includes?['users'] as List?) ?? const []) {
       users[u['id'] as String] = u as Map<String, dynamic>;
     }
-
-    final items = <TweetItem>[];
-    for (final t in (json['data'] as List?) ?? const []) {
-      final tweet = t as Map<String, dynamic>;
-      final author = users[tweet['author_id']];
-      // Long-form ("note") tweets keep the full text and its own entities in
-      // a note_tweet object; the top-level text is truncated to 280 chars.
-      final note = tweet['note_tweet'] as Map<String, dynamic>?;
-      final isLongForm = note != null && (note['text'] as String?) != null;
-      final body = isLongForm ? note! : tweet;
-      items.add(TweetItem(
-        id: tweet['id'] as String,
-        text: _expandUrls(body),
-        authorName: author?['name'] as String?,
-        authorUsername: author?['username'] as String?,
-        createdAt: DateTime.tryParse(tweet['created_at'] as String? ?? ''),
-        articleUrl: _firstExternalUrl(body),
-        isLongForm: isLongForm,
-      ));
-    }
-    return items;
+    return users;
   }
 
-  /// Replaces t.co links in the text with their expanded form. Works for both
-  /// a tweet object and a note_tweet object (both expose entities.urls).
-  static String _expandUrls(Map<String, dynamic> body) {
-    var text = body['text'] as String? ?? '';
-    final urls = (body['entities']?['urls'] as List?) ?? const [];
-    for (final u in urls) {
-      final shortUrl = u['url'] as String?;
-      final expanded = (u['expanded_url'] ?? u['unwound_url']) as String?;
-      if (shortUrl != null && expanded != null) {
-        text = text.replaceAll(shortUrl, expanded);
-      }
+  /// media_key -> image URL, from the response includes, so article cover and
+  /// attached images can be rendered.
+  static Map<String, String> _mediaFrom(Map<String, dynamic> json) {
+    final media = <String, String>{};
+    final includes = json['includes'] as Map<String, dynamic>?;
+    for (final m in (includes?['media'] as List?) ?? const []) {
+      final key = m['media_key'] as String?;
+      final url = (m['url'] ?? m['preview_image_url']) as String?;
+      if (key != null && url != null) media[key] = url;
     }
-    return text;
+    return media;
   }
 
-  static String? _firstExternalUrl(Map<String, dynamic> body) {
-    final urls = (body['entities']?['urls'] as List?) ?? const [];
-    for (final u in urls) {
-      final expanded = (u['unwound_url'] ?? u['expanded_url']) as String?;
-      if (expanded == null) continue;
-      final host = Uri.tryParse(expanded)?.host ?? '';
-      if (host.endsWith('twitter.com') || host.endsWith('x.com')) continue;
-      return expanded;
-    }
-    return null;
+  static TweetItem _parseTweet(Map<String, dynamic> tweet,
+      Map<String, Map<String, dynamic>> users, Map<String, String> media) {
+    final author = users[tweet['author_id']];
+    // Link/article references come from the note body when present, else the
+    // tweet itself; an article's own entities point only at its own URL.
+    final body = noteOf(tweet) ?? tweet;
+    return TweetItem(
+      id: tweet['id'] as String,
+      text: tweetBodyMarkdown(tweet, mediaUrls: media),
+      authorName: author?['name'] as String?,
+      authorUsername: author?['username'] as String?,
+      createdAt: DateTime.tryParse(tweet['created_at'] as String? ?? ''),
+      articleUrl: firstExternalUrl(body),
+      isLongForm: isLongFormTweet(tweet),
+      linkedTweetId: linkedTweetId(tweet, body),
+    );
   }
 
   // ----------------------------------------------------------------- tokens
@@ -198,7 +259,7 @@ class TwitterService {
     final token = await _validAccessToken();
     final uri =
         Uri.parse('$_apiBase$path').replace(queryParameters: query);
-    final response = await http
+    final response = await _client
         .get(uri, headers: {'Authorization': 'Bearer $token'});
     if (response.statusCode == 429) {
       throw Exception('Twitter rate limit reached, try again later');
@@ -211,6 +272,8 @@ class TwitterService {
   }
 
   Future<String> _validAccessToken() async {
+    final override = _accessTokenOverride;
+    if (override != null) return override();
     final expiresAtRaw = await _storage.read(key: _kExpiresAt);
     final accessToken = await _storage.read(key: _kAccessToken);
     final expiresAt = int.tryParse(expiresAtRaw ?? '') ?? 0;
@@ -225,7 +288,7 @@ class TwitterService {
     if (refreshToken == null || clientId == null) {
       throw Exception('Twitter is not connected');
     }
-    final response = await http.post(Uri.parse(_tokenUrl), headers: {
+    final response = await _client.post(Uri.parse(_tokenUrl), headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     }, body: {
       'grant_type': 'refresh_token',

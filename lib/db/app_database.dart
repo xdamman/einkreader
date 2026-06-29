@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -12,9 +13,16 @@ class AppDatabase {
 
   Database? _db;
 
+  /// Test seam: when set, the database is opened here instead of the default
+  /// app location (use `inMemoryDatabasePath` or a temp file with the
+  /// sqflite_common_ffi factory).
+  @visibleForTesting
+  String? debugDatabasePath;
+
   Future<Database> get database async {
     if (_db != null) return _db!;
-    final path = join(await getDatabasesPath(), 'einkreader.db');
+    final path =
+        debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
       version: 3,
@@ -22,6 +30,14 @@ class AppDatabase {
       onUpgrade: _onUpgrade,
     );
     return _db!;
+  }
+
+  /// Test seam: closes and forgets the open database so the next access reopens
+  /// it (e.g. against a fresh temp path between tests).
+  @visibleForTesting
+  Future<void> debugReset() async {
+    await _db?.close();
+    _db = null;
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -111,6 +127,13 @@ class AppDatabase {
       'Loaded ${rows.length} source${rows.length == 1 ? '' : 's'}',
     );
     return rows.map(Source.fromMap).toList();
+  }
+
+  Future<Source?> getSource(int id) async {
+    final db = await database;
+    final rows =
+        await db.query('sources', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : Source.fromMap(rows.first);
   }
 
   Future<Source?> getSourceByTypeAndUrl(SourceType type, String url) async {

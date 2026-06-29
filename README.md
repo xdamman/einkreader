@@ -10,6 +10,14 @@ It pulls articles from:
 
 Everything is downloaded while you're online and stored locally in SQLite, so the whole library reads fine offline.
 
+## Download
+
+**[⬇️ Download the latest Android APK](https://github.com/xdamman/einkreader/releases/latest)** — grab the `einkreader-*.apk` asset from the most recent release, copy it to your e-ink tablet (or phone) and open it to install.
+
+You may need to allow "install from unknown sources" the first time. The APK is built and published automatically by [GitHub Actions](.github/workflows/release.yml) on every tagged release, and is signed so that older/locked-down e-ink firmwares (which reject v2/v3-only signatures) accept it.
+
+> iOS has no public build — Apple requires installs signed with your own Apple ID. Build it yourself with `flutter build ios` (see [Building](#building)).
+
 ## Screenshots
 
 | Home | Reader (with highlights) | Highlights |

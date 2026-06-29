@@ -102,10 +102,54 @@ class Article {
     required this.createdAt,
   });
 
+  Article copyWith({String? title, String? contentMarkdown, int? favorite}) =>
+      Article(
+        id: id,
+        sourceId: sourceId,
+        guid: guid,
+        title: title ?? this.title,
+        author: author,
+        url: url,
+        publishedAt: publishedAt,
+        summary: summary,
+        contentMarkdown: contentMarkdown ?? this.contentMarkdown,
+        fetched: fetched,
+        read: read,
+        readLater: readLater,
+        favorite: favorite ?? this.favorite,
+        createdAt: createdAt,
+      );
+
   /// Normalized form of [url] used to detect the same story arriving from
   /// different sources (e.g. an RSS item and a tweet linking to it). Null when
   /// there is no URL to compare.
   String? get urlKey => canonicalUrl(url);
+
+  /// [title] with Markdown syntax and bare URLs removed, for plain-text display
+  /// in the feed. Titles are derived from RSS/tweet/note bodies, so they may
+  /// carry links, emphasis markers, heading/quote markers or raw URLs.
+  String get displayTitle => plainTitle(title);
+
+  /// Strips Markdown markup and bare URLs from [raw], collapsing the leftover
+  /// whitespace. Falls back to the trimmed original if nothing readable remains
+  /// (e.g. a title that was only a link).
+  static String plainTitle(String raw) {
+    var text = raw
+        // [text](url) and ![alt](url) -> just the visible text / alt.
+        .replaceAllMapped(
+            RegExp(r'!?\[([^\]]*)\]\([^)]*\)'), (m) => m.group(1) ?? '')
+        // Bare URLs.
+        .replaceAll(RegExp(r'https?://\S+'), '')
+        // Leading heading (#) and blockquote (>) markers.
+        .replaceAll(RegExp(r'^\s*#{1,6}\s+'), '')
+        .replaceAll(RegExp(r'^\s*>\s?'), '')
+        // Emphasis / inline-code markers.
+        .replaceAll(RegExp(r'\*+|~~|`'), '')
+        // Collapse whitespace left behind by the removals.
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return text.isEmpty ? raw.trim() : text;
+  }
 
   Map<String, Object?> toMap() => {
         'id': id,
