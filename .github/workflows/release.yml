@@ -47,6 +47,20 @@ jobs:
 
       - run: flutter build apk --release
 
+      # Guard against the "invalid APK on e-ink tablets" regression: old/locked-down
+      # firmwares (iFLYTEK AINOTE, etc.) reject v2/v3-only APKs and need the legacy
+      # v1 (JAR) signature, which AGP drops by default when minSdk >= 24. See
+      # docs/android-release.md. Fail the release if v1 signing ever goes missing.
+      - name: Verify APK carries a v1 (JAR) signature
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort -V | tail -1)
+          "$apksigner" verify --verbose --min-sdk-version 24 "$apk" | tee /tmp/apksig.txt
+          if ! grep -q "Verified using v1 scheme (JAR signing): true" /tmp/apksig.txt; then
+            echo "::error::APK is missing the v1 (JAR) signature — e-ink firmwares will reject it as invalid. See docs/android-release.md"
+            exit 1
+          fi
+
       - name: Stage APK with a versioned name
         run: |
           mkdir -p dist

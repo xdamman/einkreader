@@ -25,7 +25,11 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        // Pin the target to Android 14 (API 34) instead of Flutter's bleeding-edge
+        // default (API 36 / Android 16). Locked-down e-ink firmwares (iFLYTEK
+        // AINOTE 2 runs Android 14) can reject an APK that targets an SDK newer
+        // than the device as "invalid". See docs/android-release.md.
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

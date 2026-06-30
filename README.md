@@ -16,6 +16,8 @@ Everything is downloaded while you're online and stored locally in SQLite, so th
 
 You may need to allow "install from unknown sources" the first time. The APK is built and published automatically by [GitHub Actions](.github/workflows/release.yml) on every tagged release, and is signed so that older/locked-down e-ink firmwares (which reject v2/v3-only signatures) accept it.
 
+> If an e-ink tablet refuses the APK as "invalid", see [`docs/android-release.md`](docs/android-release.md) — the diagnosis checklist (v1 signature, `targetSdk`, download integrity) for these picky firmwares.
+
 > iOS has no public build — Apple requires installs signed with your own Apple ID. Build it yourself with `flutter build ios` (see [Building](#building)).
 
 ## Screenshots
