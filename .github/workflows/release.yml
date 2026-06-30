@@ -55,7 +55,11 @@ jobs:
         run: |
           apk=build/app/outputs/flutter-apk/app-release.apk
           apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort -V | tail -1)
-          "$apksigner" verify --verbose --min-sdk-version 24 "$apk" | tee /tmp/apksig.txt
+          # Check at min-sdk 23: v2 signing only exists from API 24, so apksigner
+          # reports "v1 scheme: true" only when a real v1 (JAR) signature is present.
+          # (At --min-sdk-version 24+ it reports v1 as false even when present, since
+          # v2 supersedes it — which is exactly the case old e-ink firmwares can't use.)
+          "$apksigner" verify --verbose --min-sdk-version 23 "$apk" | tee /tmp/apksig.txt
           if ! grep -q "Verified using v1 scheme (JAR signing): true" /tmp/apksig.txt; then
             echo "::error::APK is missing the v1 (JAR) signature — e-ink firmwares will reject it as invalid. See docs/android-release.md"
             exit 1

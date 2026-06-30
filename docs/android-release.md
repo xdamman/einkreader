@@ -28,8 +28,11 @@ curl -sL -o einkreader.apk \
   "$(curl -sL https://api.github.com/repos/xdamman/einkreader/releases/latest \
      | grep browser_download_url | grep '\.apk' | head -1 | cut -d'"' -f4)"
 
-# 1. signatures — v1 MUST be true
-apksigner verify --verbose --min-sdk-version 24 einkreader.apk | grep "scheme"
+# 1. signatures — v1 MUST be true.
+# Use --min-sdk-version 23, NOT 24: APK Signature Scheme v2 starts at API 24, and
+# apksigner reports "v1 scheme: false" at min-sdk 24+ even when a v1 signature IS
+# present (it just isn't *needed* in that range). At 23 it actually checks v1.
+apksigner verify --verbose --min-sdk-version 23 einkreader.apk | grep "scheme"
 
 # 2. sdk levels + ABIs
 aapt dump badging einkreader.apk | grep -E "sdkVersion|targetSdk|native-code"
