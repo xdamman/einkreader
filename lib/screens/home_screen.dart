@@ -8,6 +8,7 @@ import '../services/app_log.dart';
 import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
 import '../widgets/highlight_list.dart';
+import 'add_source_screen.dart';
 import 'settings_screen.dart';
 import 'sources_screen.dart';
 
@@ -172,16 +173,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: syncing ? null : _sync,
           ),
           IconButton(
-            tooltip: 'Sources',
-            icon: const Icon(Icons.rss_feed),
-            onPressed: () async {
-              await Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const SourcesScreen()));
-              _load();
-            },
-          ),
-          IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () async {
@@ -237,10 +228,66 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Opens the source-management screen and refreshes on return.
+  Future<void> _openSources() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SourcesScreen()));
+    _load();
+  }
+
+  /// Bottom sheet offering the two ways to add a first source: connecting
+  /// Twitter/X (in Settings) or adding an RSS feed.
+  Future<void> _showAddSourceSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+              child: Text('Add a source',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.alternate_email),
+              title: const Text('Connect Twitter / X'),
+              subtitle: const Text('Your bookmarks as a feed'),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const SettingsScreen()));
+                _load();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.rss_feed),
+              title: const Text('Add RSS feed'),
+              subtitle: const Text('Paste a feed or website URL'),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const AddSourceScreen()));
+                _load();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Feed tab: a swipable source filter strip above the article list. Sources
   /// are ordered by unread count, then total items; tapping one filters the
-  /// feed to that source, with "All" showing everything.
+  /// feed to that source, with "All" showing everything. With no sources
+  /// configured yet, a centered call-to-action replaces the feed.
   Widget _buildFeed() {
+    if (_sourceTitles.isEmpty) {
+      return _EmptySourcesView(onAdd: _showAddSourceSheet);
+    }
     final total = <int, int>{};
     final unread = <int, int>{};
     for (final article in _articles) {
@@ -273,25 +320,70 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (sources.isNotEmpty)
-          _SourceFilterBar(
-            sources: sources,
-            selectedId: selectedId,
-            allUnread: allUnread,
-            syncingSourceIds: _syncingSourceIds,
-            onSelected: (id) => setState(() => _feedSourceId = id),
-          ),
+        _SourceFilterBar(
+          sources: sources,
+          selectedId: selectedId,
+          allUnread: allUnread,
+          syncingSourceIds: _syncingSourceIds,
+          onSelected: (id) => setState(() => _feedSourceId = id),
+          onEdit: _openSources,
+        ),
         Expanded(
           child: ArticleFeed(
             articles: articles,
             sourceTitles: _sourceTitles,
             emptyMessage:
-                'No articles yet.\n\nAdd sources with the feed '
-                'button above, then sync.',
+                'No articles yet.\n\nPull to sync, or tap the edit '
+                'button above to manage sources.',
             onChanged: _load,
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Centered call-to-action shown on the Feed tab when no sources exist yet.
+class _EmptySourcesView extends StatelessWidget {
+  final VoidCallback onAdd;
+
+  const _EmptySourcesView({required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'No sources yet',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Add a source to start filling your reader.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 15),
+            ),
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.add),
+              label: const Text(
+                'Add your first source',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                side: const BorderSide(width: 1.5),
+              ),
+              onPressed: onAdd,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -321,12 +413,17 @@ class _SourceFilterBar extends StatelessWidget {
   final Set<int> syncingSourceIds;
   final ValueChanged<int?> onSelected;
 
+  /// Opens source management. Pinned to the right of the strip so it stays
+  /// visible no matter how many sources scroll past under it.
+  final VoidCallback onEdit;
+
   const _SourceFilterBar({
     required this.sources,
     required this.selectedId,
     required this.allUnread,
     required this.syncingSourceIds,
     required this.onSelected,
+    required this.onEdit,
   });
 
   @override
@@ -337,27 +434,45 @@ class _SourceFilterBar extends StatelessWidget {
       ),
       child: SizedBox(
         height: 52,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
           children: [
-            _SourceChip(
-              label: 'All',
-              count: allUnread,
-              selected: selectedId == null,
-              syncing: false,
-              onTap: () => onSelected(null),
-            ),
-            for (final source in sources) ...[
-              const SizedBox(width: 8),
-              _SourceChip(
-                label: source.title,
-                count: source.unread,
-                selected: selectedId == source.id,
-                syncing: syncingSourceIds.contains(source.id),
-                onTap: () => onSelected(source.id),
+            Expanded(
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                children: [
+                  _SourceChip(
+                    label: 'All',
+                    count: allUnread,
+                    selected: selectedId == null,
+                    syncing: false,
+                    onTap: () => onSelected(null),
+                  ),
+                  for (final source in sources) ...[
+                    const SizedBox(width: 8),
+                    _SourceChip(
+                      label: source.title,
+                      count: source.unread,
+                      selected: selectedId == source.id,
+                      syncing: syncingSourceIds.contains(source.id),
+                      onTap: () => onSelected(source.id),
+                    ),
+                  ],
+                ],
               ),
-            ],
+            ),
+            // Pinned edit affordance for the source list, with a divider so it
+            // reads as separate from the scrolling chips.
+            const SizedBox(
+              height: 52,
+              child: VerticalDivider(width: 1, thickness: 1),
+            ),
+            IconButton(
+              tooltip: 'Edit sources',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: onEdit,
+            ),
           ],
         ),
       ),
