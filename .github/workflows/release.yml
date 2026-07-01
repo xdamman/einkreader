@@ -74,7 +74,9 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
-      - run: flutter build apk --release
+      # Build the sideload (github) flavor: it carries the in-app self-update
+      # and REQUEST_INSTALL_PACKAGES. A Play build would use --flavor play.
+      - run: flutter build apk --release --flavor github
 
       # Guard against the "invalid APK on e-ink tablets" regression: old/locked-down
       # firmwares (iFLYTEK AINOTE, etc.) reject v2/v3-only APKs and need the legacy
@@ -87,7 +89,7 @@ jobs:
           # devices that already have an older copy. See docs/android-release.md.
           EXPECTED_CERT_SHA256: 8fdf1f1042b9125a15a5e75102a977e1e003dd5772fc1beb3905d82ec9300d5b
         run: |
-          apk=build/app/outputs/flutter-apk/app-release.apk
+          apk=build/app/outputs/flutter-apk/app-github-release.apk
           apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort -V | tail -1)
           # Check at min-sdk 23: v2 signing only exists from API 24, so apksigner
           # reports "v1 scheme: true" only when a real v1 (JAR) signature is present.
@@ -110,7 +112,7 @@ jobs:
       # docs/android-release.md.
       - name: Verify native libs use legacy (compressed) packaging
         run: |
-          apk=build/app/outputs/flutter-apk/app-release.apk
+          apk=build/app/outputs/flutter-apk/app-github-release.apk
           aapt=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt | sort -V | tail -1)
           extract=$("$aapt" dump xmltree "$apk" AndroidManifest.xml | grep -i extractNativeLibs || true)
           echo "manifest: ${extract:-<extractNativeLibs absent>}"
@@ -120,10 +122,21 @@ jobs:
             exit 1
           fi
 
+      # The sideload (github) flavor must carry REQUEST_INSTALL_PACKAGES so the
+      # in-app self-update can launch the installer. See build_config.dart.
+      - name: Verify sideload build has the install permission
+        run: |
+          apk=build/app/outputs/flutter-apk/app-github-release.apk
+          aapt=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt | sort -V | tail -1)
+          if ! "$aapt" dump permissions "$apk" | grep -q "REQUEST_INSTALL_PACKAGES"; then
+            echo "::error::github flavor is missing REQUEST_INSTALL_PACKAGES — in-app update can't install. See lib/services/build_config.dart"
+            exit 1
+          fi
+
       - name: Stage APK with a versioned name
         run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk \
+          cp build/app/outputs/flutter-apk/app-github-release.apk \
             "dist/einkreader-${{ github.ref_name }}.apk"
 
       - uses: actions/upload-artifact@v4

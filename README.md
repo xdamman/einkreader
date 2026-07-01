@@ -56,11 +56,27 @@ Long-press to select any text in the reader and choose **Highlight** in the sele
 
 ```bash
 flutter pub get
-flutter run            # on a connected device/simulator
-flutter build apk      # Android
-flutter build ios      # iOS (requires Xcode + signing)
-flutter test           # unit tests for parsers/extractor
+flutter run --flavor github          # on a connected device/simulator
+flutter build apk --flavor github    # Android (sideload build)
+flutter build ios                    # iOS (requires Xcode + signing)
+flutter test                         # unit tests for parsers/extractor
 ```
+
+### Build flavors
+
+Android has two flavors:
+
+- **`github`** — the sideload build published on Releases. It includes the
+  in-app self-update (Settings → Developer → "Update available"), which needs
+  the `REQUEST_INSTALL_PACKAGES` permission.
+- **`play`** — for the Play Store. It omits the self-update and that permission
+  (the store handles updates), so it passes review cleanly:
+  `flutter build appbundle --flavor play`.
+
+A plain `flutter build apk` (no `--flavor`) will fail — pick a flavor. The
+active flavor is exposed to Dart as `FLUTTER_APP_FLAVOR`; see
+[`lib/services/build_config.dart`](lib/services/build_config.dart) and
+[`docs/android-release.md`](docs/android-release.md).
 
 ## Connecting Twitter / X
 

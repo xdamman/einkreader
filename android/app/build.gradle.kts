@@ -90,6 +90,18 @@ android {
                 signingConfigs.getByName("debug")
         }
     }
+
+    // Distribution channels. Same app id; they differ only in whether the
+    // in-app self-update ships. The `github` (sideload) flavor adds the
+    // REQUEST_INSTALL_PACKAGES permission via src/github/AndroidManifest.xml;
+    // `play` omits it so a Play Store build stays clean. Build with
+    // `flutter build apk --flavor github` (or `--flavor play`). The flavor name
+    // is exposed to Dart as FLUTTER_APP_FLAVOR (see build_config.dart).
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("github") { dimension = "distribution" }
+        create("play") { dimension = "distribution" }
+    }
 }
 
 flutter {

@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// Result of checking GitHub for a newer release.
 class UpdateInfo {
@@ -74,6 +76,39 @@ class UpdateService {
           'https://github.com/$repo/releases/latest',
       updateAvailable: isVersionNewer(latest, current),
     );
+  }
+
+  /// Streams the release APK to the cache directory, reporting fractional
+  /// progress (0..1), and returns the downloaded file path. Only used by
+  /// sideload builds (see kSelfUpdateSupported); the caller then hands the file
+  /// to the system installer.
+  Future<String> downloadApk(
+    UpdateInfo info, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final url = info.apkUrl;
+    if (url == null) throw StateError('This release has no APK asset');
+
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/einkreader-${info.latestVersion}.apk');
+
+    final response = await _client.send(http.Request('GET', Uri.parse(url)));
+    if (response.statusCode != 200) {
+      throw Exception('Download failed (HTTP ${response.statusCode})');
+    }
+    final total = response.contentLength ?? 0;
+    final sink = file.openWrite();
+    try {
+      var received = 0;
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total > 0) onProgress?.call(received / total);
+      }
+    } finally {
+      await sink.close();
+    }
+    return file.path;
   }
 }
 

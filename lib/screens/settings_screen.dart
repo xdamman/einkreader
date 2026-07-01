@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
+import '../services/build_config.dart';
 import '../services/nostr_service.dart';
 import '../services/sync_service.dart';
 import '../services/update_service.dart';
@@ -36,6 +38,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _updates = widget.updateService ?? UpdateService();
   UpdateInfo? _update;
   bool _checkingUpdate = false;
+
+  /// Download progress as a whole percent while installing an update; null when
+  /// not downloading. Updated in 5% steps so e-ink repaints stay discrete.
+  int? _downloadPct;
 
   @override
   void initState() {
@@ -80,10 +86,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _downloadUpdate() async {
+  /// Opens the release/APK URL in the browser (fallback when in-app install
+  /// isn't available, e.g. no apk asset).
+  Future<void> _openInBrowser() async {
     final url = _update?.apkUrl ?? _update?.releaseUrl;
     if (url == null) return;
     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  /// Sideload-only: download the APK (with discrete progress) and hand it to the
+  /// system installer, which prompts the user to confirm the update.
+  Future<void> _downloadAndInstall() async {
+    final update = _update;
+    if (update == null || _downloadPct != null) return;
+    setState(() => _downloadPct = 0);
+    try {
+      final path = await _updates.downloadApk(update, onProgress: (p) {
+        final pct = (p * 100).floor();
+        // Only repaint on a new 5% step — keeps e-ink refreshes discrete.
+        if (_downloadPct == null || pct >= _downloadPct! + 5 || pct == 100) {
+          setState(() => _downloadPct = pct);
+        }
+      });
+      final result = await OpenFilex.open(path);
+      if (result.type != ResultType.done && mounted) {
+        _toast('Could not open installer: ${result.message}');
+      }
+    } catch (e) {
+      if (mounted) _toast('Update failed: $e');
+    } finally {
+      if (mounted) setState(() => _downloadPct = null);
+    }
   }
 
   Widget _buildUpdateTile() {
@@ -113,25 +146,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       );
     }
+
+    final header = Text(
+      'Update available: v${update.latestVersion}  '
+      '(installed v${update.currentVersion})',
+      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+    );
+
+    // Play Store build: the store handles updates; don't offer a sideload path.
+    if (!kSelfUpdateSupported) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          const SizedBox(height: 4),
+          const Text('Update through the Play Store.',
+              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+        ],
+      );
+    }
+
+    if (_downloadPct != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          const SizedBox(height: 8),
+          Text('Downloading… $_downloadPct%',
+              style: const TextStyle(fontSize: 14)),
+        ],
+      );
+    }
+
+    final canInstall = update.apkUrl != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Update available: v${update.latestVersion}  '
-          '(installed v${update.currentVersion})',
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
+        header,
         const SizedBox(height: 8),
         OutlinedButton.icon(
           icon: const Icon(Icons.download),
-          label: Text(
-              update.apkUrl != null ? 'Download APK' : 'Open release page'),
-          onPressed: _downloadUpdate,
+          label: Text(canInstall ? 'Download & install' : 'Open release page'),
+          onPressed: canInstall ? _downloadAndInstall : _openInBrowser,
         ),
         const SizedBox(height: 4),
-        const Text(
-          'Opens GitHub in the browser; tap the file to install over this app.',
-          style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+        Text(
+          canInstall
+              ? 'Downloads and launches the installer; you confirm the update.'
+              : 'Opens the release page in the browser.',
+          style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
         ),
       ],
     );

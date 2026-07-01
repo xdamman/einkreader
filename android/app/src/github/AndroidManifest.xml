@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Sideload-only: lets the app hand a downloaded APK to the system
+         installer for the in-app self-update. Deliberately absent from the
+         `play` flavor — the Play Store handles updates and rejects this
+         permission. See lib/services/build_config.dart. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+</manifest>

@@ -91,6 +91,31 @@ packaging {
 This also roughly halves the APK (compressed libs): our build went 58.6 MB → 26.7
 MB. CI fails the release if `extractNativeLibs` is ever not-true.
 
+## Build flavors: `github` (sideload) vs `play`
+
+The app builds in two flavors (see `android/app/build.gradle.kts`):
+
+- **`github`** — the sideload build published on Releases. Its
+  `src/github/AndroidManifest.xml` adds `REQUEST_INSTALL_PACKAGES` so the in-app
+  self-update (Settings → Developer) can hand a downloaded APK to the installer.
+- **`play`** — for the Play Store. It omits that permission and the self-update
+  code path (gated by `kSelfUpdateSupported` in `lib/services/build_config.dart`,
+  which reads the auto-injected `FLUTTER_APP_FLAVOR`).
+
+Build the sideload APK with `flutter build apk --flavor github` (CI does this)
+and the store bundle with `flutter build appbundle --flavor play`. A plain
+`flutter build apk` with no flavor fails by design.
+
+Verify the split — the install permission must be present in `github` and
+**absent** in `play`:
+
+```bash
+aapt dump permissions app-github-release.apk | grep REQUEST_INSTALL_PACKAGES  # present
+aapt dump permissions app-play-release.apk   | grep REQUEST_INSTALL_PACKAGES  # nothing
+```
+
+CI fails the release if the sideload build is missing that permission.
+
 ## Cause 1 — missing v1 (JAR) signature  *(the original incident)*
 
 Android Gradle Plugin **drops the v1 signature by default when `minSdk >= 24`**,
