@@ -219,12 +219,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
           ),
           IconButton(
             tooltip: 'Reload & reprocess',
+            // Static "…" while working; e-ink can't render a smooth spinner.
             icon: _reprocessing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const Icon(Icons.more_horiz)
                 : const Icon(Icons.refresh),
             onPressed: _reprocessing ? null : _reprocess,
           ),

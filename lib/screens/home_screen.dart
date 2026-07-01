@@ -158,20 +158,27 @@ class _HomeScreenState extends State<HomeScreen> {
             : _HomeTab.values.where((tab) => tab != _HomeTab.debug);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reader'),
+        title: const Text('eInk Reader'),
         actions: [
-          IconButton(
-            tooltip: 'Update all sources',
-            icon:
-                syncing
-                    ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                    : const Icon(Icons.sync),
-            onPressed: syncing ? null : _sync,
-          ),
+          // A static "Syncing…" label instead of a spinning indicator: e-ink
+          // can't render continuous rotation without stutter/ghosting, so we
+          // show discrete state that repaints only when it changes.
+          if (syncing)
+            const Padding(
+              padding: EdgeInsets.only(right: 12),
+              child: Center(
+                child: Text(
+                  'Syncing…',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              tooltip: 'Update all sources',
+              icon: const Icon(Icons.sync),
+              onPressed: _sync,
+            ),
           IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
@@ -524,15 +531,10 @@ class _SourceChip extends StatelessWidget {
               ),
             ),
             if (syncing) ...[
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 13,
-                height: 13,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: foreground,
-                ),
-              ),
+              const SizedBox(width: 6),
+              // Static "…" instead of a spinner — a single e-ink repaint when
+              // this source starts/finishes syncing, no continuous animation.
+              Icon(Icons.more_horiz, size: 18, color: foreground),
             ] else if (count > 0) ...[
               const SizedBox(width: 6),
               Text(
