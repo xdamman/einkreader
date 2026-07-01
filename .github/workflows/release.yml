@@ -103,6 +103,23 @@ jobs:
             exit 1
           fi
 
+      # Guard the native-lib packaging: newer Flutter/AGP stores .so uncompressed
+      # and page-aligned (extractNativeLibs=false), which the iFLYTEK AINOTE parser
+      # rejects as "package appears to be invalid". build.gradle.kts forces
+      # useLegacyPackaging=true; fail the release if that regresses. See
+      # docs/android-release.md.
+      - name: Verify native libs use legacy (compressed) packaging
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          aapt=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt | sort -V | tail -1)
+          extract=$("$aapt" dump xmltree "$apk" AndroidManifest.xml | grep -i extractNativeLibs || true)
+          echo "manifest: ${extract:-<extractNativeLibs absent>}"
+          # 0xffffffff == true. Absent or 0x0 means the modern layout e-ink installers reject.
+          if ! echo "$extract" | grep -q "0xffffffff"; then
+            echo "::error::extractNativeLibs is not true — locked-down e-ink installers will reject this APK as invalid. Set useLegacyPackaging=true. See docs/android-release.md"
+            exit 1
+          fi
+
       - name: Stage APK with a versioned name
         run: |
           mkdir -p dist

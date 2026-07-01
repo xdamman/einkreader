@@ -8,14 +8,18 @@ re-diagnose it from scratch every time.
 
 ## TL;DR — what a valid APK for these devices needs
 
-1. **A v1 (JAR) signature**, in addition to v2/v3. ← the original bug, now fixed
-   in `android/app/build.gradle.kts` and guarded in CI.
-2. A `targetSdkVersion` the firmware actually knows. Targeting an SDK *newer*
-   than the device's Android version can trip an OEM installer's parser.
-3. An ABI the device supports — we ship `arm64-v8a` + `armeabi-v7a` + `x86_64`,
-   which covers every e-ink tablet we've seen.
-4. To be downloaded **intact** onto the device (the most boring cause, and a
-   real one for a ~60 MB file pulled through a cheap built-in browser).
+1. **Legacy native-lib packaging** (`useLegacyPackaging = true` → compressed `.so`
+   + `extractNativeLibs=true`). ← **the cause of the AINOTE 2 failure.** Modern
+   Flutter/AGP stores native libs uncompressed and page-aligned; the AINOTE
+   installer rejects that layout as "package appears to be invalid".
+2. **A stable signing key** — the same key for every build. A per-build key makes
+   the device reject upgrades over an existing copy.
+3. **A v1 (JAR) signature**, in addition to v2/v3. ← the original (first) bug.
+4. A `targetSdkVersion` the firmware knows (we pin 34 = Android 14).
+5. An ABI the device supports — we ship `arm64-v8a` + `armeabi-v7a` + `x86_64`.
+6. To be downloaded **intact** onto the device.
+
+All six are enforced in `android/app/build.gradle.kts` + guarded in `release.yml`.
 
 ## How to diagnose, fast
 
@@ -52,6 +56,40 @@ sdkVersion:'24'
 targetSdkVersion:'34'
 native-code: 'arm64-v8a' 'armeabi-v7a' 'x86_64'
 ```
+
+## Cause 0 — uncompressed native libs  *(what actually broke the AINOTE 2)*
+
+The symptom is **"App not installed as package appears to be invalid"** — a
+*parse* failure, and it persists no matter the signing key, `targetSdk`,
+`compileSdk`, or download method. That combination points here.
+
+Newer Flutter/AGP defaults to `useLegacyPackaging = false`: native `.so`
+libraries are stored **uncompressed and page-aligned** in the APK
+(`android:extractNativeLibs="false"`). Stock Android handles this; the AINOTE 2's
+locked-down `PackageParser` does not, and rejects the whole APK as invalid. Older
+Flutter defaulted to the legacy (compressed) layout, which is why an earlier beta
+installed and later builds didn't.
+
+Confirm it on a suspect APK — the native libs should be `Defl` (compressed), not
+`Stored`, and `extractNativeLibs` should be true:
+
+```bash
+unzip -v app.apk | grep 'lib/.*\.so'                              # want Defl, not Stored
+aapt dump xmltree app.apk AndroidManifest.xml | grep extractNativeLibs   # want 0xffffffff
+```
+
+Fix, in `android/app/build.gradle.kts` (inside `android { }`):
+
+```kotlin
+packaging {
+    jniLibs {
+        useLegacyPackaging = true
+    }
+}
+```
+
+This also roughly halves the APK (compressed libs): our build went 58.6 MB → 26.7
+MB. CI fails the release if `extractNativeLibs` is ever not-true.
 
 ## Cause 1 — missing v1 (JAR) signature  *(the original incident)*
 

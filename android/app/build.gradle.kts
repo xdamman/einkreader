@@ -33,6 +33,16 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    // Some locked-down e-ink installers (iFLYTEK AINOTE) reject the modern
+    // uncompressed/page-aligned native-lib layout as "package appears to be
+    // invalid". Force the legacy layout: compressed .so + extractNativeLibs=true.
+    // This was THE fix for the AINOTE 2 install failure. See docs/android-release.md.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.xdamman.einkreader"
