@@ -4,6 +4,11 @@
 *.pyc
 *.swp
 .DS_Store
+
+# Signing material — CI writes these from secrets; never commit the private key.
+/android/key.properties
+*.keystore
+*.jks
 .atom/
 .build/
 .buildlog/

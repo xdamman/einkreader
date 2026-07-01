@@ -40,6 +40,35 @@ jobs:
 
       - run: flutter pub get
 
+      # Sign releases with a STABLE key stored in GitHub secrets, not the random
+      # debug key Gradle generates per-runner. A per-runner key makes every build
+      # a different signer, so the device rejects the install as "invalid" (key
+      # mismatch with the already-installed copy). The secret holds the project's
+      # debug keystore so local and CI builds share one identity. See
+      # docs/android-release.md. On a tag build the secret is required.
+      - name: Configure release signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — a tagged release must be signed with the stable key. See docs/android-release.md"
+              exit 1
+            fi
+            echo "No keystore secret set; falling back to the debug key for this non-release build."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 --decode > android/app/release.keystore
+          cat > android/key.properties <<EOF
+          storeFile=release.keystore
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
       # Gate the release on a green analyzer + test suite (the screenshot
       # golden tests are skipped unless --dart-define=screenshots=true).
       - run: flutter analyze
@@ -51,7 +80,12 @@ jobs:
       # firmwares (iFLYTEK AINOTE, etc.) reject v2/v3-only APKs and need the legacy
       # v1 (JAR) signature, which AGP drops by default when minSdk >= 24. See
       # docs/android-release.md. Fail the release if v1 signing ever goes missing.
-      - name: Verify APK carries a v1 (JAR) signature
+      - name: Verify APK signature (v1 present + expected key)
+        env:
+          # SHA-256 of the einkreader signing certificate. The release MUST be
+          # signed with this exact key or installs are rejected as "invalid" on
+          # devices that already have an older copy. See docs/android-release.md.
+          EXPECTED_CERT_SHA256: 8fdf1f1042b9125a15a5e75102a977e1e003dd5772fc1beb3905d82ec9300d5b
         run: |
           apk=build/app/outputs/flutter-apk/app-release.apk
           apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort -V | tail -1)
@@ -59,9 +93,13 @@ jobs:
           # reports "v1 scheme: true" only when a real v1 (JAR) signature is present.
           # (At --min-sdk-version 24+ it reports v1 as false even when present, since
           # v2 supersedes it — which is exactly the case old e-ink firmwares can't use.)
-          "$apksigner" verify --verbose --min-sdk-version 23 "$apk" | tee /tmp/apksig.txt
+          "$apksigner" verify --verbose --print-certs --min-sdk-version 23 "$apk" | tee /tmp/apksig.txt
           if ! grep -q "Verified using v1 scheme (JAR signing): true" /tmp/apksig.txt; then
             echo "::error::APK is missing the v1 (JAR) signature — e-ink firmwares will reject it as invalid. See docs/android-release.md"
+            exit 1
+          fi
+          if ! grep -qi "certificate SHA-256 digest: $EXPECTED_CERT_SHA256" /tmp/apksig.txt; then
+            echo "::error::APK is signed with an unexpected key (not $EXPECTED_CERT_SHA256). Devices with an older copy will reject the install. Check the ANDROID_KEYSTORE_* secrets. See docs/android-release.md"
             exit 1
           fi
 

@@ -100,7 +100,52 @@ defaultConfig {
 Leave `minSdk` low (24) — that only sets the *floor*, so it never hurts
 compatibility.
 
-## Cause 3 — corrupt / truncated download on the device
+## Cause 3 — release signed with a different key each build  *(the real recurrence)*
+
+If the tablet already has an older copy of the app installed, Android refuses to
+install a new APK **signed by a different key** — surfaced on locked-down
+firmwares as a generic "invalid APK". This is easy to trigger by accident:
+
+- a **local** `flutter build apk` signs with *your* `~/.android/debug.keystore`,
+- but **CI has no keystore**, so Gradle auto-generates a **fresh random debug
+  keystore on every runner** — a different signer each time.
+
+So the first (local) build installs fine, and every GitHub build afterward is
+rejected. Diagnose by comparing the signing certificate of the working APK and
+the failing one:
+
+```bash
+apksigner verify --print-certs some.apk | grep "SHA-256"
+```
+
+Different `SHA-256` digests ⇒ different keys ⇒ this is your problem.
+
+**Fix:** sign every build — local and CI — with **one stable key**. We store the
+project's debug keystore as GitHub secrets; CI decodes it into
+`android/key.properties` + `android/app/release.keystore` (both git-ignored), and
+`android/app/build.gradle.kts` uses it for the `release` build type, falling back
+to the debug key locally. Because the secret holds the *same* debug keystore your
+machine uses, local and CI builds share one identity and upgrade cleanly.
+
+The signing job in `release.yml` fails a tagged build if the keystore secret is
+missing, and the verify step fails if the APK isn't signed with the expected
+certificate `SHA-256` (`8fdf1f…`) — so a key regression can't ship silently.
+
+### Setting up the signing secrets (one-time)
+
+```bash
+base64 -i ~/.android/debug.keystore | pbcopy   # keystore, base64-encoded
+gh secret set ANDROID_KEYSTORE_BASE64 --repo xdamman/einkreader   # paste it
+gh secret set ANDROID_KEYSTORE_PASSWORD --repo xdamman/einkreader --body android
+gh secret set ANDROID_KEY_ALIAS       --repo xdamman/einkreader --body androiddebugkey
+gh secret set ANDROID_KEY_PASSWORD    --repo xdamman/einkreader --body android
+```
+
+(The debug keystore's password is the well-known `android` / alias
+`androiddebugkey` — no real secrecy, but keeping the key file out of the public
+repo is why it lives in a secret rather than being committed.)
+
+## Cause 4 — corrupt / truncated download on the device
 
 A ~60 MB file pulled through a basic e-ink browser sometimes lands truncated, or
 gets saved as `…apk.bin` / `…apk.1`. Symptoms are identical to a bad signature.
