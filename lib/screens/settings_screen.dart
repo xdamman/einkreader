@@ -2,16 +2,21 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
 import '../services/nostr_service.dart';
 import '../services/sync_service.dart';
+import '../services/update_service.dart';
 
 /// Account connections: Twitter (OAuth) and Nostr (public npub only).
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  /// Injectable for tests; defaults to the real GitHub-backed checker.
+  final UpdateService? updateService;
+
+  const SettingsScreen({super.key, this.updateService});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -27,6 +32,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _twitterUsername;
   bool _busy = false;
   bool _developerMode = false;
+
+  late final _updates = widget.updateService ?? UpdateService();
+  UpdateInfo? _update;
+  bool _checkingUpdate = false;
 
   @override
   void initState() {
@@ -54,6 +63,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _npubController.text = prefs.getString('nostr_npub') ?? '';
       _developerMode = developerMode;
     });
+    if (developerMode && _update == null) _checkForUpdate();
+  }
+
+  Future<void> _checkForUpdate() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final update = await _updates.check();
+      if (!mounted) return;
+      setState(() => _update = update);
+    } catch (e) {
+      if (mounted) _toast('Update check failed: $e');
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
+  }
+
+  Future<void> _downloadUpdate() async {
+    final url = _update?.apkUrl ?? _update?.releaseUrl;
+    if (url == null) return;
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  Widget _buildUpdateTile() {
+    if (_checkingUpdate) {
+      return const Text('Checking for updates…',
+          style: TextStyle(fontSize: 14));
+    }
+    final update = _update;
+    if (update == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton(
+          onPressed: _checkForUpdate,
+          child: const Text('Check for updates'),
+        ),
+      );
+    }
+    if (!update.updateAvailable) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text('Up to date (v${update.currentVersion})',
+                style: const TextStyle(fontSize: 14)),
+          ),
+          TextButton(
+              onPressed: _checkForUpdate, child: const Text('Check again')),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Update available: v${update.latestVersion}  '
+          '(installed v${update.currentVersion})',
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.download),
+          label: Text(
+              update.apkUrl != null ? 'Download APK' : 'Open release page'),
+          onPressed: _downloadUpdate,
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Opens GitHub in the browser; tap the file to install over this app.',
+          style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+        ),
+      ],
+    );
   }
 
   void _toast(String message) {
@@ -234,8 +315,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) async {
                 setState(() => _developerMode = value);
                 await AppLogService.instance.setDeveloperModeEnabled(value);
+                if (value) _checkForUpdate();
               },
             ),
+            if (_developerMode) ...[
+              const SizedBox(height: 8),
+              _buildUpdateTile(),
+            ],
             const SizedBox(height: 24),
             const Divider(),
             const SizedBox(height: 16),

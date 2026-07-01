@@ -23,6 +23,7 @@ dependencies:
   crypto: ^3.0.6
   shared_preferences: ^2.5.2
   url_launcher: ^6.3.1
+  package_info_plus: ^8.0.0
   intl: ^0.20.2
   # Decode/resize downloaded images for offline storage.
   image: ^4.3.0
