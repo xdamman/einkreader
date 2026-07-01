@@ -61,6 +61,9 @@ class ArchiveStore {
     return dir.path;
   }
 
+  /// Absolute path to the offline archive directory, for backup/restore.
+  Future<String> baseDir() => _base();
+
   /// Initializes the cached base path so [localFile] works on a cold start.
   Future<void> ensureInitialized() async {
     await _base();

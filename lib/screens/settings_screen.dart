@@ -1,13 +1,17 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
+import '../services/backup_service.dart';
 import '../services/build_config.dart';
 import '../services/nostr_service.dart';
 import '../services/sync_service.dart';
@@ -42,6 +46,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Download progress as a whole percent while installing an update; null when
   /// not downloading. Updated in 5% steps so e-ink repaints stay discrete.
   int? _downloadPct;
+
+  final _backupService = BackupService();
+  bool _backupBusy = false;
 
   @override
   void initState() {
@@ -116,6 +123,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) _toast('Update failed: $e');
     } finally {
       if (mounted) setState(() => _downloadPct = null);
+    }
+  }
+
+  Future<void> _backup() async {
+    setState(() => _backupBusy = true);
+    try {
+      final file = await _backupService.createBackup(
+          nowMs: DateTime.now().millisecondsSinceEpoch);
+      if (!mounted) return;
+      await Share.shareXFiles([XFile(file.path)],
+          subject: 'einkreader backup', text: 'einkreader library backup');
+    } catch (e) {
+      if (mounted) _toast('Backup failed: $e');
+    } finally {
+      if (mounted) setState(() => _backupBusy = false);
+    }
+  }
+
+  Future<void> _restore() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['zip'],
+    );
+    final path = picked?.files.single.path;
+    if (path == null) return;
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        title: const Text('Restore backup?'),
+        content: const Text(
+            'This replaces your current library — feeds, articles, highlights '
+            'and downloaded content — with the backup. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _backupBusy = true);
+    try {
+      await _backupService.restoreBackup(File(path));
+      if (!mounted) return;
+      await _load();
+      _toast('Backup restored');
+    } catch (e) {
+      if (mounted) _toast('Restore failed: $e');
+    } finally {
+      if (mounted) setState(() => _backupBusy = false);
     }
   }
 
@@ -364,6 +428,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             OutlinedButton(
               onPressed: _saveNostr,
               child: const Text('Save Nostr sources'),
+            ),
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+            const Text('Backup', style: sectionStyle),
+            const SizedBox(height: 8),
+            const Text(
+              'Save your whole library (feeds, articles, highlights and '
+              'downloaded content) to a file you can keep in Google Drive, then '
+              'restore it after reinstalling.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.backup_outlined),
+              label: Text(_backupBusy ? 'Preparing…' : 'Back up now'),
+              onPressed: _backupBusy ? null : _backup,
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.restore),
+              label: Text(_backupBusy ? 'Restoring…' : 'Restore from backup'),
+              onPressed: _backupBusy ? null : _restore,
             ),
             const SizedBox(height: 32),
             const Divider(),

@@ -25,6 +25,8 @@ dependencies:
   url_launcher: ^6.3.1
   package_info_plus: ^8.0.0
   open_filex: ^4.5.0
+  archive: ^4.0.0
+  file_picker: ^8.1.0
   intl: ^0.20.2
   # Decode/resize downloaded images for offline storage.
   image: ^4.3.0

@@ -40,6 +40,24 @@ class AppDatabase {
     _db = null;
   }
 
+  /// Absolute path to the SQLite file, for backup/restore.
+  Future<String> databaseFile() async =>
+      debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
+
+  /// Folds the write-ahead log back into the main file so a plain file copy is
+  /// a complete, consistent snapshot (used before backing up).
+  Future<void> checkpoint() async {
+    final db = await database;
+    await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+  }
+
+  /// Closes the open connection; the next access reopens it. Used around a
+  /// restore, which swaps the underlying file out from under us.
+  Future<void> close() async {
+    await _db?.close();
+    _db = null;
+  }
+
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute(

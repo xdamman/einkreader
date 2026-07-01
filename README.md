@@ -78,6 +78,15 @@ active flavor is exposed to Dart as `FLUTTER_APP_FLAVOR`; see
 [`lib/services/build_config.dart`](lib/services/build_config.dart) and
 [`docs/android-release.md`](docs/android-release.md).
 
+## Backup & restore
+
+Settings → **Backup** exports your whole library — the SQLite database plus the
+offline `archive/` directory (article text and downloaded images) — as a single
+`.zip`. "Back up now" hands it to the system share sheet so you can keep it in
+Google Drive (or anywhere); "Restore from backup" picks that file and replaces
+the local library, so an uninstall/reinstall doesn't lose anything. (Automatic
+Drive sync can be layered on later.)
+
 ## Connecting Twitter / X
 
 The app uses OAuth 2.0 with PKCE (a *public* client — no secret is embedded or needed). You bring your own client ID:
