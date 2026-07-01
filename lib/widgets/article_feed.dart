@@ -47,6 +47,10 @@ class ArticleFeed extends StatelessWidget {
       );
     }
 
+    // Ordered ids of the whole (filtered) feed, so the article screen can swipe
+    // to the next/previous one.
+    final articleIds = [for (final a in articles) a.id!];
+
     // Interleave day headers with the articles of that day.
     final entries = <Object>[];
     DateTime? currentDay;
@@ -76,6 +80,7 @@ class ArticleFeed extends StatelessWidget {
         return _ArticleTile(
           article: entry as Article,
           sourceTitle: sourceTitles[(entry).sourceId],
+          articleIds: articleIds,
           rowAction: rowAction,
           onChanged: onChanged,
         );
@@ -121,12 +126,16 @@ class _DayHeader extends StatelessWidget {
 class _ArticleTile extends StatelessWidget {
   final Article article;
   final String? sourceTitle;
+
+  /// Ordered ids of the feed this tile belongs to, for swipe navigation.
+  final List<int> articleIds;
   final FeedRowAction rowAction;
   final VoidCallback onChanged;
 
   const _ArticleTile({
     required this.article,
     this.sourceTitle,
+    required this.articleIds,
     required this.rowAction,
     required this.onChanged,
   });
@@ -188,7 +197,11 @@ class _ArticleTile extends StatelessWidget {
       trailing: _actionButton(),
       onTap: () async {
         await Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => ArticleScreen(articleId: article.id!)));
+            builder: (_) => ArticleScreen(
+                  articleId: article.id!,
+                  articleIds: articleIds,
+                  initialIndex: articleIds.indexOf(article.id!),
+                )));
         onChanged();
       },
     );

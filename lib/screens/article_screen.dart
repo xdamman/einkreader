@@ -16,11 +16,19 @@ import '../widgets/markdown_view.dart';
 class ArticleScreen extends StatefulWidget {
   final int articleId;
 
+  /// The active feed's article ids in display order, enabling swipe navigation
+  /// between them. Null (e.g. opened from Highlights) means a single article.
+  final List<int>? articleIds;
+
+  /// Position of [articleId] within [articleIds]; swiping left from here pops
+  /// back to the feed rather than to an earlier article.
+  final int? initialIndex;
+
   /// Optional highlight to reveal context for (from the Highlights screen).
   final String? focusHighlight;
 
   const ArticleScreen({super.key, required this.articleId,
-      this.focusHighlight});
+      this.articleIds, this.initialIndex, this.focusHighlight});
 
   @override
   State<ArticleScreen> createState() => _ArticleScreenState();
@@ -34,15 +42,27 @@ class _ArticleScreenState extends State<ArticleScreen> {
   double _fontSize = 18;
   bool _reprocessing = false;
 
+  /// Ordered feed ids and where we are in them. [_startIndex] is the article
+  /// the user opened; swiping left from it returns to the feed.
+  late final List<int> _ids;
+  late final int _startIndex;
+  late int _index;
+
+  int get _currentId => _ids[_index];
+
   @override
   void initState() {
     super.initState();
+    _ids = widget.articleIds ?? [widget.articleId];
+    final at = widget.initialIndex ?? _ids.indexOf(widget.articleId);
+    _startIndex = (at < 0 || at >= _ids.length) ? 0 : at;
+    _index = _startIndex;
     _load();
   }
 
   Future<void> _load() async {
-    final article = await _db.getArticle(widget.articleId);
-    final highlights = await _db.getHighlights(articleId: widget.articleId);
+    final article = await _db.getArticle(_currentId);
+    final highlights = await _db.getHighlights(articleId: _currentId);
     if (!mounted) return;
     setState(() {
       _article = article;
@@ -50,6 +70,58 @@ class _ArticleScreenState extends State<ArticleScreen> {
     });
     if (article != null && article.read == 0) {
       await _db.markArticleRead(article.id!);
+    }
+  }
+
+  /// Swipe right → next article in the feed (no-op past the end).
+  void _goToNext() {
+    if (_index >= _ids.length - 1) return;
+    setState(() => _index++);
+    _load();
+  }
+
+  /// Swipe left → previous article, or back to the feed when we're at the
+  /// article that was first opened.
+  void _goToPreviousOrBack() {
+    if (_index <= _startIndex) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    setState(() => _index--);
+    _load();
+  }
+
+  // Swipe detection via raw pointer events (a Listener), not a GestureDetector:
+  // the reader's SelectionArea claims horizontal drags in the gesture arena, so
+  // a competing recognizer never fires. A Listener observes pointers passively
+  // without disturbing selection or scrolling.
+  Offset? _dragStart;
+  Duration? _dragStartTime;
+
+  void _onPointerDown(PointerDownEvent event) {
+    _dragStart = event.position;
+    _dragStartTime = event.timeStamp;
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    final start = _dragStart;
+    final startTime = _dragStartTime;
+    _dragStart = null;
+    _dragStartTime = null;
+    if (start == null || startTime == null) return;
+
+    final dx = event.position.dx - start.dx;
+    final dy = event.position.dy - start.dy;
+    final ms = (event.timeStamp - startTime).inMilliseconds;
+    final speed = ms > 0 ? dx.abs() / ms * 1000 : double.infinity; // px/s
+
+    // A deliberate horizontal fling: far enough, clearly horizontal, and quick
+    // enough to not be a scroll or a slow text-selection drag.
+    if (dx.abs() < 60 || dx.abs() < dy.abs() * 1.5 || speed < 300) return;
+    if (dx > 0) {
+      _goToNext(); // swipe right
+    } else {
+      _goToPreviousOrBack(); // swipe left
     }
   }
 
@@ -72,7 +144,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
       text: text,
       createdAt: DateTime.now().millisecondsSinceEpoch,
     ));
-    final highlights = await _db.getHighlights(articleId: widget.articleId);
+    final highlights = await _db.getHighlights(articleId: _currentId);
     if (!mounted) return;
     setState(() => _highlights = highlights);
     // A highlighted article is worth keeping: copy it to favorites and refresh
@@ -90,7 +162,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     setState(() => _reprocessing = true);
     String message = 'Article reprocessed';
     try {
-      await SyncService.instance.reprocessArticle(widget.articleId);
+      await SyncService.instance.reprocessArticle(_currentId);
     } catch (e) {
       message = 'Couldn\'t reprocess: $e';
     }
@@ -168,7 +240,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
       await Share.share(shareText);
     } else if (action == 'remove') {
       await _db.deleteHighlight(highlight.id!);
-      final highlights = await _db.getHighlights(articleId: widget.articleId);
+      final highlights = await _db.getHighlights(articleId: _currentId);
       await _rewriteHighlights();
       if (!mounted) return;
       setState(() => _highlights = highlights);
@@ -234,7 +306,14 @@ class _ArticleScreenState extends State<ArticleScreen> {
             ),
         ],
       ),
-      body: SelectionArea(
+      body: Listener(
+        key: const Key('articleSwipe'),
+        // Swipe right → next article, swipe left → previous (or back to the
+        // feed at the first-opened one). See _onPointerUp for why this is a
+        // Listener rather than a GestureDetector.
+        onPointerDown: _onPointerDown,
+        onPointerUp: _onPointerUp,
+        child: SelectionArea(
         onSelectionChanged: (selection) =>
             _selectedText = selection?.plainText ?? '',
         contextMenuBuilder: (context, selectableRegionState) {
@@ -259,6 +338,8 @@ class _ArticleScreenState extends State<ArticleScreen> {
                 ? (constraints.maxWidth - 680) / 2
                 : 20.0;
             return SingleChildScrollView(
+              // New identity per article so scroll resets to the top on swipe.
+              key: ValueKey(_currentId),
               physics: const ClampingScrollPhysics(),
               padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 48),
               child: Column(
@@ -311,6 +392,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
               ),
             );
           },
+        ),
         ),
       ),
     );
