@@ -1,7 +1,7 @@
-// Verifies swipe navigation on the article screen:
-//   swipe right  -> next article in the feed
-//   swipe left   -> previous article
-//   swipe left at the first-opened article -> back to the feed
+// Verifies swipe navigation on the article screen (book convention):
+//   swipe left   -> next article in the feed
+//   swipe right  -> previous article
+//   swipe right at the first-opened article -> back to the feed
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/article_screen.dart';
@@ -58,7 +58,7 @@ void main() {
     await settle(tester);
   }
 
-  testWidgets('swipe right/left navigate the feed; left at start returns',
+  testWidgets('swipe left/right navigate the feed; right at start returns',
       (tester) async {
     // A feed sentinel that opens Article A (index 0) on tap, so we can detect
     // the pop back to the feed.
@@ -87,27 +87,27 @@ void main() {
     expect(find.text('Article A'), findsWidgets);
     expect(find.text('FEED'), findsNothing);
 
-    // Swipe right → B → C, and stays at C past the end.
-    await swipe(tester, right: true);
+    // Swipe left → B → C, and stays at C past the end.
+    await swipe(tester, right: false);
     expect(find.text('Article B'), findsWidgets);
     expect(find.text('Article A'), findsNothing);
 
-    await swipe(tester, right: true);
-    expect(find.text('Article C'), findsWidgets);
-
-    await swipe(tester, right: true); // past the end: no-op
-    expect(find.text('Article C'), findsWidgets);
-
-    // Swipe left → B → A (the first-opened one).
     await swipe(tester, right: false);
+    expect(find.text('Article C'), findsWidgets);
+
+    await swipe(tester, right: false); // past the end: no-op
+    expect(find.text('Article C'), findsWidgets);
+
+    // Swipe right → B → A (the first-opened one).
+    await swipe(tester, right: true);
     expect(find.text('Article B'), findsWidgets);
 
-    await swipe(tester, right: false);
+    await swipe(tester, right: true);
     expect(find.text('Article A'), findsWidgets);
     expect(find.text('FEED'), findsNothing);
 
-    // Swipe left at the first-opened article → back to the feed.
-    await swipe(tester, right: false);
+    // Swipe right at the first-opened article → back to the feed.
+    await swipe(tester, right: true);
     expect(find.text('FEED'), findsOneWidget);
   });
 }

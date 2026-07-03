@@ -48,7 +48,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int? _downloadPct;
 
   final _backupService = BackupService();
-  bool _backupBusy = false;
+
+  /// Separate flags so backing up only relabels its own button; both buttons
+  /// are still disabled while either operation runs.
+  bool _backingUp = false;
+  bool _restoring = false;
+  bool get _backupBusy => _backingUp || _restoring;
 
   @override
   void initState() {
@@ -127,7 +132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _backup() async {
-    setState(() => _backupBusy = true);
+    setState(() => _backingUp = true);
     try {
       final file = await _backupService.createBackup(
           nowMs: DateTime.now().millisecondsSinceEpoch);
@@ -137,7 +142,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       if (mounted) _toast('Backup failed: $e');
     } finally {
-      if (mounted) setState(() => _backupBusy = false);
+      if (mounted) setState(() => _backingUp = false);
     }
   }
 
@@ -170,7 +175,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true) return;
 
-    setState(() => _backupBusy = true);
+    setState(() => _restoring = true);
     try {
       await _backupService.restoreBackup(File(path));
       if (!mounted) return;
@@ -179,7 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       if (mounted) _toast('Restore failed: $e');
     } finally {
-      if (mounted) setState(() => _backupBusy = false);
+      if (mounted) setState(() => _restoring = false);
     }
   }
 
@@ -443,13 +448,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 12),
             OutlinedButton.icon(
               icon: const Icon(Icons.backup_outlined),
-              label: Text(_backupBusy ? 'Preparing…' : 'Back up now'),
+              label: Text(_backingUp ? 'Preparing…' : 'Back up now'),
               onPressed: _backupBusy ? null : _backup,
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               icon: const Icon(Icons.restore),
-              label: Text(_backupBusy ? 'Restoring…' : 'Restore from backup'),
+              label: Text(_restoring ? 'Restoring…' : 'Restore from backup'),
               onPressed: _backupBusy ? null : _restore,
             ),
             const SizedBox(height: 32),

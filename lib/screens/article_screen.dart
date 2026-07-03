@@ -73,14 +73,14 @@ class _ArticleScreenState extends State<ArticleScreen> {
     }
   }
 
-  /// Swipe right → next article in the feed (no-op past the end).
+  /// Swipe left → next article in the feed (no-op past the end).
   void _goToNext() {
     if (_index >= _ids.length - 1) return;
     setState(() => _index++);
     _load();
   }
 
-  /// Swipe left → previous article, or back to the feed when we're at the
+  /// Swipe right → previous article, or back to the feed when we're at the
   /// article that was first opened.
   void _goToPreviousOrBack() {
     if (_index <= _startIndex) {
@@ -118,10 +118,12 @@ class _ArticleScreenState extends State<ArticleScreen> {
     // A deliberate horizontal fling: far enough, clearly horizontal, and quick
     // enough to not be a scroll or a slow text-selection drag.
     if (dx.abs() < 60 || dx.abs() < dy.abs() * 1.5 || speed < 300) return;
-    if (dx > 0) {
-      _goToNext(); // swipe right
+    // Book convention: swiping left pulls in the next article, swiping right
+    // turns back (to the previous article, then out to the feed).
+    if (dx < 0) {
+      _goToNext(); // swipe left
     } else {
-      _goToPreviousOrBack(); // swipe left
+      _goToPreviousOrBack(); // swipe right
     }
   }
 
@@ -291,9 +293,12 @@ class _ArticleScreenState extends State<ArticleScreen> {
           ),
           IconButton(
             tooltip: 'Reload & reprocess',
-            // Static "…" while working; e-ink can't render a smooth spinner.
             icon: _reprocessing
-                ? const Icon(Icons.more_horiz)
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.refresh),
             onPressed: _reprocessing ? null : _reprocess,
           ),
@@ -308,7 +313,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
       ),
       body: Listener(
         key: const Key('articleSwipe'),
-        // Swipe right → next article, swipe left → previous (or back to the
+        // Swipe left → next article, swipe right → previous (or back to the
         // feed at the first-opened one). See _onPointerUp for why this is a
         // Listener rather than a GestureDetector.
         onPointerDown: _onPointerDown,
