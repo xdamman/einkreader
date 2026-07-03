@@ -109,6 +109,42 @@ void main() {
       expect(favImages.listSync().whereType<File>(), isNotEmpty);
     });
 
+    test('moveTo relocates the archive and keeps image refs resolving',
+        () async {
+      final md = await ArchiveStore.instance.localizeMarkdown(
+        '![pic](https://cdn.example.com/a.png)',
+        relDir: '2026/06/stratechery',
+        maxDimension: 1000,
+      );
+      final ref = RegExp(r'eink-img://[^)\s]+').firstMatch(md)!.group(0)!;
+
+      final dest = Directory.systemTemp.createTempSync('archive_move');
+      addTearDown(() {
+        if (dest.existsSync()) dest.deleteSync(recursive: true);
+      });
+      await ArchiveStore.instance.moveTo(dest.path);
+
+      // The same eink-img:// ref now resolves inside the new base, the file
+      // moved with it, and the old tree is gone.
+      final file = ArchiveStore.localFile(ref)!;
+      expect(p.isWithin(dest.path, file.path), isTrue);
+      expect(file.existsSync(), isTrue);
+      expect(tmp.existsSync(), isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(ArchiveStore.dirPrefKey), dest.path);
+      await prefs.remove(ArchiveStore.dirPrefKey);
+
+      // Recreate tmp so tearDown's recursive delete doesn't fail.
+      tmp.createSync(recursive: true);
+    });
+
+    test('moveTo rejects a folder inside the current archive', () async {
+      expect(
+        () => ArchiveStore.instance.moveTo(p.join(tmp.path, 'sub')),
+        throwsA(isA<Exception>()),
+      );
+    });
+
     test('writeHighlights groups by article into one file', () async {
       await ArchiveStore.instance.writeHighlights([
         const Highlight(

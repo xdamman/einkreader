@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
+import '../services/archive_store.dart';
 import '../services/backup_service.dart';
 import '../services/build_config.dart';
 import '../services/nostr_service.dart';
@@ -55,6 +57,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _restoring = false;
   bool get _backupBusy => _backingUp || _restoring;
 
+  /// Where the offline archive currently lives, and whether that is a
+  /// user-chosen folder (as opposed to the default app directory).
+  String? _archiveDir;
+  bool _customArchiveDir = false;
+  bool _movingArchive = false;
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final connected = await _twitter.isConnected;
     final username = await _twitter.username;
     final developerMode = await AppLogService.instance.isDeveloperModeEnabled();
+    final archiveDir = await ArchiveStore.instance.baseDir();
     if (!mounted) return;
     setState(() {
       _twitterConnected = connected;
@@ -80,6 +89,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _clientIdController.text = prefs.getString('twitter_client_id') ?? '';
       _npubController.text = prefs.getString('nostr_npub') ?? '';
       _developerMode = developerMode;
+      _archiveDir = archiveDir;
+      _customArchiveDir = prefs.getString(ArchiveStore.dirPrefKey) != null;
     });
     if (developerMode && _update == null) _checkForUpdate();
   }
@@ -186,6 +197,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } finally {
       if (mounted) setState(() => _restoring = false);
     }
+  }
+
+  /// Best-effort storage permission: Android 11+ needs "All files access" for
+  /// raw paths outside the app; older versions use the legacy permission. The
+  /// real authority is the write probe in [ArchiveStore.moveTo] — if writing
+  /// works without any grant (e.g. an app-specific external dir), fine.
+  Future<void> _requestStoragePermission() async {
+    if (!Platform.isAndroid) return;
+    var status = await Permission.manageExternalStorage.status;
+    if (status.isGranted) return;
+    status = await Permission.manageExternalStorage.request();
+    if (status.isGranted) return;
+    await Permission.storage.request();
+  }
+
+  Future<void> _moveArchive(String? path) async {
+    if (SyncService.instance.isSyncing) {
+      _toast('Wait for the current sync to finish first');
+      return;
+    }
+    setState(() => _movingArchive = true);
+    try {
+      await ArchiveStore.instance.moveTo(path);
+      await _load();
+      _toast(path == null
+          ? 'Library moved back to app storage'
+          : 'Library moved');
+    } catch (e) {
+      _toast('Could not move the library: $e');
+    } finally {
+      if (mounted) setState(() => _movingArchive = false);
+    }
+  }
+
+  Future<void> _chooseArchiveDir() async {
+    final path = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Choose the library folder',
+    );
+    if (path == null) return;
+    await _requestStoragePermission();
+    await _moveArchive(path);
   }
 
   Widget _buildUpdateTile() {
@@ -434,6 +486,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: _saveNostr,
               child: const Text('Save Nostr sources'),
             ),
+            if (kCustomStorageSupported) ...[
+              const SizedBox(height: 32),
+              const Divider(),
+              const SizedBox(height: 24),
+              const Text('Storage', style: sectionStyle),
+              const SizedBox(height: 8),
+              const Text(
+                'Where your offline library (article files and images) is '
+                'stored. Choose a folder outside the app — for example one '
+                'synced by Syncthing — to mirror it to your other devices. '
+                'The reading database itself stays in app storage.',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _archiveDir == null
+                    ? 'Current folder: …'
+                    : 'Current folder: $_archiveDir'
+                        '${_customArchiveDir ? '' : ' (app storage)'}',
+                style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.folder_open),
+                label: Text(_movingArchive ? 'Moving…' : 'Choose folder'),
+                onPressed: _movingArchive ? null : _chooseArchiveDir,
+              ),
+              if (_customArchiveDir) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.undo),
+                  label: const Text('Move back to app storage'),
+                  onPressed: _movingArchive ? null : () => _moveArchive(null),
+                ),
+              ],
+            ],
             const SizedBox(height: 32),
             const Divider(),
             const SizedBox(height: 24),

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
 import 'app_log.dart';
@@ -30,6 +31,11 @@ class ArchiveStore {
   static final ArchiveStore instance = ArchiveStore._();
 
   static const scheme = 'eink-img://';
+
+  /// Preference holding a user-chosen archive location (absent = the default
+  /// app documents directory). Set via [moveTo] from the Storage setting.
+  static const dirPrefKey = 'archive_dir';
+
   static const _maxBytes = 200 * 1024;
   static const _userAgent =
       'Mozilla/5.0 (compatible; einkreader/0.1; +https://github.com/xdamman/einkreader)';
@@ -54,12 +60,83 @@ class ArchiveStore {
 
   Future<String> _base() async {
     if (_basePath != null) return _basePath!;
+    final prefs = await SharedPreferences.getInstance();
+    final custom = prefs.getString(dirPrefKey);
+    if (custom != null) {
+      if (await _writable(Directory(custom))) {
+        _basePath = custom;
+        _staticBase = custom;
+        return custom;
+      }
+      // SD card removed, permission revoked, … — keep the app usable on the
+      // default location rather than failing every write.
+      await AppLogService.instance.warn(
+          'Archive folder not writable, using app storage instead: $custom');
+    }
+    final path = await _defaultBase();
+    await Directory(path).create(recursive: true);
+    _basePath = path;
+    _staticBase = path;
+    return path;
+  }
+
+  Future<String> _defaultBase() async {
     final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(docs.path, 'archive'));
-    if (!await dir.exists()) await dir.create(recursive: true);
-    _basePath = dir.path;
-    _staticBase = dir.path;
-    return dir.path;
+    return p.join(docs.path, 'archive');
+  }
+
+  /// True when [dir] exists (or can be created) and files can be written in it.
+  static Future<bool> _writable(Directory dir) async {
+    try {
+      await dir.create(recursive: true);
+      final probe = File(p.join(dir.path, '.einkreader-write-test'));
+      await probe.writeAsString('ok', flush: true);
+      await probe.delete();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Moves the whole archive to [newPath], or back to the default app
+  /// directory when null: copies every file, repoints the store, then removes
+  /// the old tree. Throws if the destination can't be written; the existing
+  /// archive is only deleted after the copy completed, so a failed move never
+  /// loses content. Stored `eink-img://` references are relative to the base
+  /// dir, so they stay valid wherever the archive lives.
+  Future<void> moveTo(String? newPath) async {
+    final oldBase = await _base();
+    final dest = newPath ?? await _defaultBase();
+    if (p.equals(dest, oldBase)) return;
+    if (p.isWithin(oldBase, dest)) {
+      throw Exception('Choose a folder outside the current archive');
+    }
+    if (!await _writable(Directory(dest))) {
+      throw Exception('Cannot write to $dest');
+    }
+    final oldDir = Directory(oldBase);
+    var copied = 0;
+    if (await oldDir.exists()) {
+      await for (final entity in oldDir.list(recursive: true)) {
+        if (entity is! File) continue;
+        final rel = p.relative(entity.path, from: oldBase);
+        final out = File(p.join(dest, rel));
+        await out.parent.create(recursive: true);
+        await entity.copy(out.path);
+        copied++;
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    if (newPath == null) {
+      await prefs.remove(dirPrefKey);
+    } else {
+      await prefs.setString(dirPrefKey, newPath);
+    }
+    _basePath = dest;
+    _staticBase = dest;
+    if (await oldDir.exists()) await oldDir.delete(recursive: true);
+    await AppLogService.instance.info(
+        'Archive moved: $copied files from $oldBase to $dest');
   }
 
   /// Absolute path to the offline archive directory, for backup/restore.

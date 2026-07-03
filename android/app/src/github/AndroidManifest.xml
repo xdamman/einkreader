@@ -4,4 +4,13 @@
          `play` flavor — the Play Store handles updates and rejects this
          permission. See lib/services/build_config.dart. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Sideload-only: lets the user store the offline archive in a folder of
+         their choosing (e.g. one synced by Syncthing). Android 11+ requires
+         "All files access" for raw file paths outside the app; older versions
+         use the legacy write permission. The Play Store rejects
+         MANAGE_EXTERNAL_STORAGE, so the `play` flavor omits both and hides the
+         setting (see kCustomStorageSupported in lib/services/build_config.dart). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
 </manifest>

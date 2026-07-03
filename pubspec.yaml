@@ -32,6 +32,8 @@ dependencies:
   image: ^4.3.0
   # Native share sheet for sharing a highlight.
   share_plus: ^10.1.4
+  # Request "All files access" so the archive can live in a user-chosen folder.
+  permission_handler: ^12.0.0
 
 dev_dependencies:
   flutter_test:
