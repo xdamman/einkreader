@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:ui' as ui;
 
@@ -301,7 +302,10 @@ class SyncService {
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode}');
     }
-    final feed = FeedParser.parse(response.body);
+    // Parsing and converting happen on background isolates: a large feed can
+    // take long enough on an e-ink device's CPU to freeze the UI (ANR).
+    final xml = response.body;
+    final feed = await Isolate.run(() => FeedParser.parse(xml));
     await AppLogService.instance.info(
       'Parsed RSS feed #${source.id}: "${feed.title}", '
       '${feed.items.length} item${feed.items.length == 1 ? '' : 's'}',
@@ -322,14 +326,21 @@ class SyncService {
       } else if (item.link != null) {
         needsFetch++;
       }
+      // Items already in the database need no conversion or image downloads,
+      // so skip them before the expensive steps instead of at insert time.
+      if (await _db.articleExists(
+          sourceId: source.id!, guid: item.guid, url: item.link)) {
+        skipped++;
+        continue;
+      }
       final published = item.published?.millisecondsSinceEpoch;
-      var markdown =
-          hasFullContent
-              ? ArticleExtractor.convertHtmlToMarkdown(item.contentHtml!)
-              : null;
-      if (markdown != null) {
+      String? markdown;
+      if (hasFullContent) {
+        final html = item.contentHtml!;
+        final converted = await Isolate.run(
+            () => ArticleExtractor.convertHtmlToMarkdown(html));
         markdown = await _archive.localizeMarkdown(
-          markdown,
+          converted,
           relDir: _relDirFor(source, published, now),
           maxDimension: _maxImageDimension,
         );
@@ -380,6 +391,17 @@ class SyncService {
       // don't download a linked page. A short tweet that links to a blog post
       // gets the linked article downloaded (fetched = 0).
       final downloadsArticle = tweet.articleUrl != null && !tweet.isLongForm;
+      // Long-form posts keep the tweet permalink so the body stays;
+      // others point at the linked article when there is one.
+      final url = tweet.isLongForm
+          ? tweet.tweetUrl
+          : (tweet.articleUrl ?? tweet.tweetUrl);
+      // Bookmarks return the same tweets every sync; skip known ones before
+      // downloading their images again.
+      if (await _db.articleExists(
+          sourceId: source.id!, guid: tweet.id, url: url)) {
+        continue;
+      }
       final published = tweet.createdAt?.millisecondsSinceEpoch;
       // Download any images embedded in the tweet/article so they read offline.
       var content = downloadsArticle ? null : tweet.text;
@@ -395,11 +417,7 @@ class SyncService {
         guid: tweet.id,
         title: _titleFromText(tweet.text),
         author: author,
-        // Long-form posts keep the tweet permalink so the body stays;
-        // others point at the linked article when there is one.
-        url: tweet.isLongForm
-            ? tweet.tweetUrl
-            : (tweet.articleUrl ?? tweet.tweetUrl),
+        url: url,
         publishedAt: published,
         summary: tweet.text,
         contentMarkdown: content,
@@ -517,7 +535,10 @@ class SyncService {
       return false;
     }
     try {
-      final markdown = ArticleExtractor.extract(body, baseUrl: url);
+      // Parsing + readability-scoring a full page is CPU-heavy enough to
+      // freeze the UI on slow devices, so it runs on a background isolate.
+      final markdown =
+          await Isolate.run(() => ArticleExtractor.extract(body, baseUrl: url));
       if (markdown != null) {
         final source = await _db.getSource(article.sourceId);
         final relDir = source == null
@@ -549,7 +570,8 @@ class SyncService {
         // it with the real page title once we have it.
         var titled = article;
         if (article.title.endsWith('…') || article.title == article.url) {
-          final pageTitle = ArticleExtractor.extractTitle(body);
+          final pageTitle =
+              await Isolate.run(() => ArticleExtractor.extractTitle(body));
           if (pageTitle != null) {
             await _db.updateArticleTitle(article.id!, pageTitle);
             titled = article.copyWith(title: pageTitle);

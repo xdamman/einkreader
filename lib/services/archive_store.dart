@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -154,7 +155,15 @@ class ArchiveStore {
   }) async {
     final base = await _base();
     final imagesRel = '$relDir/images';
+    final hash = sha1.convert(url.codeUnits).toString();
     try {
+      // Reuse the copy already on disk (whatever extension it was stored
+      // with) so a re-sync neither re-downloads nor re-encodes it, unless the
+      // caller is reprocessing and wants a possibly-broken file replaced.
+      if (!overwrite) {
+        final cached = await _findCached(p.join(base, imagesRel), hash);
+        if (cached != null) return '$scheme$imagesRel/$cached';
+      }
       final response = await _client
           .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
           .timeout(const Duration(seconds: 25));
@@ -163,14 +172,14 @@ class ArchiveStore {
       }
       final bytes = response.bodyBytes;
       final resize = bytes.length > _maxBytes;
-      final stored = resize ? _resize(bytes, maxDimension) : bytes;
+      // Decoding + re-encoding a large photo takes seconds of pure CPU, so it
+      // runs on a background isolate to keep the UI responsive during sync.
+      final stored =
+          resize ? await Isolate.run(() => _resize(bytes, maxDimension)) : bytes;
       final ext = resize ? 'jpg' : _extensionFor(response, url);
-      final name = '${sha1.convert(url.codeUnits)}.$ext';
+      final name = '$hash.$ext';
       final ref = '$scheme$imagesRel/$name';
       final file = File(p.join(base, imagesRel, name));
-      // Skip the download when the image is already on disk, unless the caller
-      // is reprocessing and wants a possibly-broken file replaced.
-      if (!overwrite && await file.exists()) return ref;
       await file.parent.create(recursive: true);
       await file.writeAsBytes(stored, flush: true);
       await AppLogService.instance.debug(
@@ -183,6 +192,18 @@ class ArchiveStore {
       await AppLogService.instance.warn('Could not store image <$url>: $e');
       return null;
     }
+  }
+
+  /// Filename of an already-stored image for this URL hash (any extension),
+  /// or null when it has not been downloaded yet.
+  static Future<String?> _findCached(String dirPath, String hash) async {
+    final dir = Directory(dirPath);
+    if (!await dir.exists()) return null;
+    await for (final entry in dir.list()) {
+      final name = p.basename(entry.path);
+      if (name.startsWith('$hash.')) return name;
+    }
+    return null;
   }
 
   static String _extensionFor(http.Response response, String url) {

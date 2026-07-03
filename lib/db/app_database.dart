@@ -262,6 +262,30 @@ class AppDatabase {
     return id != 0;
   }
 
+  /// True when an article with this (source, guid) or the same canonical URL
+  /// is already stored — the same duplicate rules as [insertArticleIfNew] — so
+  /// sync can skip content conversion and image downloads for known items.
+  Future<bool> articleExists({
+    required int sourceId,
+    required String guid,
+    String? url,
+  }) async {
+    final db = await database;
+    final urlKey = Article.canonicalUrl(url);
+    final rows = await db.query(
+      'articles',
+      columns: ['id'],
+      where: urlKey == null
+          ? 'source_id = ? AND guid = ?'
+          : '(source_id = ? AND guid = ?) OR url_key = ?',
+      whereArgs: urlKey == null
+          ? [sourceId, guid]
+          : [sourceId, guid, urlKey],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   Future<List<Article>> getArticles({
     int? sourceId,
     bool readLaterOnly = false,
