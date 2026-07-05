@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
+import '../services/archive_store.dart';
 import '../services/share_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
@@ -51,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _developerMode = false;
   StreamSubscription<SyncProgress>? _progressSub;
   StreamSubscription<void>? _logSub;
-  StreamSubscription<SharedLink>? _shareSub;
+  StreamSubscription<String>? _shareSub;
 
   @override
   void initState() {
@@ -77,8 +78,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _logSub = AppLogService.instance.changes.stream.listen((_) {
       if (mounted) _loadDeveloperMode();
     });
-    // Links shared into the app ("Share → einkreader") are queued to To Read.
-    _shareSub = ShareLinkService.instance.links.stream.listen(_saveSharedLink);
+    // Text shared into the app ("Share → einkreader") queues its link to
+    // To Read; a shared browser selection also becomes a highlight.
+    _shareSub = ShareLinkService.instance.texts.stream.listen(_onSharedText);
     ShareLinkService.instance.init();
     // Refresh everything on launch so content is ready for offline reading.
     if (SyncService.instance.autoSyncOnLaunch) {
@@ -94,9 +96,33 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _saveSharedLink(SharedLink link) async {
+  Future<void> _onSharedText(String text) async {
+    final link = ShareLinkService.parse(text);
+    if (link == null) {
+      // The share sheet lists us for any text; without a URL there is
+      // nothing to queue — say so instead of silently dropping it.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No link in the shared text — nothing to save')));
+      return;
+    }
     final saved = await _db.saveLinkForLater(url: link.url, title: link.title);
-    _startDownload(saved);
+    // A shared selection becomes a highlight: painted inline once the
+    // article's content is downloaded, and listed under Highlights.
+    if (link.quote != null) {
+      await _db.insertHighlightIfNew(Highlight(
+        articleId: saved.id!,
+        text: link.quote!,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      ));
+      try {
+        await ArchiveStore.instance.writeHighlights(await _db.getHighlights());
+      } catch (_) {
+        // Archive not available (e.g. storage not mounted); the highlight is
+        // still in the database and exported on the next rewrite.
+      }
+    }
+    await _startDownload(saved);
   }
 
   /// Post-save handling shared by the share sheet and the clipboard prompt:

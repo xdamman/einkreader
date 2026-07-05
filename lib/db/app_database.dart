@@ -532,6 +532,22 @@ class AppDatabase {
     return db.insert('highlights', highlight.toMap()..remove('id'));
   }
 
+  /// Inserts unless the article already has a highlight with this exact text
+  /// (e.g. the same selection shared twice). Returns true when inserted.
+  Future<bool> insertHighlightIfNew(Highlight highlight) async {
+    final db = await database;
+    final existing = await db.query(
+      'highlights',
+      columns: ['id'],
+      where: 'article_id = ? AND text = ?',
+      whereArgs: [highlight.articleId, highlight.text],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return false;
+    await insertHighlight(highlight);
+    return true;
+  }
+
   Future<void> deleteHighlight(int id) async {
     final db = await database;
     await db.delete('highlights', where: 'id = ?', whereArgs: [id]);

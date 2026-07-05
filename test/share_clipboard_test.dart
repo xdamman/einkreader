@@ -39,11 +39,31 @@ void main() {
       expect(link.title, isNull);
     });
 
-    test('keeps surrounding text as the title hint', () {
+    test('keeps short surrounding text as the title hint', () {
       final link = ShareLinkService.parse(
           'A Great Read\nhttps://example.com/story?id=1')!;
       expect(link.url, 'https://example.com/story?id=1');
       expect(link.title, 'A Great Read');
+      expect(link.quote, isNull);
+    });
+
+    test('a quoted selection (Chrome share) becomes a quote', () {
+      final link = ShareLinkService.parse(
+          '“The passage the reader selected on the page”\n'
+          'https://example.com/story')!;
+      expect(link.url, 'https://example.com/story');
+      expect(link.quote, 'The passage the reader selected on the page');
+      expect(link.title, isNull);
+    });
+
+    test('long unquoted text also reads as a selection', () {
+      final selection =
+          'An unquoted but clearly-longer-than-a-title passage that someone '
+          'selected and shared straight from their browser.';
+      final link = ShareLinkService.parse(
+          '$selection https://example.com/story')!;
+      expect(link.quote, selection);
+      expect(link.title, isNull);
     });
 
     test('drops trailing sentence punctuation', () {
@@ -56,6 +76,18 @@ void main() {
       expect(ShareLinkService.parse('no links here'), isNull);
       expect(ShareLinkService.parse(null), isNull);
     });
+  });
+
+  test('insertHighlightIfNew skips an identical quote on the same article',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final saved =
+        await db.saveLinkForLater(url: 'https://example.com/quoted');
+    final quote = Highlight(
+        articleId: saved.id!, text: 'the shared passage', createdAt: 1);
+    expect(await db.insertHighlightIfNew(quote), isTrue);
+    expect(await db.insertHighlightIfNew(quote), isFalse);
+    expect(await db.getHighlights(articleId: saved.id), hasLength(1));
   });
 
   group('ClipboardLinkPrompt', () {

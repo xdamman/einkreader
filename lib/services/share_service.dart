@@ -2,25 +2,27 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-/// A URL shared into the app, with any surrounding text as a title hint
-/// (browsers often share "Page title\nhttps://…").
+/// A URL shared into the app, with what surrounded it. Browsers share a page
+/// as "Page title\nURL" ([title]) and a text selection as '"selection" URL'
+/// ([quote] — saved as a highlight on the queued article).
 class SharedLink {
   final String url;
   final String? title;
+  final String? quote;
 
-  const SharedLink(this.url, {this.title});
+  const SharedLink(this.url, {this.title, this.quote});
 }
 
 /// Receives text shared to the app via Android's share sheet (see
-/// MainActivity.kt) and emits the links found in it. The home screen listens
-/// and queues them to read later.
+/// MainActivity.kt) and emits it raw; the home screen parses it (see [parse])
+/// and queues the link to read later — or tells the user when there is none.
 class ShareLinkService {
   ShareLinkService._();
   static final ShareLinkService instance = ShareLinkService._();
 
   static const _channel = MethodChannel('einkreader/share');
 
-  final StreamController<SharedLink> links = StreamController.broadcast();
+  final StreamController<String> texts = StreamController.broadcast();
   bool _initialized = false;
 
   /// Starts listening for shares pushed into the running app and drains the
@@ -43,14 +45,18 @@ class ShareLinkService {
   }
 
   void _emit(String? text) {
-    final link = parse(text);
-    if (link != null) links.add(link);
+    if (text != null && text.trim().isNotEmpty) texts.add(text);
   }
 
   static final _urlPattern = RegExp(r'https?://\S+');
 
-  /// Extracts the first http(s) URL from [text]; the remaining text becomes
-  /// the title hint. Returns null when there is no URL.
+  /// Text wrapped in straight or curly quotes — how Chromium browsers share
+  /// a selection ("quote" + page URL).
+  static final _quoted = RegExp(r'''^["'“‘](.*)["'”’]$''', dotAll: true);
+
+  /// Extracts the first http(s) URL from [text]. Quoted or long surrounding
+  /// text is a selection from the page ([SharedLink.quote]); short unquoted
+  /// text is a title hint. Returns null when there is no URL.
   static SharedLink? parse(String? text) {
     if (text == null) return null;
     final match = _urlPattern.firstMatch(text);
@@ -58,7 +64,15 @@ class ShareLinkService {
     // Trailing punctuation is usually the sentence's, not the URL's.
     final url = match.group(0)!.replaceFirst(RegExp(r'''[).,;:!?'"”>]+$'''), '');
     if (Uri.tryParse(url)?.host.isEmpty ?? true) return null;
-    final title = text.replaceFirst(match.group(0)!, '').trim();
-    return SharedLink(url, title: title.isEmpty ? null : title);
+    final rest = text.replaceFirst(match.group(0)!, '').trim();
+    if (rest.isEmpty) return SharedLink(url);
+    final quoted = _quoted.firstMatch(rest)?.group(1)?.trim();
+    if (quoted != null && quoted.isNotEmpty) {
+      return SharedLink(url, quote: quoted);
+    }
+    // Unquoted: a page title is short; anything longer reads as a selection.
+    return rest.length > 80
+        ? SharedLink(url, quote: rest)
+        : SharedLink(url, title: rest);
   }
 }
