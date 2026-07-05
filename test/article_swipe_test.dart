@@ -110,4 +110,36 @@ void main() {
     await swipe(tester, right: true);
     expect(find.text('FEED'), findsOneWidget);
   });
+
+  testWidgets('two-finger double tap (e-ink refresh gesture) is not a swipe',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: ArticleScreen(
+        articleId: ids[0],
+        articleIds: ids,
+        initialIndex: 0,
+      ),
+    ));
+    await settle(tester);
+    expect(find.text('Article A'), findsWidgets);
+
+    // The AINOTE's screen-refresh gesture: two horizontally separated fingers
+    // tapping twice in quick succession. The cross-finger up/down deltas used
+    // to read as an instant horizontal fling.
+    final box = tester.getCenter(find.byKey(const Key('articleSwipe')));
+    for (var tap = 0; tap < 2; tap++) {
+      final finger1 = await tester.startGesture(box + const Offset(-60, 0));
+      final finger2 = await tester.startGesture(box + const Offset(60, 0));
+      await tester.pump(const Duration(milliseconds: 30));
+      await finger1.up();
+      await finger2.up();
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await settle(tester);
+
+    // Still on Article A: no navigation happened.
+    expect(find.text('Article A'), findsWidgets);
+    expect(find.text('Article B'), findsNothing);
+  });
 }

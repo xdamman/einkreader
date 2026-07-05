@@ -97,13 +97,31 @@ class _ArticleScreenState extends State<ArticleScreen> {
   // without disturbing selection or scrolling.
   Offset? _dragStart;
   Duration? _dragStartTime;
+  int _activePointers = 0;
 
   void _onPointerDown(PointerDownEvent event) {
+    _activePointers++;
+    if (_activePointers > 1) {
+      // Multi-touch (e.g. the AINOTE's two-finger screen-refresh tap) is never
+      // a swipe. Without this guard the second finger's down overwrites the
+      // first finger's start, and the up→down delta spans two different
+      // fingers — which reads as a huge, near-instant "fling".
+      _dragStart = null;
+      _dragStartTime = null;
+      return;
+    }
     _dragStart = event.position;
     _dragStartTime = event.timeStamp;
   }
 
+  void _onPointerCancel(PointerCancelEvent event) {
+    if (_activePointers > 0) _activePointers--;
+    _dragStart = null;
+    _dragStartTime = null;
+  }
+
   void _onPointerUp(PointerUpEvent event) {
+    if (_activePointers > 0) _activePointers--;
     final start = _dragStart;
     final startTime = _dragStartTime;
     _dragStart = null;
@@ -318,6 +336,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
         // Listener rather than a GestureDetector.
         onPointerDown: _onPointerDown,
         onPointerUp: _onPointerUp,
+        onPointerCancel: _onPointerCancel,
         child: SelectionArea(
         onSelectionChanged: (selection) =>
             _selectedText = selection?.plainText ?? '',
