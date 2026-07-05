@@ -25,7 +25,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -93,6 +93,11 @@ class AppDatabase {
       );
       await db.execute('ALTER TABLE articles ADD COLUMN scrolled_at INTEGER');
     }
+    if (oldVersion < 5) {
+      await db.execute(
+        'ALTER TABLE articles ADD COLUMN via_article_id INTEGER',
+      );
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -125,6 +130,7 @@ class AppDatabase {
         created_at INTEGER NOT NULL,
         scroll_position REAL NOT NULL DEFAULT 0,
         scrolled_at INTEGER,
+        via_article_id INTEGER,
         UNIQUE(source_id, guid)
       )
     ''');
@@ -429,6 +435,88 @@ class AppDatabase {
       'GROUP BY source_id',
     );
     return {for (final row in rows) row['source_id'] as int: row['c'] as int};
+  }
+
+  // ------------------------------------------------------------ saved links
+
+  /// URL marker for the built-in Saved Links source (not a fetchable feed).
+  static const savedLinksUrl = 'local:saved-links';
+
+  /// Returns the built-in source that saved links are filed under, creating
+  /// it on first use.
+  Future<Source> ensureSavedLinksSource() async {
+    final existing =
+        await getSourceByTypeAndUrl(SourceType.savedLinks, savedLinksUrl);
+    if (existing != null) return existing;
+    return insertSource(Source(
+      type: SourceType.savedLinks,
+      title: 'Saved Links',
+      url: savedLinksUrl,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    ));
+  }
+
+  /// Saves a link found inside [viaArticleId] to read later: bookmarked, and
+  /// queued for download (fetched = 0) so the next online sync fetches its
+  /// content. If the same story is already stored under any source, it is
+  /// just bookmarked instead. Returns the queued (or existing) article.
+  Future<Article> saveLinkForLater({
+    required String url,
+    String? title,
+    int? viaArticleId,
+  }) async {
+    final db = await database;
+    final key = Article.canonicalUrl(url);
+    if (key != null) {
+      final rows = await db.query(
+        'articles',
+        where: 'url_key = ?',
+        whereArgs: [key],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        final existing = Article.fromMap(rows.first);
+        await setReadLater(existing.id!, true);
+        await AppLogService.instance.info(
+          'Link already stored as article #${existing.id}; bookmarked it',
+        );
+        return (await getArticle(existing.id!))!;
+      }
+    }
+    final source = await ensureSavedLinksSource();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final cleanTitle = title?.trim() ?? '';
+    final article = Article(
+      sourceId: source.id!,
+      guid: url,
+      // Sync replaces a URL title (and any Saved Links title) with the real
+      // page title once the content is downloaded.
+      title: cleanTitle.isEmpty ? url : cleanTitle,
+      url: url,
+      publishedAt: now,
+      readLater: 1,
+      viaArticleId: viaArticleId,
+      createdAt: now,
+    );
+    final id = await db.insert(
+      'articles',
+      article.toMap()..remove('id'),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await AppLogService.instance.info(
+      'Saved link for later as article #$id: $url (from #$viaArticleId)',
+    );
+    if (id != 0) return (await getArticle(id))!;
+    // Lost a race with an identical guid; bookmark the existing row.
+    final rows = await db.query(
+      'articles',
+      where: 'source_id = ? AND guid = ?',
+      whereArgs: [source.id, url],
+      limit: 1,
+    );
+    final existing = Article.fromMap(rows.first);
+    await setReadLater(existing.id!, true);
+    return (await getArticle(existing.id!))!;
   }
 
   // ------------------------------------------------------------- highlights

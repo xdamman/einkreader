@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -181,6 +182,34 @@ class SyncService {
     }
   }
 
+  /// Downloads content for a single still-pending article right away (e.g. a
+  /// link saved to read later while online). Failures are left pending for
+  /// the next sync. Returns true when content landed.
+  Future<bool> downloadArticle(int articleId) async {
+    final article = await _db.getArticle(articleId);
+    if (article == null || article.fetched == 1) return false;
+    final changed = await _fetchArticleContent(article);
+    progress.add(SyncProgress('', running: _syncing, reload: true));
+    return changed;
+  }
+
+  /// Quick online probe: resolves a well-known host with a short timeout.
+  /// Test seam: set [debugIsOnline] to skip the real lookup.
+  Future<bool> isOnline() async {
+    final probe = debugIsOnline;
+    if (probe != null) return probe();
+    try {
+      final addresses = await InternetAddress.lookup('one.one.one.one')
+          .timeout(const Duration(seconds: 3));
+      return addresses.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @visibleForTesting
+  Future<bool> Function()? debugIsOnline;
+
   /// Re-downloads and re-processes a single article's content (the reader's
   /// refresh button), then rewrites its archived markdown. Images are
   /// re-downloaded even when already cached so a previously broken/partial image
@@ -285,6 +314,10 @@ class SyncService {
         );
       case SourceType.nostrLikes:
         return _insertNostrItems(source, await nostr.fetchLikes(source.url));
+      case SourceType.savedLinks:
+        // Local queue only: its articles are inserted when the user saves a
+        // link and downloaded by the pending-content pass below.
+        return 0;
     }
   }
 
@@ -566,10 +599,13 @@ class SyncService {
           'Processed article #${article.id}: extracted '
           '${content.length} markdown characters',
         );
-        // Tweets/notes get a placeholder title cut from their text; replace
-        // it with the real page title once we have it.
+        // Tweets/notes get a placeholder title cut from their text, and saved
+        // links carry their anchor text or URL; replace it with the real page
+        // title once we have it.
         var titled = article;
-        if (article.title.endsWith('…') || article.title == article.url) {
+        if (article.title.endsWith('…') ||
+            article.title == article.url ||
+            source?.type == SourceType.savedLinks) {
           final pageTitle =
               await Isolate.run(() => ArticleExtractor.extractTitle(body));
           if (pageTitle != null) {

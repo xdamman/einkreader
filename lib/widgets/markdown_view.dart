@@ -20,12 +20,17 @@ class MarkdownView extends StatefulWidget {
   /// highlight, so the reader can offer to share or remove it.
   final void Function(String highlightText)? onHighlightTap;
 
+  /// Called when a link is tapped, with its URL and anchor text. When null,
+  /// links open in the external browser.
+  final void Function(String url, String anchorText)? onLinkTap;
+
   const MarkdownView({
     super.key,
     required this.markdown,
     this.highlights = const [],
     this.fontSize = 18,
     this.onHighlightTap,
+    this.onLinkTap,
   });
 
   @override
@@ -146,21 +151,11 @@ class _MarkdownViewState extends State<MarkdownView> {
           ),
         );
       case _BlockType.image:
+        // No caption below the image: alt text is usually a filename or other
+        // noise. It still serves as the placeholder when the image can't load.
         return Padding(
           padding: const EdgeInsets.only(bottom: 14),
-          child: Column(
-            children: [
-              _image(block),
-              if (block.text.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(block.text,
-                      style: _bodyStyle.copyWith(
-                          fontSize: widget.fontSize - 4,
-                          fontStyle: FontStyle.italic)),
-                ),
-            ],
-          ),
+          child: _image(block),
         );
       case _BlockType.rule:
         return const Padding(
@@ -313,16 +308,23 @@ class _MarkdownViewState extends State<MarkdownView> {
             style.copyWith(
                 fontFamily: 'monospace',
                 fontFamilyFallback: const [],
-                backgroundColor: const Color(0xFFEEEEEE))));
+                backgroundColor: const Color(0xFFEEEEEE)),
+            unescape: false));
       } else if (match.group(6) != null) {
         final url = match.group(7)!;
+        final anchor = _unescape(match.group(6)!);
         final recognizer = TapGestureRecognizer()
-          ..onTap = () => launchUrl(Uri.parse(url),
-              mode: LaunchMode.externalApplication);
+          ..onTap = () {
+            final onLinkTap = widget.onLinkTap;
+            if (onLinkTap != null) {
+              onLinkTap(url, anchor);
+            } else {
+              launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+            }
+          };
         _recognizers.add(recognizer);
         spans.addAll(_highlighted(
-            match.group(6)!,
-            style.copyWith(decoration: TextDecoration.underline),
+            anchor, style.copyWith(decoration: TextDecoration.underline),
             recognizer: recognizer));
       } else if (match.group(8) != null) {
         // Inline image: render as caption text only.
@@ -352,10 +354,19 @@ class _MarkdownViewState extends State<MarkdownView> {
     }
   }
 
+  /// html2md backslash-escapes Markdown punctuation found in page text
+  /// (\[, \], \*, …); strip the escapes so readers see the literal character.
+  /// Applied at render time, after inline parsing, so the escapes still keep
+  /// that punctuation from being read as markup.
+  static String _unescape(String text) => text.replaceAllMapped(
+      RegExp(r'\\([\\`*_{}\[\]()#+\-.!>~|])'), (m) => m.group(1)!);
+
   /// Splits [text] so every saved highlight occurrence gets a grey wash, and
   /// (unless the span is already a link) makes it tappable to manage it.
-  List<InlineSpan> _highlighted(String text, TextStyle style,
-      {TapGestureRecognizer? recognizer}) {
+  /// [unescape] is off for code spans, where backslashes are literal.
+  List<InlineSpan> _highlighted(String rawText, TextStyle style,
+      {TapGestureRecognizer? recognizer, bool unescape = true}) {
+    final text = unescape ? _unescape(rawText) : rawText;
     final ranges = <(int, int, String)>[];
     for (final (needle, full) in _highlightNeedles) {
       var from = 0;

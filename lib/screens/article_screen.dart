@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
@@ -37,6 +39,10 @@ class ArticleScreen extends StatefulWidget {
 class _ArticleScreenState extends State<ArticleScreen> {
   final _db = AppDatabase.instance;
   Article? _article;
+
+  /// The article this one was saved from (via a tapped link), for the
+  /// "From: …" line in the header. Null for regular articles.
+  Article? _viaArticle;
   List<Highlight> _highlights = [];
   String _selectedText = '';
   double _fontSize = 18;
@@ -63,9 +69,13 @@ class _ArticleScreenState extends State<ArticleScreen> {
   Future<void> _load() async {
     final article = await _db.getArticle(_currentId);
     final highlights = await _db.getHighlights(articleId: _currentId);
+    final via = article?.viaArticleId == null
+        ? null
+        : await _db.getArticle(article!.viaArticleId!);
     if (!mounted) return;
     setState(() {
       _article = article;
+      _viaArticle = via;
       _highlights = highlights;
     });
     // One-time per article (not on highlight/reprocess reloads, which also
@@ -230,6 +240,74 @@ class _ArticleScreenState extends State<ArticleScreen> {
     } else {
       _goToPreviousOrBack(); // swipe right
     }
+  }
+
+  /// A tapped link offers to open in the browser (online) and/or save the
+  /// page to read later. Saving queues it for download (immediately when
+  /// online, on the next sync otherwise), bookmarks it under To Read, and
+  /// remembers this article as where it came from.
+  Future<void> _onLinkTap(String url, String anchorText) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    final online = await SyncService.instance.isOnline();
+    if (!mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text(
+                online ? url : 'You\'re offline\n$url',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14),
+              ),
+            ),
+            const Divider(height: 1),
+            if (online)
+              ListTile(
+                leading: const Icon(Icons.open_in_browser),
+                title: const Text('Open in browser'),
+                onTap: () => Navigator.pop(context, 'open'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.bookmark_add_outlined),
+              title: const Text('Read later'),
+              subtitle: Text(online
+                  ? 'Download now and add to To Read'
+                  : 'Added to To Read; downloads when back online'),
+              onTap: () => Navigator.pop(context, 'save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'open') {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
+    final saved = await _db.saveLinkForLater(
+      url: url,
+      title: anchorText,
+      viaArticleId: _currentId,
+    );
+    if (online && saved.fetched == 0) {
+      unawaited(SyncService.instance.downloadArticle(saved.id!));
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(online
+            ? 'Saved to To Read — downloading'
+            : 'Saved to To Read — will download when back online')));
   }
 
   Future<void> _toggleFavorite() async {
@@ -484,6 +562,25 @@ class _ArticleScreenState extends State<ArticleScreen> {
                               fontSize: _fontSize - 4,
                               fontStyle: FontStyle.italic)),
                     ),
+                  // Saved links remember the story they were found in.
+                  if (_viaArticle != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: InkWell(
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => ArticleScreen(
+                                    articleId: _viaArticle!.id!))),
+                        child: Text(
+                          'From: ${_viaArticle!.displayTitle}',
+                          style: TextStyle(
+                            fontSize: _fontSize - 4,
+                            fontStyle: FontStyle.italic,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ),
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     child: Divider(),
@@ -493,6 +590,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
                     fontSize: _fontSize,
                     highlights: [for (final h in _highlights) h.text],
                     onHighlightTap: _manageHighlight,
+                    onLinkTap: _onLinkTap,
                   ),
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 20),

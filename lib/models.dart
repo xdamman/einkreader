@@ -6,7 +6,12 @@ enum SourceType {
   twitterBookmarks,
   twitterLikes,
   nostrBookmarks,
-  nostrLikes;
+  nostrLikes,
+
+  /// Built-in queue of links the user saved from inside articles. Nothing to
+  /// pull remotely — its articles are inserted locally with fetched = 0 and
+  /// downloaded by the regular pending-content pass.
+  savedLinks;
 
   static SourceType fromName(String name) =>
       SourceType.values.firstWhere((t) => t.name == name,
@@ -18,6 +23,7 @@ enum SourceType {
         SourceType.twitterLikes => 'Twitter Likes',
         SourceType.nostrBookmarks => 'Nostr Bookmarks',
         SourceType.nostrLikes => 'Nostr Likes',
+        SourceType.savedLinks => 'Saved Links',
       };
 }
 
@@ -94,6 +100,10 @@ class Article {
   /// most recently touched. Null when there is no saved position.
   final int? scrolledAt;
 
+  /// For links saved from inside another article: the id of the article the
+  /// link was found in, shown as "From: …" in the reader header.
+  final int? viaArticleId;
+
   const Article({
     this.id,
     required this.sourceId,
@@ -111,6 +121,7 @@ class Article {
     required this.createdAt,
     this.scrollPosition = 0,
     this.scrolledAt,
+    this.viaArticleId,
   });
 
   Article copyWith({String? title, String? contentMarkdown, int? favorite}) =>
@@ -131,6 +142,7 @@ class Article {
         createdAt: createdAt,
         scrollPosition: scrollPosition,
         scrolledAt: scrolledAt,
+        viaArticleId: viaArticleId,
       );
 
   /// Normalized form of [url] used to detect the same story arriving from
@@ -182,6 +194,7 @@ class Article {
         'created_at': createdAt,
         'scroll_position': scrollPosition,
         'scrolled_at': scrolledAt,
+        'via_article_id': viaArticleId,
       };
 
   /// Canonicalizes a URL for deduplication: lowercases the host, drops
@@ -233,6 +246,7 @@ class Article {
         createdAt: m['created_at'] as int,
         scrollPosition: (m['scroll_position'] as num?)?.toDouble() ?? 0,
         scrolledAt: m['scrolled_at'] as int?,
+        viaArticleId: m['via_article_id'] as int?,
       );
 }
 
