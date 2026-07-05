@@ -228,7 +228,9 @@ class _MarkdownViewState extends State<MarkdownView> {
         continue;
       }
 
-      if (RegExp(r'^(\-{3,}|\*{3,}|_{3,})$').hasMatch(trimmed)) {
+      // Thematic break: 3+ of the same marker, optionally space-separated —
+      // html2md emits hr as "* * *", which must win over the list parser.
+      if (RegExp(r'^([*\-_])(?:\s*\1){2,}$').hasMatch(trimmed)) {
         flushParagraph();
         blocks.add(_Block(_BlockType.rule, ''));
         continue;

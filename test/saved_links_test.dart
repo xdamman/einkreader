@@ -112,6 +112,36 @@ void main() {
     expect(text, isNot(contains(r'\[Smith')));
   });
 
+  testWidgets(r'escaped list numbers (1\.) render as literal 1.',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: '1\\. First point\n\n2\\. Second point',
+        ),
+      ),
+    ));
+    final text = renderedText(tester);
+    expect(text, contains('1. First point'));
+    expect(text, contains('2. Second point'));
+    expect(text, isNot(contains(r'\.')));
+  });
+
+  testWidgets('*** and * * * render as a horizontal rule, not a list',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: 'Above.\n\n***\n\nBetween.\n\n* * *\n\nBelow.',
+        ),
+      ),
+    ));
+    expect(find.byType(Divider), findsNWidgets(2));
+    final text = renderedText(tester);
+    expect(text, isNot(contains('*')));
+    expect(text, isNot(contains('•')), reason: 'no stray list bullet');
+  });
+
   testWidgets('image alt text is not shown as a caption', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
