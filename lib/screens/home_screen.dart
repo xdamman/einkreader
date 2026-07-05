@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
+import '../services/share_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
+import '../widgets/clipboard_link_prompt.dart';
 import '../widgets/highlight_list.dart';
 import '../widgets/resume_reading.dart';
 import 'add_source_screen.dart';
@@ -49,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _developerMode = false;
   StreamSubscription<SyncProgress>? _progressSub;
   StreamSubscription<void>? _logSub;
+  StreamSubscription<SharedLink>? _shareSub;
 
   @override
   void initState() {
@@ -74,6 +77,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _logSub = AppLogService.instance.changes.stream.listen((_) {
       if (mounted) _loadDeveloperMode();
     });
+    // Links shared into the app ("Share → einkreader") are queued to To Read.
+    _shareSub = ShareLinkService.instance.links.stream.listen(_saveSharedLink);
+    ShareLinkService.instance.init();
     // Refresh everything on launch so content is ready for offline reading.
     if (SyncService.instance.autoSyncOnLaunch) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _sync(silent: true));
@@ -84,7 +90,29 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _progressSub?.cancel();
     _logSub?.cancel();
+    _shareSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _saveSharedLink(SharedLink link) async {
+    final saved = await _db.saveLinkForLater(url: link.url, title: link.title);
+    _startDownload(saved);
+  }
+
+  /// Post-save handling shared by the share sheet and the clipboard prompt:
+  /// kick off the download right away when online (otherwise the next sync
+  /// picks it up), refresh the feed, and confirm.
+  Future<void> _startDownload(Article saved) async {
+    final online = await SyncService.instance.isOnline();
+    if (online && saved.fetched == 0) {
+      unawaited(SyncService.instance.downloadArticle(saved.id!));
+    }
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(online
+            ? 'Saved to To Read — downloading'
+            : 'Saved to To Read — will download when back online')));
   }
 
   bool _loading = false;
@@ -195,6 +223,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(child: _body()),
         ],
       ),
+      // Slim, dismissible offer to save a URL sitting in the clipboard.
+      bottomNavigationBar: ClipboardLinkPrompt(onSaved: _startDownload),
     );
   }
 

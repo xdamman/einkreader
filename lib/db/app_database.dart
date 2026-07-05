@@ -460,28 +460,34 @@ class AppDatabase {
   /// queued for download (fetched = 0) so the next online sync fetches its
   /// content. If the same story is already stored under any source, it is
   /// just bookmarked instead. Returns the queued (or existing) article.
+  /// Finds an already-stored article for [url] via its canonical form (same
+  /// dedup rule as [insertArticleIfNew]). Null when unknown or unmatched.
+  Future<Article?> findArticleByUrl(String url) async {
+    final key = Article.canonicalUrl(url);
+    if (key == null) return null;
+    final db = await database;
+    final rows = await db.query(
+      'articles',
+      where: 'url_key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : Article.fromMap(rows.first);
+  }
+
   Future<Article> saveLinkForLater({
     required String url,
     String? title,
     int? viaArticleId,
   }) async {
     final db = await database;
-    final key = Article.canonicalUrl(url);
-    if (key != null) {
-      final rows = await db.query(
-        'articles',
-        where: 'url_key = ?',
-        whereArgs: [key],
-        limit: 1,
+    final existing = await findArticleByUrl(url);
+    if (existing != null) {
+      await setReadLater(existing.id!, true);
+      await AppLogService.instance.info(
+        'Link already stored as article #${existing.id}; bookmarked it',
       );
-      if (rows.isNotEmpty) {
-        final existing = Article.fromMap(rows.first);
-        await setReadLater(existing.id!, true);
-        await AppLogService.instance.info(
-          'Link already stored as article #${existing.id}; bookmarked it',
-        );
-        return (await getArticle(existing.id!))!;
-      }
+      return (await getArticle(existing.id!))!;
     }
     final source = await ensureSavedLinksSource();
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -514,9 +520,9 @@ class AppDatabase {
       whereArgs: [source.id, url],
       limit: 1,
     );
-    final existing = Article.fromMap(rows.first);
-    await setReadLater(existing.id!, true);
-    return (await getArticle(existing.id!))!;
+    final raced = Article.fromMap(rows.first);
+    await setReadLater(raced.id!, true);
+    return (await getArticle(raced.id!))!;
   }
 
   // ------------------------------------------------------------- highlights
