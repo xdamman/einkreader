@@ -68,14 +68,20 @@ class _ArticleScreenState extends State<ArticleScreen> {
       _article = article;
       _highlights = highlights;
     });
-    if (article != null && article.read == 0) {
-      await _db.markArticleRead(article.id!);
+    // One-time per article (not on highlight/reprocess reloads, which also
+    // land here): restore the saved position or auto-read a short article.
+    if (article != null && _preparedId != article.id) {
+      _preparedId = article.id;
+      _reachedBottom = false;
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _prepareScroll(article));
     }
   }
 
   /// Swipe left → next article in the feed (no-op past the end).
   void _goToNext() {
     if (_index >= _ids.length - 1) return;
+    _saveProgress();
     setState(() => _index++);
     _load();
   }
@@ -87,8 +93,89 @@ class _ArticleScreenState extends State<ArticleScreen> {
       Navigator.of(context).maybePop();
       return;
     }
+    _saveProgress();
     setState(() => _index--);
     _load();
+  }
+
+  // ------------------------------------------------------- reading progress
+  // An unread article becomes "reading" (position saved, shown under Resume
+  // reading) once the user scrolls down; scrolling back to the top before
+  // ever reaching the bottom resets it to unread, and reaching the bottom
+  // marks it read. Read articles are left alone — only an explicit
+  // "mark as unread" restarts the cycle.
+
+  final ScrollController _scroll = ScrollController();
+
+  /// Whether the bottom was reached for the article currently on screen.
+  bool _reachedBottom = false;
+
+  /// Article id whose post-layout preparation (restore / auto-read) ran, so
+  /// reloads after highlighting or reprocessing don't yank the scroll back.
+  int? _preparedId;
+
+  /// Scrolls shorter than this (px) don't count as "started reading".
+  static const double _minReadingOffset = 24;
+
+  /// After the article's first layout: jump to the saved reading position, or
+  /// mark an article that fits entirely on screen as read — its bottom is
+  /// visible on open and no scrolling can ever happen.
+  void _prepareScroll(Article article) {
+    if (!mounted || !_scroll.hasClients || _currentId != article.id) return;
+    final maxExtent = _scroll.position.maxScrollExtent;
+    if (maxExtent <= 0) {
+      _reachedBottom = true;
+      if (article.read == 0) _markRead();
+      return;
+    }
+    if (article.read == 0 && article.scrollPosition > 0) {
+      _scroll.jumpTo(article.scrollPosition.clamp(0.0, maxExtent));
+    }
+  }
+
+  void _onScroll(ScrollMetrics metrics, {required bool settled}) {
+    final article = _article;
+    if (article == null || metrics.axis != Axis.vertical) return;
+    if (!_reachedBottom &&
+        metrics.maxScrollExtent > 0 &&
+        metrics.pixels >= metrics.maxScrollExtent - 8) {
+      _reachedBottom = true;
+      if (article.read == 0) _markRead();
+      return;
+    }
+    // Persist on scroll end only: e-ink scrolling is discrete, so this stays
+    // cheap. Back near the top saves 0, which resets the article to unread.
+    if (settled && !_reachedBottom && article.read == 0) {
+      final offset = metrics.pixels;
+      _db.saveScrollPosition(
+          article.id!, offset < _minReadingOffset ? 0 : offset);
+    }
+  }
+
+  /// Saves the current position when leaving the article (swipe or pop).
+  void _saveProgress() {
+    final article = _article;
+    if (article == null || article.read != 0 || _reachedBottom) return;
+    if (!_scroll.hasClients) return;
+    final offset = _scroll.position.pixels;
+    _db.saveScrollPosition(
+        article.id!, offset < _minReadingOffset ? 0 : offset);
+  }
+
+  Future<void> _markRead() async {
+    final article = _article;
+    if (article == null || article.read != 0) return;
+    await _db.markArticleRead(article.id!);
+    final updated = await _db.getArticle(article.id!);
+    if (!mounted || updated == null || updated.id != _currentId) return;
+    setState(() => _article = updated);
+  }
+
+  @override
+  void dispose() {
+    _saveProgress();
+    _scroll.dispose();
+    super.dispose();
   }
 
   // Swipe detection via raw pointer events (a Listener), not a GestureDetector:
@@ -355,6 +442,15 @@ class _ArticleScreenState extends State<ArticleScreen> {
             ],
           );
         },
+        child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollUpdateNotification ||
+              notification is ScrollEndNotification) {
+            _onScroll(notification.metrics,
+                settled: notification is ScrollEndNotification);
+          }
+          return false;
+        },
         child: LayoutBuilder(
           builder: (context, constraints) {
             // Comfortable measure on tablets: cap the text column width.
@@ -364,6 +460,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
             return SingleChildScrollView(
               // New identity per article so scroll resets to the top on swipe.
               key: ValueKey(_currentId),
+              controller: _scroll,
               physics: const ClampingScrollPhysics(),
               padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 48),
               child: Column(
@@ -416,6 +513,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
               ),
             );
           },
+        ),
         ),
         ),
       ),

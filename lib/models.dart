@@ -85,6 +85,15 @@ class Article {
   final int favorite;
   final int createdAt;
 
+  /// Saved reading position in scroll pixels. An unread article with a
+  /// position > 0 is "being read" and shows up under Resume reading; reaching
+  /// the bottom marks it read and clears the position.
+  final double scrollPosition;
+
+  /// When [scrollPosition] was last saved, so Resume reading can order by
+  /// most recently touched. Null when there is no saved position.
+  final int? scrolledAt;
+
   const Article({
     this.id,
     required this.sourceId,
@@ -100,6 +109,8 @@ class Article {
     this.readLater = 0,
     this.favorite = 0,
     required this.createdAt,
+    this.scrollPosition = 0,
+    this.scrolledAt,
   });
 
   Article copyWith({String? title, String? contentMarkdown, int? favorite}) =>
@@ -118,6 +129,8 @@ class Article {
         readLater: readLater,
         favorite: favorite ?? this.favorite,
         createdAt: createdAt,
+        scrollPosition: scrollPosition,
+        scrolledAt: scrolledAt,
       );
 
   /// Normalized form of [url] used to detect the same story arriving from
@@ -167,6 +180,8 @@ class Article {
         'read_later': readLater,
         'favorite': favorite,
         'created_at': createdAt,
+        'scroll_position': scrollPosition,
+        'scrolled_at': scrolledAt,
       };
 
   /// Canonicalizes a URL for deduplication: lowercases the host, drops
@@ -216,6 +231,8 @@ class Article {
         readLater: (m['read_later'] as int?) ?? 0,
         favorite: (m['favorite'] as int?) ?? 0,
         createdAt: m['created_at'] as int,
+        scrollPosition: (m['scroll_position'] as num?)?.toDouble() ?? 0,
+        scrolledAt: m['scrolled_at'] as int?,
       );
 }
 

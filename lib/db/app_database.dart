@@ -25,7 +25,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -87,6 +87,12 @@ class AppDatabase {
         }
       }
     }
+    if (oldVersion < 4) {
+      await db.execute(
+        'ALTER TABLE articles ADD COLUMN scroll_position REAL NOT NULL DEFAULT 0',
+      );
+      await db.execute('ALTER TABLE articles ADD COLUMN scrolled_at INTEGER');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -117,6 +123,8 @@ class AppDatabase {
         read_later INTEGER NOT NULL DEFAULT 0,
         favorite INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
+        scroll_position REAL NOT NULL DEFAULT 0,
+        scrolled_at INTEGER,
         UNIQUE(source_id, guid)
       )
     ''');
@@ -384,11 +392,31 @@ class AppDatabase {
     );
   }
 
+  /// Sets the read flag and always clears the saved reading position: a read
+  /// article restarts from the top, and marking unread resets any progress —
+  /// either way the article leaves the Resume reading section.
   Future<void> markArticleRead(int id, {bool read = true}) async {
     final db = await database;
     await db.update(
       'articles',
-      {'read': read ? 1 : 0},
+      {'read': read ? 1 : 0, 'scroll_position': 0.0, 'scrolled_at': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Saves the reading position. A position > 0 puts an unread article in the
+  /// "reading" state (shown under Resume reading); 0 puts it back to plain
+  /// unread.
+  Future<void> saveScrollPosition(int id, double position) async {
+    final db = await database;
+    await db.update(
+      'articles',
+      {
+        'scroll_position': position,
+        'scrolled_at':
+            position > 0 ? DateTime.now().millisecondsSinceEpoch : null,
+      },
       where: 'id = ?',
       whereArgs: [id],
     );

@@ -8,6 +8,7 @@ import '../services/app_log.dart';
 import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
 import '../widgets/highlight_list.dart';
+import '../widgets/resume_reading.dart';
 import 'add_source_screen.dart';
 import 'settings_screen.dart';
 import 'sources_screen.dart';
@@ -316,9 +317,17 @@ class _HomeScreenState extends State<HomeScreen> {
         : _articles.where((a) => a.sourceId == selectedId).toList();
     final allUnread = unread.values.fold(0, (sum, value) => sum + value);
 
+    final currentReads = ResumeReadingSection.currentReads(_articles);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (currentReads.isNotEmpty)
+          ResumeReadingSection(
+            articles: currentReads,
+            sourceTitles: _sourceTitles,
+            onChanged: _load,
+          ),
         _SourceFilterBar(
           sources: sources,
           selectedId: selectedId,
