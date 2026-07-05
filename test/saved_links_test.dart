@@ -220,10 +220,14 @@ void main() {
     await settle(tester);
 
     expect(find.text('From: The Origin Story'), findsOneWidget);
+    // The top bar shows the publisher's domain for saved links…
+    expect(find.textContaining('example.org:'), findsOneWidget);
+
     await tester.tap(find.text('From: The Origin Story'));
     await settle(tester);
-    // The origin article opened.
+    // The origin article opened, its top bar prefixed with its feed's name.
     expect(find.text('The Origin Story'), findsWidgets);
+    expect(find.textContaining('Feed: The Origin Story'), findsOneWidget);
     expect(find.textContaining('Intro paragraph', findRichText: true),
         findsOneWidget);
   });

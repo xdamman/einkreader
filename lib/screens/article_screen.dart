@@ -43,6 +43,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
   /// The article this one was saved from (via a tapped link), for the
   /// "From: …" line in the header. Null for regular articles.
   Article? _viaArticle;
+
+  /// The article's source, for the origin prefix in the top bar.
+  Source? _source;
   List<Highlight> _highlights = [];
   String _selectedText = '';
   double _fontSize = 18;
@@ -72,10 +75,13 @@ class _ArticleScreenState extends State<ArticleScreen> {
     final via = article?.viaArticleId == null
         ? null
         : await _db.getArticle(article!.viaArticleId!);
+    final source =
+        article == null ? null : await _db.getSource(article.sourceId);
     if (!mounted) return;
     setState(() {
       _article = article;
       _viaArticle = via;
+      _source = source;
       _highlights = highlights;
     });
     // One-time per article (not on highlight/reprocess reloads, which also
@@ -434,6 +440,22 @@ class _ArticleScreenState extends State<ArticleScreen> {
     }
   }
 
+  /// Origin shown before the title in the top bar: the feed's name, or — for
+  /// saved links, which all live under the generic Saved Links source — the
+  /// domain the article was published on (e.g. "BX1: …" / "brusselstimes.com:
+  /// …").
+  String? get _originLabel {
+    final article = _article;
+    if (article == null) return null;
+    final source = _source;
+    if (source != null && source.type != SourceType.savedLinks) {
+      return source.title;
+    }
+    final host = Uri.tryParse(article.url ?? '')?.host ?? '';
+    if (host.isNotEmpty) return host.replaceFirst(RegExp(r'^www\.'), '');
+    return source?.title;
+  }
+
   @override
   Widget build(BuildContext context) {
     final article = _article;
@@ -458,7 +480,10 @@ class _ArticleScreenState extends State<ArticleScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(article.title,
+        title: Text(
+            _originLabel == null
+                ? article.displayTitle
+                : '$_originLabel: ${article.displayTitle}',
             maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 16)),
         actions: [
