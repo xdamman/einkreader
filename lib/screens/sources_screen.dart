@@ -52,17 +52,19 @@ class _SourcesScreenState extends State<SourcesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Folders first (each with its sources indented), then top-level sources.
+    // Folders first (each with its sources indented), then top-level sources;
+    // everything alphabetical so the list keeps a stable, memorable layout.
+    final sorted = [..._sources]..sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
     final entries = <Widget>[];
     for (final folder in _folders) {
-      final members =
-          _sources.where((s) => s.folderId == folder.id).toList();
+      final members = sorted.where((s) => s.folderId == folder.id).toList();
       entries.add(_folderTile(folder, members));
       for (final source in members) {
         entries.add(_sourceTile(source, indented: true));
       }
     }
-    for (final source in _sources.where((s) => s.folderId == null)) {
+    for (final source in sorted.where((s) => s.folderId == null)) {
       entries.add(_sourceTile(source, indented: false));
     }
 

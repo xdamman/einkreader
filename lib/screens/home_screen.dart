@@ -346,10 +346,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Feed tab: a swipable filter strip above the article list — "All" first,
-  /// then folders, then top-level sources, ordered by unread count then total
-  /// items. Tapping a source filters the feed to it; tapping a folder opens a
-  /// menu with the whole folder and its sources. With no sources configured
-  /// yet, a centered call-to-action replaces the feed.
+  /// then folders, then top-level sources, each group alphabetical. A stable
+  /// order preserves the reader's spatial memory of where each chip lives.
+  /// Tapping a source filters the feed to it; tapping a folder opens a menu
+  /// with the whole folder and its sources. With no sources configured yet, a
+  /// centered call-to-action replaces the feed.
   Widget _buildFeed() {
     if (_sourceTitles.isEmpty) {
       return _EmptySourcesView(onAdd: _showAddSourceSheet);
@@ -362,10 +363,8 @@ class _HomeScreenState extends State<HomeScreen> {
         unread[article.sourceId] = (unread[article.sourceId] ?? 0) + 1;
       }
     }
-    int compareFilters(_SourceFilter a, _SourceFilter b) {
-      final byUnread = b.unread.compareTo(a.unread);
-      return byUnread != 0 ? byUnread : b.total.compareTo(a.total);
-    }
+    int compareFilters(_SourceFilter a, _SourceFilter b) =>
+        a.title.toLowerCase().compareTo(b.title.toLowerCase());
 
     _SourceFilter filterFor(int id) => _SourceFilter(
           id: id,
@@ -398,10 +397,8 @@ class _HomeScreenState extends State<HomeScreen> {
         members: members,
       ));
     }
-    folders.sort((a, b) {
-      final byUnread = b.unread.compareTo(a.unread);
-      return byUnread != 0 ? byUnread : b.total.compareTo(a.total);
-    });
+    folders.sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
     // Fall back to "All" if the selection no longer has any articles.
     final selectedId =

@@ -112,6 +112,37 @@ void main() {
     expect(text, isNot(contains(r'\[Smith')));
   });
 
+  testWidgets(r'an escaped link \[text\](url) still renders as a link',
+      (tester) async {
+    // html2md escapes brackets that arrived as literal text; bracketed text
+    // followed by (url) is a real link and must render as one — underlined,
+    // tappable, with no stray backslashes.
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: '> \\[Voici les mesures annoncées\\]'
+              '(https://bx1.be/categories/news/mesures/)',
+        ),
+      ),
+    ));
+    final text = renderedText(tester);
+    expect(text, 'Voici les mesures annoncées');
+    TextSpan? anchor;
+    void walk(InlineSpan span) {
+      if (span is TextSpan) {
+        if (span.text == 'Voici les mesures annoncées') anchor = span;
+        (span.children ?? const <InlineSpan>[]).forEach(walk);
+      }
+    }
+
+    for (final rich in tester.widgetList<RichText>(find.byType(RichText))) {
+      walk(rich.text);
+    }
+    expect(anchor, isNotNull);
+    expect(anchor!.style?.decoration, TextDecoration.underline);
+    expect(anchor!.recognizer, isA<TapGestureRecognizer>());
+  });
+
   testWidgets(r'escaped list numbers (1\.) render as literal 1.',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

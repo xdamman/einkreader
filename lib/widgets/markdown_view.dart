@@ -285,10 +285,15 @@ class _MarkdownViewState extends State<MarkdownView> {
 
   // ---------------------------------------------------------- inline spans
 
+  // The last alternative is a backslash-escaped link \[text\](url): html2md
+  // escapes brackets that arrived as literal text, but bracketed text followed
+  // by a parenthesized URL is in practice always a real link — render it as
+  // one instead of leaving mangled text.
   static final _inlinePattern = RegExp(
       r'\*\*(.+?)\*\*|__(.+?)__|\*([^*\s][^*]*?)\*|_([^_\s][^_]*?)_|'
       r'`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
-      r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)');
+      r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
+      r'\\\[([^\]]+?)\\\]\(([^)\s]+)(?:\s+"[^"]*")?\)');
 
   List<InlineSpan> _inlineSpans(String text, TextStyle style) {
     final spans = <InlineSpan>[];
@@ -312,9 +317,9 @@ class _MarkdownViewState extends State<MarkdownView> {
                 fontFamilyFallback: const [],
                 backgroundColor: const Color(0xFFEEEEEE)),
             unescape: false));
-      } else if (match.group(6) != null) {
-        final url = match.group(7)!;
-        final anchor = _unescape(match.group(6)!);
+      } else if (match.group(6) != null || match.group(10) != null) {
+        final url = (match.group(7) ?? match.group(11))!;
+        final anchor = _unescape((match.group(6) ?? match.group(10))!);
         final recognizer = TapGestureRecognizer()
           ..onTap = () {
             final onLinkTap = widget.onLinkTap;
