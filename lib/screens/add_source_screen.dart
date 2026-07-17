@@ -3,15 +3,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
 import '../services/feed_parser.dart';
+import '../services/nostr_service.dart';
 import '../services/sync_service.dart';
 
-/// Adds an RSS/Atom source. Accepts either a feed URL directly or a website
-/// URL — in that case the feed is discovered from the page's <link> tags.
+/// Adds a source, whichever kind: an RSS/Atom feed (a feed URL directly or a
+/// website/domain — the feed is discovered from the page's `<link>` tags), a
+/// Twitter account (bookmarks feed via OAuth), or a Nostr npub (bookmarks and
+/// likes feeds).
 class AddSourceScreen extends StatefulWidget {
   const AddSourceScreen({super.key});
 
@@ -20,14 +24,124 @@ class AddSourceScreen extends StatefulWidget {
 }
 
 class _AddSourceScreenState extends State<AddSourceScreen> {
+  final _db = AppDatabase.instance;
+  final _twitter = SyncService.instance.twitter;
   final _controller = TextEditingController();
+  final _clientIdController = TextEditingController();
+  final _npubController = TextEditingController();
   bool _busy = false;
+  bool _twitterBusy = false;
+  bool _twitterConnected = false;
+  String? _twitterUsername;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAccounts();
+  }
 
   @override
   void dispose() {
     _controller.dispose();
+    _clientIdController.dispose();
+    _npubController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    var connected = false;
+    String? username;
+    try {
+      connected = await _twitter.isConnected;
+      username = await _twitter.username;
+    } catch (_) {
+      // Secure storage unavailable (tests); treat as disconnected.
+    }
+    if (!mounted) return;
+    setState(() {
+      _twitterConnected = connected;
+      _twitterUsername = username;
+      _clientIdController.text = prefs.getString('twitter_client_id') ?? '';
+      _npubController.text = prefs.getString('nostr_npub') ?? '';
+    });
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _connectTwitter() async {
+    final clientId = _clientIdController.text.trim();
+    if (clientId.isEmpty) {
+      _toast('Enter your Twitter OAuth 2.0 Client ID first');
+      return;
+    }
+    setState(() => _twitterBusy = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('twitter_client_id', clientId);
+      final username = await _twitter.connect(clientId);
+      final source = await _db.insertSource(Source(
+        type: SourceType.twitterBookmarks,
+        title: 'Twitter Bookmarks',
+        url: username,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      ));
+      _toast('Connected as @$username');
+      await _loadAccounts();
+      // Pull in this source's items right away.
+      unawaited(SyncService.instance.syncSources([source]));
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => _twitterBusy = false);
+    }
+  }
+
+  /// Drops the OAuth credentials only. The bookmarks source and its
+  /// downloaded articles and highlights stay — reconnecting (e.g. to grant a
+  /// new permission) must never cost data. Removing the source is an
+  /// explicit act in Manage sources, with its own warning.
+  Future<void> _disconnectTwitter() async {
+    await _twitter.disconnect();
+    _toast('Twitter disconnected — sources and articles kept');
+    await _loadAccounts();
+  }
+
+  Future<void> _addNostr() async {
+    final npub = _npubController.text.trim();
+    if (npub.isEmpty) {
+      _toast('Enter your npub first');
+      return;
+    }
+    try {
+      NostrService.decodeNpub(npub); // validate before saving
+    } catch (e) {
+      _toast('Invalid npub: $e');
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('nostr_npub', npub);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final bookmarks = await _db.insertSource(Source(
+      type: SourceType.nostrBookmarks,
+      title: 'Nostr Bookmarks',
+      url: npub,
+      createdAt: now,
+    ));
+    final likes = await _db.insertSource(Source(
+      type: SourceType.nostrLikes,
+      title: 'Nostr Likes',
+      url: npub,
+      createdAt: now,
+    ));
+    _toast('Nostr sources added');
+    // Pull in the new sources' items right away.
+    unawaited(SyncService.instance.syncSources([bookmarks, likes]));
   }
 
   Future<void> _add() async {
@@ -134,6 +248,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const sectionStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
     return Scaffold(
       appBar: AppBar(title: const Text('Add source')),
       body: SingleChildScrollView(
@@ -141,20 +256,21 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const Text('RSS feed', style: sectionStyle),
+            const SizedBox(height: 8),
             const Text(
-              'Paste a feed URL or a website address — the feed will be '
-              'discovered automatically.',
+              'Paste a feed URL, a website address or just a domain — the '
+              'feed will be discovered automatically.',
               style: TextStyle(fontSize: 15),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _controller,
-              autofocus: true,
               keyboardType: TextInputType.url,
               autocorrect: false,
               decoration: const InputDecoration(
                 labelText: 'Feed or website URL',
-                hintText: 'https://example.com/feed.xml',
+                hintText: 'example.com or https://example.com/feed.xml',
               ),
               onSubmitted: (_) => _add(),
             ),
@@ -176,11 +292,71 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
             ),
             const SizedBox(height: 32),
             const Divider(),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
+            const Text('Twitter / X', style: sectionStyle),
+            const SizedBox(height: 8),
             const Text(
-              'To add Twitter bookmarks/likes or Nostr bookmarks/likes, '
-              'connect your accounts in Settings.',
-              style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+              'Creates a feed from your Bookmarks. You need a '
+              'free OAuth 2.0 Client ID from developer.x.com with callback '
+              'URL einkreader://callback (see README).',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            if (_twitterConnected) ...[
+              Text(
+                'Connected as @${_twitterUsername ?? '?'}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: _disconnectTwitter,
+                child: const Text('Disconnect Twitter'),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Disconnecting keeps your sources, articles and highlights.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ] else ...[
+              TextField(
+                controller: _clientIdController,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'OAuth 2.0 Client ID',
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: _twitterBusy ? null : _connectTwitter,
+                child: Text(_twitterBusy ? 'Connecting…' : 'Connect Twitter'),
+              ),
+            ],
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+            const Text('Nostr', style: sectionStyle),
+            const SizedBox(height: 8),
+            const Text(
+              'Creates two feeds from your public bookmark list and likes. '
+              'Only your public key (npub) is needed — never a private key.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _npubController,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'npub',
+                hintText: 'npub1…',
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _addNostr,
+              child: const Text('Add Nostr sources'),
             ),
           ],
         ),

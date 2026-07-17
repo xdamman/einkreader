@@ -85,8 +85,8 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     child: Padding(
                       padding: EdgeInsets.all(32),
                       child: Text(
-                        'No sources yet.\n\nAdd an RSS feed below, or '
-                        'connect Twitter / Nostr in Settings.',
+                        'No sources yet.\n\nUse "Add source" below for an '
+                        'RSS feed, a Twitter account or a Nostr npub.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 16),
                       ),

@@ -69,10 +69,14 @@ class HighlightList extends StatelessWidget {
           style: const TextStyle(fontSize: 13),
         ),
       ),
-      trailing: IconButton(
-        tooltip: 'Share highlight',
-        icon: const Icon(Icons.share_outlined),
-        onPressed: () => _share(context, highlight),
+      // Builder: the menu anchors to this button's own context, so it opens
+      // next to its trigger instead of a tablet-height away in a bottom sheet.
+      trailing: Builder(
+        builder: (buttonContext) => IconButton(
+          tooltip: 'Share highlight',
+          icon: const Icon(Icons.share_outlined),
+          onPressed: () => _share(buttonContext, highlight),
+        ),
       ),
       onTap: () async {
         await Navigator.of(context).push(MaterialPageRoute(
@@ -86,37 +90,35 @@ class HighlightList extends StatelessWidget {
   }
 
   Future<void> _share(BuildContext context, Highlight highlight) async {
+    // Anchor the menu at the share button (see the Builder in _tile);
+    // measured before any await, while the context is synchronously valid.
+    final button = context.findRenderObject() as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        button.localToGlobal(Offset.zero, ancestor: overlay),
+        button.localToGlobal(button.size.bottomRight(Offset.zero),
+            ancestor: overlay),
+      ),
+      Offset.zero & overlay.size,
+    );
     final article =
         await AppDatabase.instance.getArticle(highlight.articleId);
     if (article == null || !context.mounted) return;
     final twitterConnected = await ShareActions.twitterConnected();
     if (!context.mounted) return;
-    final action = await showModalBottomSheet<String>(
+    final action = await showMenu<String>(
       context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.email_outlined),
-              title: const Text('Share by email'),
-              onTap: () => Navigator.pop(sheetContext, 'email'),
-            ),
-            if (twitterConnected)
-              ListTile(
-                leading: const Icon(Icons.alternate_email),
-                title: const Text('Share on Twitter'),
-                onTap: () => Navigator.pop(sheetContext, 'twitter'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.share_outlined),
-              title: const Text('Share…'),
-              onTap: () => Navigator.pop(sheetContext, 'share'),
-            ),
-          ],
-        ),
-      ),
+      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+      position: position,
+      items: [
+        const PopupMenuItem(value: 'email', child: Text('Share by email')),
+        if (twitterConnected)
+          const PopupMenuItem(
+              value: 'twitter', child: Text('Share on Twitter')),
+        const PopupMenuItem(value: 'share', child: Text('Share…')),
+      ],
     );
     if (action == null || !context.mounted) return;
     final body = ShareActions.highlightsBody(article, [highlight]);

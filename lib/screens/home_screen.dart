@@ -292,48 +292,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Bottom sheet offering the two ways to add a first source: connecting
-  /// Twitter/X (in Settings) or adding an RSS feed.
-  Future<void> _showAddSourceSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
-              child: Text('Add a source',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.alternate_email),
-              title: const Text('Connect Twitter / X'),
-              subtitle: const Text('Your bookmarks as a feed'),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const SettingsScreen()));
-                _load();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.rss_feed),
-              title: const Text('Add RSS feed'),
-              subtitle: const Text('Paste a feed or website URL'),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const AddSourceScreen()));
-                _load();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+  /// The Add source screen covers every kind (RSS, Twitter, Nostr).
+  Future<void> _openAddSource() async {
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AddSourceScreen()));
+    _load();
   }
 
   /// Feed tab: a swipable filter strip above the article list — "All" first,
@@ -344,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// centered call-to-action replaces the feed.
   Widget _buildFeed() {
     if (_sourceTitles.isEmpty) {
-      return _EmptySourcesView(onAdd: _showAddSourceSheet);
+      return _EmptySourcesView(onAdd: _openAddSource);
     }
     final total = <int, int>{};
     final unread = <int, int>{};

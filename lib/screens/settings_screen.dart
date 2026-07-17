@@ -9,18 +9,17 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../db/app_database.dart';
-import '../models.dart';
 import '../services/app_log.dart';
 import '../services/archive_store.dart';
 import '../services/backup_service.dart';
 import '../services/build_config.dart';
-import '../services/nostr_service.dart';
 import '../services/sync_service.dart';
 import '../services/update_service.dart';
 import 'sources_screen.dart';
 
-/// Account connections: Twitter (OAuth) and Nostr (public npub only).
+/// App settings: source management entry point, storage location, backup /
+/// restore and developer tools. Accounts (Twitter, Nostr) are connected from
+/// the Add source screen.
 class SettingsScreen extends StatefulWidget {
   /// Injectable for tests; defaults to the real GitHub-backed checker.
   final UpdateService? updateService;
@@ -32,14 +31,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _db = AppDatabase.instance;
-  final _twitter = SyncService.instance.twitter;
-  final _clientIdController = TextEditingController();
-  final _npubController = TextEditingController();
-
-  bool _twitterConnected = false;
-  String? _twitterUsername;
-  bool _busy = false;
   bool _developerMode = false;
 
   late final _updates = widget.updateService ?? UpdateService();
@@ -70,25 +61,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _load();
   }
 
-  @override
-  void dispose() {
-    _clientIdController.dispose();
-    _npubController.dispose();
-    super.dispose();
-  }
-
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    final connected = await _twitter.isConnected;
-    final username = await _twitter.username;
     final developerMode = await AppLogService.instance.isDeveloperModeEnabled();
     final archiveDir = await ArchiveStore.instance.baseDir();
     if (!mounted) return;
     setState(() {
-      _twitterConnected = connected;
-      _twitterUsername = username;
-      _clientIdController.text = prefs.getString('twitter_client_id') ?? '';
-      _npubController.text = prefs.getString('nostr_npub') ?? '';
       _developerMode = developerMode;
       _archiveDir = archiveDir;
       _customArchiveDir = prefs.getString(ArchiveStore.dirPrefKey) != null;
@@ -329,94 +307,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _connectTwitter() async {
-    final clientId = _clientIdController.text.trim();
-    if (clientId.isEmpty) {
-      _toast('Enter your Twitter OAuth 2.0 Client ID first');
-      return;
-    }
-    setState(() => _busy = true);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('twitter_client_id', clientId);
-      final username = await _twitter.connect(clientId);
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final source = await _db.insertSource(
-        Source(
-          type: SourceType.twitterBookmarks,
-          title: 'Twitter Bookmarks',
-          url: username,
-          createdAt: now,
-        ),
-      );
-      _toast('Connected as @$username');
-      await _load();
-      // Pull in this source's items right away.
-      unawaited(SyncService.instance.syncSources([source]));
-    } catch (e) {
-      _toast('$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _disconnectTwitter() async {
-    await _twitter.disconnect();
-    final sources = await _db.getSources();
-    for (final source in sources) {
-      if (source.type == SourceType.twitterBookmarks ||
-          source.type == SourceType.twitterLikes) {
-        await _db.deleteSource(source.id!);
-      }
-    }
-    _toast('Twitter disconnected');
-    await _load();
-  }
-
-  Future<void> _saveNostr() async {
-    final npub = _npubController.text.trim();
-    final prefs = await SharedPreferences.getInstance();
-    if (npub.isEmpty) {
-      await prefs.remove('nostr_npub');
-      final sources = await _db.getSources();
-      for (final source in sources) {
-        if (source.type == SourceType.nostrBookmarks ||
-            source.type == SourceType.nostrLikes) {
-          await _db.deleteSource(source.id!);
-        }
-      }
-      _toast('Nostr sources removed');
-      return;
-    }
-    try {
-      NostrService.decodeNpub(npub); // validate before saving
-    } catch (e) {
-      _toast('Invalid npub: $e');
-      return;
-    }
-    await prefs.setString('nostr_npub', npub);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final bookmarks = await _db.insertSource(
-      Source(
-        type: SourceType.nostrBookmarks,
-        title: 'Nostr Bookmarks',
-        url: npub,
-        createdAt: now,
-      ),
-    );
-    final likes = await _db.insertSource(
-      Source(
-        type: SourceType.nostrLikes,
-        title: 'Nostr Likes',
-        url: npub,
-        createdAt: now,
-      ),
-    );
-    _toast('Nostr sources added');
-    // Pull in the new sources' items right away.
-    unawaited(SyncService.instance.syncSources([bookmarks, likes]));
-  }
-
   @override
   Widget build(BuildContext context) {
     const sectionStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
@@ -440,69 +330,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const SourcesScreen())),
             ),
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Twitter / X', style: sectionStyle),
-            const SizedBox(height: 8),
-            const Text(
-              'Creates a feed from your Bookmarks. You need a '
-              'free OAuth 2.0 Client ID from developer.x.com with callback '
-              'URL einkreader://callback (see README).',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 12),
-            if (_twitterConnected) ...[
-              Text(
-                'Connected as @${_twitterUsername ?? '?'}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: _disconnectTwitter,
-                child: const Text('Disconnect Twitter'),
-              ),
-            ] else ...[
-              TextField(
-                controller: _clientIdController,
-                autocorrect: false,
-                decoration: const InputDecoration(
-                  labelText: 'OAuth 2.0 Client ID',
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: _busy ? null : _connectTwitter,
-                child: Text(_busy ? 'Connecting…' : 'Connect Twitter'),
-              ),
-            ],
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Nostr', style: sectionStyle),
-            const SizedBox(height: 8),
-            const Text(
-              'Creates two feeds from your public bookmark list and likes. '
-              'Only your public key (npub) is needed — never a private key.',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _npubController,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'npub',
-                hintText: 'npub1…',
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: _saveNostr,
-              child: const Text('Save Nostr sources'),
-            ),
             if (kCustomStorageSupported) ...[
               const SizedBox(height: 32),
               const Divider(),
@@ -516,13 +343,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 'The reading database itself stays in app storage.',
                 style: TextStyle(fontSize: 14),
               ),
+              const SizedBox(height: 8),
+              const Text(
+                'Everything is stored as plain Markdown files in a clear '
+                'directory structure — year/month/source folders per '
+                'article, a favorites copy, and a single highlights.md — '
+                'so your library is easy to back up, restore and browse '
+                'with any application.',
+                style: TextStyle(fontSize: 14),
+              ),
               const SizedBox(height: 12),
-              Text(
-                _archiveDir == null
-                    ? 'Current folder: …'
-                    : 'Current folder: $_archiveDir'
-                        '${_customArchiveDir ? '' : ' (app storage)'}',
-                style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      _archiveDir == null
+                          ? 'Current folder: …'
+                          : 'Current folder: $_archiveDir'
+                              '${_customArchiveDir ? '' : ' (app storage)'}',
+                      style: const TextStyle(
+                          fontSize: 13, fontFamily: 'monospace'),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Open folder',
+                    icon: const Icon(Icons.open_in_new),
+                    onPressed: _archiveDir == null
+                        ? null
+                        : () => OpenFilex.open(_archiveDir!),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               OutlinedButton.icon(

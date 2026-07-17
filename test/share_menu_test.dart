@@ -135,6 +135,41 @@ void main() {
     });
   });
 
+  testWidgets('quote-tweet dialog shows a preview card of the original',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => Center(
+            child: OutlinedButton(
+              onPressed: () => ShareActions.onTwitter(
+                context,
+                draft: '',
+                quoteTweetId: '123',
+                quotePreview: (
+                  author: '@someone',
+                  text: 'The original tweet text',
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('@someone'), findsOneWidget);
+    expect(find.text('The original tweet text'), findsOneWidget);
+    expect(find.text('Add your comment…'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+  });
+
   group('TwitterService.tweetIdFromUrl', () {
     test('extracts the status id from tweet URLs', () {
       expect(

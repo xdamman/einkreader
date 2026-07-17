@@ -43,6 +43,18 @@ class ShareActions {
     return 'My highlights from ${attribution(article)}:\n\n$quotes';
   }
 
+  /// Preview card content for a quoted tweet, from the article's own stored
+  /// text (works offline; the tweet IS the article).
+  static ({String? author, String text}) _quotePreviewOf(Article article) {
+    final raw =
+        article.contentMarkdown ?? article.summary ?? article.displayTitle;
+    final plain = Article.plainTitle(raw);
+    return (
+      author: article.author,
+      text: plain.length > 280 ? '${plain.substring(0, 280)}…' : plain,
+    );
+  }
+
   /// Tweets the article: a native quote tweet when the article itself is a
   /// tweet (the comment starts empty), otherwise title + link.
   static Future<void> tweetArticle(BuildContext context, Article article) {
@@ -56,6 +68,7 @@ class ShareActions {
               if (article.url != null) article.url!,
             ].join('\n'),
       quoteTweetId: quoteTweetId,
+      quotePreview: quoteTweetId == null ? null : _quotePreviewOf(article),
     );
   }
 
@@ -69,6 +82,7 @@ class ShareActions {
       draft: highlightsBody(article, highlights,
           withAttribution: quoteTweetId == null),
       quoteTweetId: quoteTweetId,
+      quotePreview: quoteTweetId == null ? null : _quotePreviewOf(article),
     );
   }
 
@@ -89,31 +103,43 @@ class ShareActions {
     await Share.share(body, subject: subject);
   }
 
+  /// Account facts the tweet dialog adapts to, resolved while it is already
+  /// on screen (never blocks it): who posts, and their character budget.
+  static Future<({int maxLength, String? username})> _accountInfo(
+      TwitterService twitter) async {
+    var maxLength = 280;
+    String? username;
+    try {
+      maxLength = await twitter.tweetMaxLength();
+    } catch (_) {}
+    try {
+      username = await twitter.username;
+    } catch (_) {}
+    return (maxLength: maxLength, username: username);
+  }
+
   /// Edit-then-post tweet dialog. Shows which account will post (so there's
   /// no doubt which connection is active), adapts the character budget to
   /// the account's plan (see TwitterService.tweetMaxLength), and posts as a
-  /// native quote tweet when [quoteTweetId] is given.
+  /// native quote tweet when [quoteTweetId] is given — with a preview card
+  /// of the quoted post, like on twitter.com.
   static Future<void> onTwitter(BuildContext context,
-      {required String draft, String? quoteTweetId}) async {
+      {required String draft,
+      String? quoteTweetId,
+      ({String? author, String text})? quotePreview}) async {
     final twitter = SyncService.instance.twitter;
-    final maxLength = await twitter.tweetMaxLength();
-    String? username;
-    try {
-      username = await twitter.username;
-    } catch (_) {
-      // Secure storage unavailable; just omit the byline.
-    }
-    if (!context.mounted) return;
-    final controller = TextEditingController(
-        text: draft.length > maxLength
-            ? draft.substring(0, maxLength)
-            : draft);
+    final accountInfo = _accountInfo(twitter);
+    final controller = TextEditingController(text: draft);
     final text = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
         title: const Text('Share on Twitter'),
-        content: Column(
+        content: FutureBuilder(
+          future: accountInfo,
+          builder: (context, snapshot) {
+            final username = snapshot.data?.username;
+            return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -132,14 +158,49 @@ class ShareActions {
               autofocus: true,
               maxLines: 8,
               minLines: 3,
-              maxLength: maxLength,
+              maxLength: snapshot.data?.maxLength ?? 280,
               decoration: InputDecoration(
                 border: const OutlineInputBorder(),
                 hintText:
                     quoteTweetId != null ? 'Add your comment…' : null,
               ),
             ),
+            // Rendered like a quote card on twitter.com: rounded bordered
+            // box, author on top, tweet text below the comment field.
+            if (quotePreview != null)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(width: 1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (quotePreview.author != null &&
+                        quotePreview.author!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          quotePreview.author!,
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    Text(
+                      quotePreview.text,
+                      maxLines: 6,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, height: 1.35),
+                    ),
+                  ],
+                ),
+              ),
           ],
+            );
+          },
         ),
         actions: [
           TextButton(
