@@ -111,36 +111,43 @@ void main() {
     ));
     await settle(tester);
 
-    // All three stories visible under "All"; the folder shows as one chip.
+    // All three stories visible under "All"; the folder shows as one chip
+    // and its member sources have no top-row chips or second row yet.
     expect(find.text('Story Alpha'), findsOneWidget);
     expect(find.text('Story Gamma'), findsOneWidget);
     expect(find.text('News'), findsOneWidget);
+    // Only Story Beta's meta line mentions Beta — no chip for it yet.
+    expect(find.text('Beta'), findsOneWidget);
 
-    // Folder menu: the whole folder plus its two sources.
+    // One tap selects the folder and reveals its sources as a second chip
+    // row below the strip.
     await tester.tap(find.text('News'));
     await settle(tester);
-    expect(find.text('All in News'), findsOneWidget);
+    expect(find.text('Story Alpha'), findsOneWidget);
+    expect(find.text('Story Beta'), findsOneWidget);
+    expect(find.text('Story Gamma'), findsNothing);
+    expect(find.text('Beta'), findsNWidgets(2)); // member chip + tile meta
 
-    // Pick one source inside the folder → feed filtered to it.
-    await tester.tap(find.text('Alpha').last);
+    // Pick one source in the second row → feed filtered to it. `.first` is
+    // the chip; later matches are article tiles' meta lines.
+    await tester.tap(find.text('Alpha').first);
     await settle(tester);
     expect(find.text('Story Alpha'), findsOneWidget);
     expect(find.text('Story Beta'), findsNothing);
     expect(find.text('Story Gamma'), findsNothing);
 
-    // Pick the whole folder → both members, not the top-level source.
+    // Tapping the folder chip again re-selects the whole folder.
     await tester.tap(find.text('News'));
-    await settle(tester);
-    await tester.tap(find.text('All in News'));
     await settle(tester);
     expect(find.text('Story Alpha'), findsOneWidget);
     expect(find.text('Story Beta'), findsOneWidget);
     expect(find.text('Story Gamma'), findsNothing);
 
-    // Back to All.
+    // Back to All: the second row disappears (only the meta line remains).
     await tester.tap(find.text('All'));
     await settle(tester);
     expect(find.text('Story Gamma'), findsOneWidget);
+    expect(find.text('Beta'), findsOneWidget);
   });
 
   testWidgets('sources screen: rename folder, move source, delete folder',

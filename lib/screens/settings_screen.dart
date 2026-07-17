@@ -18,6 +18,7 @@ import '../services/build_config.dart';
 import '../services/nostr_service.dart';
 import '../services/sync_service.dart';
 import '../services/update_service.dart';
+import 'sources_screen.dart';
 
 /// Account connections: Twitter (OAuth) and Nostr (public npub only).
 class SettingsScreen extends StatefulWidget {
@@ -426,6 +427,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const Text('Sources', style: sectionStyle),
+            const SizedBox(height: 8),
+            const Text(
+              'Manage your feeds and organize them into folders.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.rss_feed),
+              label: const Text('Manage sources'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const SourcesScreen())),
+            ),
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
             const Text('Twitter / X', style: sectionStyle),
             const SizedBox(height: 8),
             const Text(

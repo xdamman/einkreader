@@ -14,7 +14,6 @@ import '../widgets/highlight_list.dart';
 import '../widgets/resume_reading.dart';
 import 'add_source_screen.dart';
 import 'settings_screen.dart';
-import 'sources_screen.dart';
 
 enum _HomeTab {
   feed('Feed'),
@@ -293,14 +292,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Opens the source-management screen and refreshes on return.
-  Future<void> _openSources() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const SourcesScreen()));
-    _load();
-  }
-
   /// Bottom sheet offering the two ways to add a first source: connecting
   /// Twitter/X (in Settings) or adding an RSS feed.
   Future<void> _showAddSourceSheet() async {
@@ -436,61 +427,23 @@ class _HomeScreenState extends State<HomeScreen> {
             _feedSourceId = id;
             _feedFolderId = null;
           }),
-          onFolderTap: _showFolderMenu,
-          onEdit: _openSources,
+          onFolderTap: (folder) => setState(() {
+            _feedFolderId = folder.id;
+            _feedSourceId = null;
+          }),
         ),
         Expanded(
           child: ArticleFeed(
             articles: articles,
             sourceTitles: _sourceTitles,
             emptyMessage:
-                'No articles yet.\n\nPull to sync, or tap the edit '
-                'button above to manage sources.',
+                'No articles yet.\n\nPull to sync, or manage sources '
+                'in Settings.',
             onChanged: _load,
           ),
         ),
       ],
     );
-  }
-
-  /// The folder chip's contextual menu: the whole folder, or one of its
-  /// sources.
-  Future<void> _showFolderMenu(_FolderFilter folder) async {
-    final choice = await showModalBottomSheet<Object>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.folder_outlined),
-              title: Text('All in ${folder.title}',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              trailing: folder.unread > 0 ? Text('${folder.unread}') : null,
-              onTap: () => Navigator.pop(sheetContext, 'folder'),
-            ),
-            const Divider(height: 1),
-            for (final member in folder.members)
-              ListTile(
-                title: Text(member.title),
-                trailing: member.unread > 0 ? Text('${member.unread}') : null,
-                onTap: () => Navigator.pop(sheetContext, member.id),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted || choice == null) return;
-    setState(() {
-      if (choice == 'folder') {
-        _feedFolderId = folder.id;
-        _feedSourceId = null;
-      } else {
-        _feedSourceId = choice as int;
-        _feedFolderId = null;
-      }
-    });
   }
 }
 
@@ -575,6 +528,8 @@ class _FolderFilter {
 
 /// Horizontally swipable strip of filter chips shown above the feed: "All"
 /// first, then folders, then top-level sources (both supplied ordered).
+/// Tapping a folder selects it and reveals a second row below with the
+/// folder's sources as the same kind of scrollable chip strip.
 class _SourceFilterBar extends StatelessWidget {
   final List<_FolderFilter> folders;
   final List<_SourceFilter> sources;
@@ -585,10 +540,6 @@ class _SourceFilterBar extends StatelessWidget {
   final ValueChanged<int?> onSelected;
   final ValueChanged<_FolderFilter> onFolderTap;
 
-  /// Opens source management. Pinned to the right of the strip so it stays
-  /// visible no matter how many sources scroll past under it.
-  final VoidCallback onEdit;
-
   const _SourceFilterBar({
     required this.folders,
     required this.sources,
@@ -598,73 +549,87 @@ class _SourceFilterBar extends StatelessWidget {
     required this.syncingSourceIds,
     required this.onSelected,
     required this.onFolderTap,
-    required this.onEdit,
   });
+
+  /// The folder whose sources show in the second row: the selected one, or
+  /// the one containing the selected source (which has no top-row chip).
+  _FolderFilter? get _activeFolder {
+    for (final folder in folders) {
+      if (selectedFolderId == folder.id ||
+          folder.members.any((m) => m.id == selectedId)) {
+        return folder;
+      }
+    }
+    return null;
+  }
+
+  Widget _chipRow(List<Widget> chips) => SizedBox(
+        height: 52,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          children: [
+            for (var i = 0; i < chips.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              chips[i],
+            ],
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final activeFolder = _activeFolder;
     return Container(
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(width: 1)),
       ),
-      child: SizedBox(
-        height: 52,
-        child: Row(
-          children: [
-            Expanded(
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                children: [
-                  _SourceChip(
-                    label: 'All',
-                    count: allUnread,
-                    selected: selectedId == null && selectedFolderId == null,
-                    syncing: false,
-                    onTap: () => onSelected(null),
-                  ),
-                  for (final folder in folders) ...[
-                    const SizedBox(width: 8),
-                    _SourceChip(
-                      label: folder.title,
-                      icon: Icons.folder_outlined,
-                      count: folder.unread,
-                      // Selected for the folder itself or a source inside it,
-                      // since that source has no chip of its own.
-                      selected: selectedFolderId == folder.id ||
-                          folder.members.any((m) => m.id == selectedId),
-                      syncing: folder.members
-                          .any((m) => syncingSourceIds.contains(m.id)),
-                      onTap: () => onFolderTap(folder),
-                    ),
-                  ],
-                  for (final source in sources) ...[
-                    const SizedBox(width: 8),
-                    _SourceChip(
-                      label: source.title,
-                      count: source.unread,
-                      selected: selectedId == source.id,
-                      syncing: syncingSourceIds.contains(source.id),
-                      onTap: () => onSelected(source.id),
-                    ),
-                  ],
-                ],
+      child: Column(
+        children: [
+          _chipRow([
+            _SourceChip(
+              label: 'All',
+              count: allUnread,
+              selected: selectedId == null && selectedFolderId == null,
+              syncing: false,
+              onTap: () => onSelected(null),
+            ),
+            for (final folder in folders)
+              _SourceChip(
+                label: folder.title,
+                icon: Icons.folder_outlined,
+                count: folder.unread,
+                // Selected for the folder itself or a source inside it,
+                // whose chip lives in the second row.
+                selected: selectedFolderId == folder.id ||
+                    folder.members.any((m) => m.id == selectedId),
+                syncing: folder.members
+                    .any((m) => syncingSourceIds.contains(m.id)),
+                onTap: () => onFolderTap(folder),
               ),
-            ),
-            // Pinned edit affordance for the source list, with a divider so it
-            // reads as separate from the scrolling chips.
-            const SizedBox(
-              height: 52,
-              child: VerticalDivider(width: 1, thickness: 1),
-            ),
-            IconButton(
-              tooltip: 'Edit sources',
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: onEdit,
-            ),
+            for (final source in sources)
+              _SourceChip(
+                label: source.title,
+                count: source.unread,
+                selected: selectedId == source.id,
+                syncing: syncingSourceIds.contains(source.id),
+                onTap: () => onSelected(source.id),
+              ),
+          ]),
+          if (activeFolder != null) ...[
+            const Divider(height: 1),
+            _chipRow([
+              for (final member in activeFolder.members)
+                _SourceChip(
+                  label: member.title,
+                  count: member.unread,
+                  selected: selectedId == member.id,
+                  syncing: syncingSourceIds.contains(member.id),
+                  onTap: () => onSelected(member.id),
+                ),
+            ]),
           ],
-        ),
+        ],
       ),
     );
   }
