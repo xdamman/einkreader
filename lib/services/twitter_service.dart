@@ -65,8 +65,10 @@ class TwitterService {
   static const _authorizeUrl = 'https://x.com/i/oauth2/authorize';
   static const _tokenUrl = 'https://api.x.com/2/oauth2/token';
   static const _apiBase = 'https://api.x.com/2';
+  // tweet.write enables "Share on Twitter" from the reader; connections made
+  // before it was added must be reconnected in Settings to grant it.
   static const _scopes =
-      'tweet.read users.read bookmark.read offline.access';
+      'tweet.read tweet.write users.read bookmark.read offline.access';
 
   static const _storage = FlutterSecureStorage();
   static const _kAccessToken = 'twitter_access_token';
@@ -250,6 +252,29 @@ class TwitterService {
       isLongForm: isLongFormTweet(tweet),
       linkedTweetId: linkedTweetId(tweet, body),
     );
+  }
+
+  /// Posts a tweet. Needs the tweet.write scope: accounts connected before
+  /// that scope was requested get a 403 until reconnected in Settings.
+  Future<void> postTweet(String text) async {
+    final token = await _validAccessToken();
+    final response = await _client.post(
+      Uri.parse('$_apiBase/tweets'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'text': text}),
+    );
+    if (response.statusCode == 403) {
+      throw Exception(
+          'Twitter refused the post. Reconnect Twitter in Settings to grant '
+          'the posting permission.');
+    }
+    if (response.statusCode != 201) {
+      throw Exception('Twitter API error ${response.statusCode}: '
+          '${response.body}');
+    }
   }
 
   // ----------------------------------------------------------------- tokens

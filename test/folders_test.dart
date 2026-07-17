@@ -162,8 +162,10 @@ void main() {
     expect(find.text('Press'), findsOneWidget);
     expect(find.text('News'), findsNothing);
 
-    // Move the top-level source into the folder via long-press.
-    await tester.longPress(find.text('Gamma'));
+    // Move the top-level source into the folder via its options button.
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Gamma'),
+        matching: find.byTooltip('Source options')));
     await settle(tester);
     await tester.tap(find.text('Move to folder…'));
     await settle(tester);

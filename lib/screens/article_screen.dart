@@ -316,6 +316,140 @@ class _ArticleScreenState extends State<ArticleScreen> {
             : 'Saved to To Read — will download when back online')));
   }
 
+  // ------------------------------------------------------------------ share
+
+  /// The top-bar share menu: open in the browser, share the article or its
+  /// highlights by email, or — when a Twitter account is connected — post a
+  /// tweet (edited in a dialog first).
+  Future<void> _showShareMenu() async {
+    final article = _article;
+    if (article == null) return;
+    var twitterConnected = false;
+    try {
+      twitterConnected = await SyncService.instance.twitter.isConnected;
+    } catch (_) {
+      // Secure storage unavailable (e.g. tests): no Twitter option.
+    }
+    if (!mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (article.url != null)
+              ListTile(
+                leading: const Icon(Icons.open_in_browser),
+                title: const Text('Open in browser'),
+                onTap: () => Navigator.pop(sheetContext, 'browser'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.email_outlined),
+              title: const Text('Share article by email'),
+              onTap: () => Navigator.pop(sheetContext, 'email'),
+            ),
+            if (_highlights.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.format_quote_outlined),
+                title: const Text('Share highlights by email'),
+                subtitle: Text('${_highlights.length} '
+                    'highlight${_highlights.length == 1 ? '' : 's'}'),
+                onTap: () => Navigator.pop(sheetContext, 'highlights'),
+              ),
+            if (twitterConnected)
+              ListTile(
+                leading: const Icon(Icons.alternate_email),
+                title: const Text('Share on Twitter'),
+                onTap: () => Navigator.pop(sheetContext, 'twitter'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'browser':
+        await launchUrl(Uri.parse(article.url!),
+            mode: LaunchMode.externalApplication);
+      case 'email':
+        await _shareByEmail(
+          subject: article.displayTitle,
+          body: [
+            article.displayTitle,
+            if (article.author != null && article.author!.isNotEmpty)
+              'by ${article.author}',
+            if (article.url != null) article.url!,
+          ].join('\n'),
+        );
+      case 'highlights':
+        await _shareByEmail(
+          subject: 'Highlights from "${article.displayTitle}"',
+          body: [
+            for (final h in _highlights) '"${h.text}"',
+            '— ${article.displayTitle}',
+            if (article.url != null) article.url!,
+          ].join('\n\n'),
+        );
+      case 'twitter':
+        await _shareOnTwitter(article);
+    }
+  }
+
+  /// Opens the mail app pre-filled; falls back to the system share sheet when
+  /// no mail app answers the mailto: intent.
+  Future<void> _shareByEmail(
+      {required String subject, required String body}) async {
+    final uri = Uri.parse('mailto:?subject=${Uri.encodeComponent(subject)}'
+        '&body=${Uri.encodeComponent(body)}');
+    try {
+      if (await launchUrl(uri)) return;
+    } catch (_) {
+      // Fall through to the generic share sheet.
+    }
+    await Share.share(body, subject: subject);
+  }
+
+  /// Edit-then-post dialog for tweeting the article.
+  Future<void> _shareOnTwitter(Article article) async {
+    final controller = TextEditingController(
+        text: [article.displayTitle, if (article.url != null) article.url!]
+            .join('\n'));
+    final text = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        title: const Text('Share on Twitter'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 6,
+          maxLength: 280,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text('Post')),
+        ],
+      ),
+    );
+    if (!mounted || text == null || text.isEmpty) return;
+    String message = 'Posted to Twitter';
+    try {
+      await SyncService.instance.twitter.postTweet(text);
+    } catch (e) {
+      message = 'Couldn\'t post: $e';
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _toggleFavorite() async {
     final article = _article;
     if (article == null) return;
@@ -510,13 +644,11 @@ class _ArticleScreenState extends State<ArticleScreen> {
                 : const Icon(Icons.refresh),
             onPressed: _reprocessing ? null : _reprocess,
           ),
-          if (article.url != null)
-            IconButton(
-              tooltip: 'Open in browser',
-              icon: const Icon(Icons.open_in_browser),
-              onPressed: () => launchUrl(Uri.parse(article.url!),
-                  mode: LaunchMode.externalApplication),
-            ),
+          IconButton(
+            tooltip: 'Share',
+            icon: const Icon(Icons.share_outlined),
+            onPressed: _showShareMenu,
+          ),
         ],
       ),
       body: Listener(

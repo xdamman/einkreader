@@ -167,15 +167,24 @@ class _SourcesScreenState extends State<SourcesScreen> {
       title: Text(source.title, style: const TextStyle(fontSize: 17)),
       subtitle:
           Text(source.type.label, style: const TextStyle(fontSize: 13)),
-      trailing: unread > 0
-          ? Container(
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (unread > 0)
+            Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(border: Border.all()),
               child: Text('$unread',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
-            )
-          : null,
+            ),
+          IconButton(
+            tooltip: 'Source options',
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _showSourceMenu(source),
+          ),
+        ],
+      ),
       onTap: () async {
         await Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => ArticleListScreen(source: source)));
