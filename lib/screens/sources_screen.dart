@@ -7,9 +7,12 @@ import 'article_list_screen.dart';
 
 /// Manage sources and their folders (one level): folders come first with
 /// their sources indented, then top-level sources. Add RSS feeds and folders
-/// below; long-press a source to move it into a folder or remove it. Folders
-/// are renamed/removed via their trailing icons. Twitter/Nostr sources are
-/// added from Settings.
+/// below. Each source row shows the feed's description (when its XML
+/// provides one) and stats, and has an anchored ⋮ menu — kept next to its
+/// trigger so it also works on tablets, unlike a bottom sheet — that lists
+/// the folders to move to directly. Sources can also be dragged onto a
+/// folder (long-press, then drag). Twitter/Nostr sources are added from
+/// Settings.
 class SourcesScreen extends StatefulWidget {
   const SourcesScreen({super.key});
 
@@ -22,6 +25,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
   List<Source> _sources = [];
   List<Folder> _folders = [];
   Map<int, int> _unread = {};
+  Map<int, SourceStats> _stats = {};
 
   @override
   void initState() {
@@ -33,11 +37,13 @@ class _SourcesScreenState extends State<SourcesScreen> {
     final sources = await _db.getSources();
     final folders = await _db.getFolders();
     final unread = await _db.unreadCountsBySource();
+    final stats = await _db.sourceStats();
     if (!mounted) return;
     setState(() {
       _sources = sources;
       _folders = folders;
       _unread = unread;
+      _stats = stats;
     });
   }
 
@@ -127,46 +133,97 @@ class _SourcesScreenState extends State<SourcesScreen> {
     );
   }
 
+  /// A folder row is also a drop target: drag a source onto it to file it.
   Widget _folderTile(Folder folder, List<Source> members) {
     final unread =
         members.fold(0, (sum, s) => sum + (_unread[s.id] ?? 0));
-    return ListTile(
+    return DragTarget<Source>(
       key: ValueKey('folder-${folder.id}'),
-      leading: const Icon(Icons.folder_outlined),
-      title: Text(folder.title,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-      subtitle: Text(
-          '${members.length} source${members.length == 1 ? '' : 's'}'
-          '${unread > 0 ? ' · $unread unread' : ''}',
-          style: const TextStyle(fontSize: 13)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            tooltip: 'Rename folder',
-            icon: const Icon(Icons.edit_outlined),
-            onPressed: () => _renameFolder(folder),
+      onWillAcceptWithDetails: (details) =>
+          details.data.folderId != folder.id,
+      onAcceptWithDetails: (details) async {
+        await _db.setSourceFolder(details.data.id!, folder.id);
+        _load();
+      },
+      builder: (context, candidates, rejected) => Container(
+        // Invert while a dragged source hovers, so the target is obvious.
+        color: candidates.isNotEmpty ? Colors.black : null,
+        child: ListTile(
+          leading: Icon(Icons.folder_outlined,
+              color: candidates.isNotEmpty ? Colors.white : Colors.black),
+          textColor: candidates.isNotEmpty ? Colors.white : Colors.black,
+          title: Text(folder.title,
+              style:
+                  const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+          subtitle: Text(
+              '${members.length} source${members.length == 1 ? '' : 's'}'
+              '${unread > 0 ? ' · $unread unread' : ''}',
+              style: const TextStyle(fontSize: 13)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Rename folder',
+                icon: Icon(Icons.edit_outlined,
+                    color:
+                        candidates.isNotEmpty ? Colors.white : Colors.black),
+                onPressed: () => _renameFolder(folder),
+              ),
+              IconButton(
+                tooltip: 'Remove folder',
+                icon: Icon(Icons.delete_outline,
+                    color:
+                        candidates.isNotEmpty ? Colors.white : Colors.black),
+                onPressed: () => _deleteFolder(folder, members),
+              ),
+            ],
           ),
-          IconButton(
-            tooltip: 'Remove folder',
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () => _deleteFolder(folder, members),
-          ),
-        ],
+        ),
       ),
     );
   }
 
+  /// "1.2 MB"-style size for the stats line.
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   Widget _sourceTile(Source source, {required bool indented}) {
     final unread = _unread[source.id] ?? 0;
-    return ListTile(
-      key: ValueKey('source-${source.id}'),
+    final stats = _stats[source.id] ?? const SourceStats();
+    final statsLine = [
+      '${stats.downloaded} article${stats.downloaded == 1 ? '' : 's'}',
+      _formatBytes(stats.contentBytes),
+      '${stats.read} read',
+      if (stats.highlights > 0)
+        '${stats.highlights} highlight${stats.highlights == 1 ? '' : 's'}',
+    ].join(' · ');
+
+    final tile = ListTile(
       contentPadding:
           EdgeInsets.only(left: indented ? 40 : 16, right: 16),
       leading: Icon(_iconFor(source.type)),
       title: Text(source.title, style: const TextStyle(fontSize: 17)),
-      subtitle:
-          Text(source.type.label, style: const TextStyle(fontSize: 13)),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (source.description != null && source.description!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(source.description!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13, fontStyle: FontStyle.italic)),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(statsLine, style: const TextStyle(fontSize: 13)),
+          ),
+        ],
+      ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -178,11 +235,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
               child: Text('$unread',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
             ),
-          IconButton(
-            tooltip: 'Source options',
-            icon: const Icon(Icons.more_vert),
-            onPressed: () => _showSourceMenu(source),
-          ),
+          _sourceMenu(source),
         ],
       ),
       onTap: () async {
@@ -190,82 +243,69 @@ class _SourcesScreenState extends State<SourcesScreen> {
             builder: (_) => ArticleListScreen(source: source)));
         _load();
       },
-      onLongPress: () => _showSourceMenu(source),
+    );
+
+    // Long-press starts a drag; drop it on a folder row to file it there.
+    return LongPressDraggable<Source>(
+      key: ValueKey('source-${source.id}'),
+      data: source,
+      feedback: Material(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(source.title,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600)),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.35, child: tile),
+      child: tile,
     );
   }
 
-  /// Long-press menu for a source: move it into/out of a folder, or remove.
-  Future<void> _showSourceMenu(Source source) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text(source.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600)),
+  /// Anchored options menu (⋮): opens next to its trigger — a bottom sheet
+  /// would put the choices a tablet's height away — and lists the move
+  /// destinations directly, saving the "Move to folder…" hop.
+  Widget _sourceMenu(Source source) {
+    return PopupMenuButton<String>(
+      tooltip: 'Source options',
+      icon: const Icon(Icons.more_vert),
+      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+      onSelected: (choice) async {
+        if (choice == 'remove') {
+          await _confirmDelete(source);
+          return;
+        }
+        await _db.setSourceFolder(
+            source.id!, choice == 'top' ? null : int.parse(choice));
+        _load();
+      },
+      itemBuilder: (context) => [
+        // Plain text items: fixed-width Rows overflow while the menu's
+        // open/close animation is mid-width.
+        for (final folder in _folders)
+          if (folder.id != source.folderId)
+            PopupMenuItem(
+              value: '${folder.id}',
+              child: Text('Move to "${folder.title}"',
+                  overflow: TextOverflow.ellipsis),
             ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.folder_outlined),
-              title: const Text('Move to folder…'),
-              onTap: () => Navigator.pop(sheetContext, 'move'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('Remove'),
-              onTap: () => Navigator.pop(sheetContext, 'remove'),
-            ),
-          ],
+        if (source.folderId != null)
+          const PopupMenuItem(
+            value: 'top',
+            child: Text('Move to top level'),
+          ),
+        if (_folders.isNotEmpty || source.folderId != null)
+          const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'remove',
+          child: Text('Remove'),
         ),
-      ),
+      ],
     );
-    if (!mounted || action == null) return;
-    if (action == 'move') {
-      await _moveToFolder(source);
-    } else if (action == 'remove') {
-      await _confirmDelete(source);
-    }
-  }
-
-  Future<void> _moveToFolder(Source source) async {
-    // Sentinel for "top level", since null is the sheet's dismissal.
-    const topLevel = -1;
-    final choice = await showModalBottomSheet<int>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ListTile(
-              leading: Icon(source.folderId == null
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off),
-              title: const Text('Top level (no folder)'),
-              onTap: () => Navigator.pop(sheetContext, topLevel),
-            ),
-            for (final folder in _folders)
-              ListTile(
-                leading: Icon(source.folderId == folder.id
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_off),
-                title: Text(folder.title),
-                onTap: () => Navigator.pop(sheetContext, folder.id),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted || choice == null) return;
-    await _db.setSourceFolder(source.id!, choice == topLevel ? null : choice);
-    _load();
   }
 
   Future<void> _addFolder() async {

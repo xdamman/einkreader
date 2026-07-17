@@ -5,6 +5,28 @@ import 'package:sqflite/sqflite.dart';
 import '../models.dart';
 import '../services/app_log.dart';
 
+/// Per-source article statistics shown in the sources screen.
+class SourceStats {
+  final int downloaded;
+  final int read;
+  final int contentBytes;
+  final int highlights;
+
+  const SourceStats({
+    this.downloaded = 0,
+    this.read = 0,
+    this.contentBytes = 0,
+    this.highlights = 0,
+  });
+
+  SourceStats withHighlights(int count) => SourceStats(
+        downloaded: downloaded,
+        read: read,
+        contentBytes: contentBytes,
+        highlights: count,
+      );
+}
+
 /// Single SQLite database holding sources, offline article content and
 /// highlights.
 class AppDatabase {
@@ -25,7 +47,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -102,6 +124,9 @@ class AppDatabase {
       await db.execute(_createFoldersSql);
       await db.execute('ALTER TABLE sources ADD COLUMN folder_id INTEGER');
     }
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE sources ADD COLUMN description TEXT');
+    }
   }
 
   static const _createFoldersSql = '''
@@ -119,6 +144,7 @@ class AppDatabase {
         type TEXT NOT NULL,
         title TEXT NOT NULL,
         url TEXT NOT NULL,
+        description TEXT,
         folder_id INTEGER,
         created_at INTEGER NOT NULL,
         UNIQUE(type, url)
@@ -225,6 +251,16 @@ class AppDatabase {
       whereArgs: [id],
     );
     await AppLogService.instance.info('Edited source #$id title: $title');
+  }
+
+  Future<void> updateSourceDescription(int id, String description) async {
+    final db = await database;
+    await db.update(
+      'sources',
+      {'description': description},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteSource(int id) async {
@@ -512,6 +548,38 @@ class AppDatabase {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  /// Per-source article statistics for the sources screen. Size counts the
+  /// stored markdown text (images on disk are not included).
+  Future<Map<int, SourceStats>> sourceStats() async {
+    final db = await database;
+    final stats = <int, SourceStats>{};
+    final rows = await db.rawQuery('''
+      SELECT source_id,
+             SUM(CASE WHEN fetched = 1 THEN 1 ELSE 0 END) AS downloaded,
+             SUM(CASE WHEN read = 1 THEN 1 ELSE 0 END) AS read,
+             SUM(LENGTH(COALESCE(content_markdown, ''))) AS bytes
+      FROM articles GROUP BY source_id
+    ''');
+    for (final row in rows) {
+      stats[row['source_id'] as int] = SourceStats(
+        downloaded: (row['downloaded'] as int?) ?? 0,
+        read: (row['read'] as int?) ?? 0,
+        contentBytes: (row['bytes'] as int?) ?? 0,
+      );
+    }
+    final highlightRows = await db.rawQuery('''
+      SELECT a.source_id AS source_id, COUNT(*) AS c
+      FROM highlights h JOIN articles a ON a.id = h.article_id
+      GROUP BY a.source_id
+    ''');
+    for (final row in highlightRows) {
+      final id = row['source_id'] as int;
+      stats[id] = (stats[id] ?? const SourceStats())
+          .withHighlights(row['c'] as int);
+    }
+    return stats;
   }
 
   Future<Map<int, int>> unreadCountsBySource() async {

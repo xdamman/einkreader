@@ -346,6 +346,10 @@ class SyncService {
     if (source.title.isEmpty || source.title == source.url) {
       await _db.updateSourceTitle(source.id!, feed.title);
     }
+    final description = feed.description;
+    if (description != null && description != source.description) {
+      await _db.updateSourceDescription(source.id!, description);
+    }
     var inserted = 0;
     var skipped = 0;
     var fullContent = 0;

@@ -162,14 +162,13 @@ void main() {
     expect(find.text('Press'), findsOneWidget);
     expect(find.text('News'), findsNothing);
 
-    // Move the top-level source into the folder via its options button.
+    // Move the top-level source into the folder via its options menu, which
+    // lists the destinations directly.
     await tester.tap(find.descendant(
         of: find.widgetWithText(ListTile, 'Gamma'),
         matching: find.byTooltip('Source options')));
     await settle(tester);
-    await tester.tap(find.text('Move to folder…'));
-    await settle(tester);
-    await tester.tap(find.text('Press').last);
+    await tester.tap(find.text('Move to "Press"'));
     await settle(tester);
     expect(find.textContaining('3 sources'), findsOneWidget);
 

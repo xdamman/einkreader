@@ -63,6 +63,9 @@ class Source {
   /// RSS: feed URL. Nostr: npub. Twitter: username (informational).
   final String url;
 
+  /// The feed's own description, when the RSS/Atom XML provides one.
+  final String? description;
+
   /// The folder this source lives in; null = top level.
   final int? folderId;
   final int createdAt;
@@ -72,6 +75,7 @@ class Source {
     required this.type,
     required this.title,
     required this.url,
+    this.description,
     this.folderId,
     required this.createdAt,
   });
@@ -81,6 +85,7 @@ class Source {
         type: type,
         title: title ?? this.title,
         url: url,
+        description: description,
         folderId: folderId,
         createdAt: createdAt,
       );
@@ -90,6 +95,7 @@ class Source {
         'type': type.name,
         'title': title,
         'url': url,
+        'description': description,
         'folder_id': folderId,
         'created_at': createdAt,
       };
@@ -99,6 +105,7 @@ class Source {
         type: SourceType.fromName(m['type'] as String),
         title: m['title'] as String,
         url: m['url'] as String,
+        description: m['description'] as String?,
         folderId: m['folder_id'] as int?,
         createdAt: m['created_at'] as int,
       );

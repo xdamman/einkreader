@@ -25,8 +25,13 @@ class FeedItem {
 
 class ParsedFeed {
   final String title;
+
+  /// The feed's own description (RSS `<description>` / Atom `<subtitle>`),
+  /// reduced to plain text. Null when the feed doesn't provide one.
+  final String? description;
   final List<FeedItem> items;
-  const ParsedFeed({required this.title, required this.items});
+  const ParsedFeed(
+      {required this.title, this.description, required this.items});
 }
 
 /// Minimal, dependency-light RSS 2.0 / Atom parser.
@@ -41,6 +46,16 @@ class FeedParser {
       throw const FormatException('Not a recognizable RSS or Atom feed');
     }
     return _parseRss(channel);
+  }
+
+  /// Reduces a description that may carry HTML to one plain-text line.
+  static String? _plainDescription(String? raw) {
+    if (raw == null) return null;
+    final text = raw
+        .replaceAll(RegExp(r'<[^>]+>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return text.isEmpty ? null : text;
   }
 
   static ParsedFeed _parseRss(XmlElement channel) {
@@ -63,7 +78,11 @@ class FeedParser {
         contentHtml: content,
       ));
     }
-    return ParsedFeed(title: feedTitle, items: items);
+    return ParsedFeed(
+      title: feedTitle,
+      description: _plainDescription(_text(channel, 'description')),
+      items: items,
+    );
   }
 
   static ParsedFeed _parseAtom(XmlElement feed) {
@@ -90,7 +109,11 @@ class FeedParser {
         contentHtml: entry.findElements('content').firstOrNull?.innerText,
       ));
     }
-    return ParsedFeed(title: feedTitle, items: items);
+    return ParsedFeed(
+      title: feedTitle,
+      description: _plainDescription(_text(feed, 'subtitle')),
+      items: items,
+    );
   }
 
   static String? _atomLink(XmlElement entry) {
