@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/archive_store.dart';
+import '../services/share_actions.dart';
 import '../services/sync_service.dart';
 import '../theme.dart';
 import '../widgets/markdown_view.dart';
@@ -319,18 +320,15 @@ class _ArticleScreenState extends State<ArticleScreen> {
   // ------------------------------------------------------------------ share
 
   /// The top-bar share menu: open in the browser, share the article or its
-  /// highlights by email, or — when a Twitter account is connected — post a
-  /// tweet (edited in a dialog first).
+  /// highlights by email, or — when a Twitter account is connected — post
+  /// either as a tweet (edited in a dialog first).
   Future<void> _showShareMenu() async {
     final article = _article;
     if (article == null) return;
-    var twitterConnected = false;
-    try {
-      twitterConnected = await SyncService.instance.twitter.isConnected;
-    } catch (_) {
-      // Secure storage unavailable (e.g. tests): no Twitter option.
-    }
+    final twitterConnected = await ShareActions.twitterConnected();
     if (!mounted) return;
+    final highlightCount = Text('${_highlights.length} '
+        'highlight${_highlights.length == 1 ? '' : 's'}');
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (sheetContext) => SafeArea(
@@ -353,16 +351,24 @@ class _ArticleScreenState extends State<ArticleScreen> {
               ListTile(
                 leading: const Icon(Icons.format_quote_outlined),
                 title: const Text('Share highlights by email'),
-                subtitle: Text('${_highlights.length} '
-                    'highlight${_highlights.length == 1 ? '' : 's'}'),
-                onTap: () => Navigator.pop(sheetContext, 'highlights'),
+                subtitle: highlightCount,
+                onTap: () => Navigator.pop(sheetContext, 'highlights-email'),
               ),
-            if (twitterConnected)
+            if (twitterConnected) ...[
               ListTile(
                 leading: const Icon(Icons.alternate_email),
                 title: const Text('Share on Twitter'),
                 onTap: () => Navigator.pop(sheetContext, 'twitter'),
               ),
+              if (_highlights.isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.alternate_email),
+                  title: const Text('Share highlights on Twitter'),
+                  subtitle: highlightCount,
+                  onTap: () =>
+                      Navigator.pop(sheetContext, 'highlights-twitter'),
+                ),
+            ],
           ],
         ),
       ),
@@ -373,7 +379,8 @@ class _ArticleScreenState extends State<ArticleScreen> {
         await launchUrl(Uri.parse(article.url!),
             mode: LaunchMode.externalApplication);
       case 'email':
-        await _shareByEmail(
+        await ShareActions.byEmail(
+          context,
           subject: article.displayTitle,
           body: [
             article.displayTitle,
@@ -382,72 +389,23 @@ class _ArticleScreenState extends State<ArticleScreen> {
             if (article.url != null) article.url!,
           ].join('\n'),
         );
-      case 'highlights':
-        await _shareByEmail(
-          subject: 'Highlights from "${article.displayTitle}"',
-          body: [
-            for (final h in _highlights) '"${h.text}"',
-            '— ${article.displayTitle}',
-            if (article.url != null) article.url!,
-          ].join('\n\n'),
+      case 'highlights-email':
+        await ShareActions.byEmail(
+          context,
+          subject:
+              ShareActions.highlightsSubject(article, _highlights.length),
+          body: ShareActions.highlightsBody(article, _highlights),
         );
       case 'twitter':
-        await _shareOnTwitter(article);
+        await ShareActions.onTwitter(context,
+            draft: [
+              article.displayTitle,
+              if (article.url != null) article.url!,
+            ].join('\n'));
+      case 'highlights-twitter':
+        await ShareActions.onTwitter(context,
+            draft: ShareActions.highlightsBody(article, _highlights));
     }
-  }
-
-  /// Opens the mail app pre-filled; falls back to the system share sheet when
-  /// no mail app answers the mailto: intent.
-  Future<void> _shareByEmail(
-      {required String subject, required String body}) async {
-    final uri = Uri.parse('mailto:?subject=${Uri.encodeComponent(subject)}'
-        '&body=${Uri.encodeComponent(body)}');
-    try {
-      if (await launchUrl(uri)) return;
-    } catch (_) {
-      // Fall through to the generic share sheet.
-    }
-    await Share.share(body, subject: subject);
-  }
-
-  /// Edit-then-post dialog for tweeting the article.
-  Future<void> _shareOnTwitter(Article article) async {
-    final controller = TextEditingController(
-        text: [article.displayTitle, if (article.url != null) article.url!]
-            .join('\n'));
-    final text = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-        title: const Text('Share on Twitter'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 6,
-          maxLength: 280,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, controller.text.trim()),
-              child: const Text('Post')),
-        ],
-      ),
-    );
-    if (!mounted || text == null || text.isEmpty) return;
-    String message = 'Posted to Twitter';
-    try {
-      await SyncService.instance.twitter.postTweet(text);
-    } catch (e) {
-      message = 'Couldn\'t post: $e';
-    }
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _toggleFavorite() async {
@@ -527,6 +485,8 @@ class _ArticleScreenState extends State<ArticleScreen> {
     }
     if (match == null) return;
     final highlight = match;
+    final twitterConnected = await ShareActions.twitterConnected();
+    if (!mounted) return;
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -544,8 +504,19 @@ class _ArticleScreenState extends State<ArticleScreen> {
             ),
             const Divider(height: 1),
             ListTile(
+              leading: const Icon(Icons.email_outlined),
+              title: const Text('Share by email'),
+              onTap: () => Navigator.pop(context, 'email'),
+            ),
+            if (twitterConnected)
+              ListTile(
+                leading: const Icon(Icons.alternate_email),
+                title: const Text('Share on Twitter'),
+                onTap: () => Navigator.pop(context, 'twitter'),
+              ),
+            ListTile(
               leading: const Icon(Icons.share_outlined),
-              title: const Text('Share'),
+              title: const Text('Share…'),
               onTap: () => Navigator.pop(context, 'share'),
             ),
             ListTile(
@@ -558,7 +529,17 @@ class _ArticleScreenState extends State<ArticleScreen> {
       ),
     );
     if (!mounted || action == null) return;
-    if (action == 'share') {
+    final article = _article;
+    if (action == 'email' && article != null) {
+      await ShareActions.byEmail(
+        context,
+        subject: ShareActions.highlightsSubject(article, 1),
+        body: ShareActions.highlightsBody(article, [highlight]),
+      );
+    } else if (action == 'twitter' && article != null) {
+      await ShareActions.onTwitter(context,
+          draft: ShareActions.highlightsBody(article, [highlight]));
+    } else if (action == 'share') {
       final title = _article?.title;
       final shareText = title == null ? highlight.text
           : '"${highlight.text}"\n\n— $title';

@@ -254,6 +254,30 @@ class TwitterService {
     );
   }
 
+  int? _cachedTweetMaxLength;
+
+  /// Character budget for a tweet on this account. The API exposes no
+  /// explicit length field; the available signal is users/me verified_type:
+  /// Premium ("blue") and business accounts can post long tweets (25k
+  /// chars), everyone else 280. Cached per session; falls back to 280 when
+  /// the lookup fails.
+  Future<int> tweetMaxLength() async {
+    final cached = _cachedTweetMaxLength;
+    if (cached != null) return cached;
+    try {
+      final json = await _get('/users/me',
+          query: {'user.fields': 'verified_type'});
+      final type =
+          ((json['data'] as Map<String, dynamic>?)?['verified_type']
+                  as String?) ??
+              'none';
+      return _cachedTweetMaxLength =
+          (type == 'blue' || type == 'business') ? 25000 : 280;
+    } catch (_) {
+      return 280; // Unknown plan: use the universal limit; don't cache.
+    }
+  }
+
   /// Posts a tweet. Needs the tweet.write scope: accounts connected before
   /// that scope was requested get a 403 until reconnected in Settings.
   Future<void> postTweet(String text) async {

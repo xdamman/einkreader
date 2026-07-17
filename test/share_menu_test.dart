@@ -7,8 +7,10 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/article_screen.dart';
+import 'package:einkreader/services/share_actions.dart';
 import 'package:einkreader/services/twitter_service.dart';
 import 'package:einkreader/theme.dart';
+import 'package:einkreader/widgets/highlight_list.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -73,6 +75,89 @@ void main() {
     expect(find.textContaining('1 highlight'), findsOneWidget);
     // No Twitter account connected in the test environment.
     expect(find.text('Share on Twitter'), findsNothing);
+    expect(find.text('Share highlights on Twitter'), findsNothing);
+  });
+
+  testWidgets('highlights tab: each row has a share button with a menu',
+      (tester) async {
+    final highlights =
+        await tester.runAsync(() => db.getHighlights()) ?? [];
+    expect(highlights, isNotEmpty);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+        body: HighlightList(highlights: highlights, onChanged: () {}),
+      ),
+    ));
+    await settle(tester);
+
+    await tester.tap(find.byTooltip('Share highlight').first);
+    await settle(tester);
+    expect(find.text('Share by email'), findsOneWidget);
+    expect(find.text('Share…'), findsOneWidget);
+    expect(find.text('Share on Twitter'), findsNothing);
+  });
+
+  group('ShareActions.highlightsBody', () {
+    const article = Article(
+        sourceId: 1,
+        guid: 'g',
+        title: 'The Story',
+        url: 'https://example.com/story',
+        createdAt: 0);
+
+    test('single highlight: quote with one attribution', () {
+      final body = ShareActions.highlightsBody(article,
+          [const Highlight(articleId: 1, text: 'a passage', createdAt: 0)]);
+      expect(body, '"a passage"\n\n— The Story (https://example.com/story)');
+    });
+
+    test('several highlights: one attribution up front, all quotes', () {
+      final body = ShareActions.highlightsBody(article, [
+        const Highlight(articleId: 1, text: 'first', createdAt: 0),
+        const Highlight(articleId: 1, text: 'second', createdAt: 0),
+      ]);
+      expect(
+          body,
+          'My highlights from The Story (https://example.com/story):\n\n'
+          '"first"\n\n"second"');
+      // The attribution appears exactly once.
+      expect('example.com/story'.allMatches(body), hasLength(1));
+    });
+  });
+
+  group('TwitterService.tweetMaxLength', () {
+    TwitterService withPlan(String? verifiedType) => TwitterService(
+          accessToken: () async => 'token',
+          client: MockClient((request) async {
+            expect(request.url.path, '/2/users/me');
+            return http.Response(
+                jsonEncode({
+                  'data': {
+                    'id': '1',
+                    if (verifiedType != null) 'verified_type': verifiedType,
+                  }
+                }),
+                200);
+          }),
+        );
+
+    test('Premium (blue) gets long posts', () async {
+      expect(await withPlan('blue').tweetMaxLength(), 25000);
+    });
+
+    test('unverified gets 280', () async {
+      expect(await withPlan('none').tweetMaxLength(), 280);
+      expect(await withPlan(null).tweetMaxLength(), 280);
+    });
+
+    test('lookup failure falls back to 280', () async {
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async => http.Response('oops', 500)),
+      );
+      expect(await twitter.tweetMaxLength(), 280);
+    });
   });
 
   group('TwitterService.postTweet', () {

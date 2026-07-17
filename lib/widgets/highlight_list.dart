@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../screens/article_screen.dart';
 import '../services/archive_store.dart';
+import '../services/share_actions.dart';
 
-/// All saved highlights, newest first. Tapping one opens its article;
-/// a long-press deletes it.
+/// All saved highlights, newest first. Tapping one opens its article, the
+/// trailing button shares it (email / Twitter / system sheet); a long-press
+/// deletes it.
 class HighlightList extends StatelessWidget {
   final List<Highlight> highlights;
   final VoidCallback onChanged;
@@ -66,6 +69,11 @@ class HighlightList extends StatelessWidget {
           style: const TextStyle(fontSize: 13),
         ),
       ),
+      trailing: IconButton(
+        tooltip: 'Share highlight',
+        icon: const Icon(Icons.share_outlined),
+        onPressed: () => _share(context, highlight),
+      ),
       onTap: () async {
         await Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => ArticleScreen(
@@ -75,6 +83,52 @@ class HighlightList extends StatelessWidget {
       },
       onLongPress: () => _confirmDelete(context, highlight),
     );
+  }
+
+  Future<void> _share(BuildContext context, Highlight highlight) async {
+    final article =
+        await AppDatabase.instance.getArticle(highlight.articleId);
+    if (article == null || !context.mounted) return;
+    final twitterConnected = await ShareActions.twitterConnected();
+    if (!context.mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.email_outlined),
+              title: const Text('Share by email'),
+              onTap: () => Navigator.pop(sheetContext, 'email'),
+            ),
+            if (twitterConnected)
+              ListTile(
+                leading: const Icon(Icons.alternate_email),
+                title: const Text('Share on Twitter'),
+                onTap: () => Navigator.pop(sheetContext, 'twitter'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.share_outlined),
+              title: const Text('Share…'),
+              onTap: () => Navigator.pop(sheetContext, 'share'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !context.mounted) return;
+    final body = ShareActions.highlightsBody(article, [highlight]);
+    switch (action) {
+      case 'email':
+        await ShareActions.byEmail(context,
+            subject: ShareActions.highlightsSubject(article, 1), body: body);
+      case 'twitter':
+        await ShareActions.onTwitter(context, draft: body);
+      case 'share':
+        await Share.share(body);
+    }
   }
 
   Future<void> _confirmDelete(
