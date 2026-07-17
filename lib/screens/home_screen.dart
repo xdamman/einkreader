@@ -40,10 +40,16 @@ class _HomeScreenState extends State<HomeScreen> {
   final _db = AppDatabase.instance;
   _HomeTab _tab = _HomeTab.feed;
 
-  /// Selected source on the Feed tab; null means "All".
+  /// Selected source on the Feed tab; null means "All" (or a folder, when
+  /// [_feedFolderId] is set — the two are mutually exclusive).
   int? _feedSourceId;
+
+  /// Selected folder on the Feed tab: filters to all its sources.
+  int? _feedFolderId;
   List<Article> _articles = [];
   List<Highlight> _highlights = [];
+  List<Source> _sources = [];
+  List<Folder> _folders = [];
   Map<int, String> _sourceTitles = {};
 
   /// Sources currently being synced, shown with a spinner in the feed strip.
@@ -157,6 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final articles = await _db.getArticles();
       final highlights = await _db.getHighlights();
       final sources = await _db.getSources();
+      final folders = await _db.getFolders();
       final developerMode =
           await AppLogService.instance.isDeveloperModeEnabled();
       await AppLogService.instance.debug(
@@ -167,6 +174,8 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _articles = articles;
         _highlights = highlights;
+        _sources = sources;
+        _folders = folders;
         _sourceTitles = {for (final s in sources) s.id!: s.title};
         _developerMode = developerMode;
         if (!_developerMode && _tab == _HomeTab.debug) {
@@ -336,10 +345,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Feed tab: a swipable source filter strip above the article list. Sources
-  /// are ordered by unread count, then total items; tapping one filters the
-  /// feed to that source, with "All" showing everything. With no sources
-  /// configured yet, a centered call-to-action replaces the feed.
+  /// Feed tab: a swipable filter strip above the article list — "All" first,
+  /// then folders, then top-level sources, ordered by unread count then total
+  /// items. Tapping a source filters the feed to it; tapping a folder opens a
+  /// menu with the whole folder and its sources. With no sources configured
+  /// yet, a centered call-to-action replaces the feed.
   Widget _buildFeed() {
     if (_sourceTitles.isEmpty) {
       return _EmptySourcesView(onAdd: _showAddSourceSheet);
@@ -352,25 +362,59 @@ class _HomeScreenState extends State<HomeScreen> {
         unread[article.sourceId] = (unread[article.sourceId] ?? 0) + 1;
       }
     }
-    final sources = total.keys
-        .map((id) => _SourceFilter(
-              id: id,
-              title: _sourceTitles[id] ?? 'Unknown',
-              unread: unread[id] ?? 0,
-              total: total[id] ?? 0,
-            ))
-        .toList()
-      ..sort((a, b) {
-        final byUnread = b.unread.compareTo(a.unread);
-        return byUnread != 0 ? byUnread : b.total.compareTo(a.total);
-      });
+    int compareFilters(_SourceFilter a, _SourceFilter b) {
+      final byUnread = b.unread.compareTo(a.unread);
+      return byUnread != 0 ? byUnread : b.total.compareTo(a.total);
+    }
 
-    // Fall back to "All" if the selected source no longer has any articles.
+    _SourceFilter filterFor(int id) => _SourceFilter(
+          id: id,
+          title: _sourceTitles[id] ?? 'Unknown',
+          unread: unread[id] ?? 0,
+          total: total[id] ?? 0,
+        );
+
+    final folderOf = {for (final s in _sources) s.id!: s.folderId};
+    final topSources = total.keys
+        .where((id) => folderOf[id] == null)
+        .map(filterFor)
+        .toList()
+      ..sort(compareFilters);
+
+    // A folder appears once any of its sources has articles; its counts
+    // aggregate over its members.
+    final folders = <_FolderFilter>[];
+    for (final folder in _folders) {
+      final memberIds = total.keys
+          .where((id) => folderOf[id] == folder.id)
+          .toList();
+      if (memberIds.isEmpty) continue;
+      final members = memberIds.map(filterFor).toList()..sort(compareFilters);
+      folders.add(_FolderFilter(
+        id: folder.id!,
+        title: folder.title,
+        unread: members.fold(0, (sum, m) => sum + m.unread),
+        total: members.fold(0, (sum, m) => sum + m.total),
+        members: members,
+      ));
+    }
+    folders.sort((a, b) {
+      final byUnread = b.unread.compareTo(a.unread);
+      return byUnread != 0 ? byUnread : b.total.compareTo(a.total);
+    });
+
+    // Fall back to "All" if the selection no longer has any articles.
     final selectedId =
-        sources.any((s) => s.id == _feedSourceId) ? _feedSourceId : null;
-    final articles = selectedId == null
+        total.containsKey(_feedSourceId) ? _feedSourceId : null;
+    final selectedFolderId =
+        folders.any((f) => f.id == _feedFolderId) ? _feedFolderId : null;
+    final articles = selectedFolderId != null
         ? _articles
-        : _articles.where((a) => a.sourceId == selectedId).toList();
+            .where((a) => folderOf[a.sourceId] == selectedFolderId)
+            .toList()
+        : selectedId == null
+            ? _articles
+            : _articles.where((a) => a.sourceId == selectedId).toList();
     final allUnread = unread.values.fold(0, (sum, value) => sum + value);
 
     final currentReads = ResumeReadingSection.currentReads(_articles);
@@ -385,11 +429,17 @@ class _HomeScreenState extends State<HomeScreen> {
             onChanged: _load,
           ),
         _SourceFilterBar(
-          sources: sources,
+          folders: folders,
+          sources: topSources,
           selectedId: selectedId,
+          selectedFolderId: selectedFolderId,
           allUnread: allUnread,
           syncingSourceIds: _syncingSourceIds,
-          onSelected: (id) => setState(() => _feedSourceId = id),
+          onSelected: (id) => setState(() {
+            _feedSourceId = id;
+            _feedFolderId = null;
+          }),
+          onFolderTap: _showFolderMenu,
           onEdit: _openSources,
         ),
         Expanded(
@@ -404,6 +454,46 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ],
     );
+  }
+
+  /// The folder chip's contextual menu: the whole folder, or one of its
+  /// sources.
+  Future<void> _showFolderMenu(_FolderFilter folder) async {
+    final choice = await showModalBottomSheet<Object>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: Text('All in ${folder.title}',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              trailing: folder.unread > 0 ? Text('${folder.unread}') : null,
+              onTap: () => Navigator.pop(sheetContext, 'folder'),
+            ),
+            const Divider(height: 1),
+            for (final member in folder.members)
+              ListTile(
+                title: Text(member.title),
+                trailing: member.unread > 0 ? Text('${member.unread}') : null,
+                onTap: () => Navigator.pop(sheetContext, member.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    setState(() {
+      if (choice == 'folder') {
+        _feedFolderId = folder.id;
+        _feedSourceId = null;
+      } else {
+        _feedSourceId = choice as int;
+        _feedFolderId = null;
+      }
+    });
   }
 }
 
@@ -468,25 +558,49 @@ class _SourceFilter {
   });
 }
 
-/// Horizontally swipable strip of source chips shown above the feed. "All" is
-/// always first; the rest are supplied already ordered.
+/// A folder chip in the Feed filter strip: aggregate counts over its member
+/// sources, which its contextual menu lists.
+class _FolderFilter {
+  final int id;
+  final String title;
+  final int unread;
+  final int total;
+  final List<_SourceFilter> members;
+
+  const _FolderFilter({
+    required this.id,
+    required this.title,
+    required this.unread,
+    required this.total,
+    required this.members,
+  });
+}
+
+/// Horizontally swipable strip of filter chips shown above the feed: "All"
+/// first, then folders, then top-level sources (both supplied ordered).
 class _SourceFilterBar extends StatelessWidget {
+  final List<_FolderFilter> folders;
   final List<_SourceFilter> sources;
   final int? selectedId;
+  final int? selectedFolderId;
   final int allUnread;
   final Set<int> syncingSourceIds;
   final ValueChanged<int?> onSelected;
+  final ValueChanged<_FolderFilter> onFolderTap;
 
   /// Opens source management. Pinned to the right of the strip so it stays
   /// visible no matter how many sources scroll past under it.
   final VoidCallback onEdit;
 
   const _SourceFilterBar({
+    required this.folders,
     required this.sources,
     required this.selectedId,
+    required this.selectedFolderId,
     required this.allUnread,
     required this.syncingSourceIds,
     required this.onSelected,
+    required this.onFolderTap,
     required this.onEdit,
   });
 
@@ -509,10 +623,25 @@ class _SourceFilterBar extends StatelessWidget {
                   _SourceChip(
                     label: 'All',
                     count: allUnread,
-                    selected: selectedId == null,
+                    selected: selectedId == null && selectedFolderId == null,
                     syncing: false,
                     onTap: () => onSelected(null),
                   ),
+                  for (final folder in folders) ...[
+                    const SizedBox(width: 8),
+                    _SourceChip(
+                      label: folder.title,
+                      icon: Icons.folder_outlined,
+                      count: folder.unread,
+                      // Selected for the folder itself or a source inside it,
+                      // since that source has no chip of its own.
+                      selected: selectedFolderId == folder.id ||
+                          folder.members.any((m) => m.id == selectedId),
+                      syncing: folder.members
+                          .any((m) => syncingSourceIds.contains(m.id)),
+                      onTap: () => onFolderTap(folder),
+                    ),
+                  ],
                   for (final source in sources) ...[
                     const SizedBox(width: 8),
                     _SourceChip(
@@ -551,6 +680,9 @@ class _SourceChip extends StatelessWidget {
   final int count;
   final bool selected;
 
+  /// Optional leading icon (folders show a folder glyph).
+  final IconData? icon;
+
   /// While true, a spinner replaces the unread count to show this source is
   /// being updated.
   final bool syncing;
@@ -562,6 +694,7 @@ class _SourceChip extends StatelessWidget {
     required this.selected,
     required this.syncing,
     required this.onTap,
+    this.icon,
   });
 
   @override
@@ -579,6 +712,10 @@ class _SourceChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (icon != null) ...[
+              Icon(icon, size: 16, color: foreground),
+              const SizedBox(width: 6),
+            ],
             Text(
               label,
               style: TextStyle(

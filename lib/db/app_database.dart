@@ -25,7 +25,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -98,7 +98,19 @@ class AppDatabase {
         'ALTER TABLE articles ADD COLUMN via_article_id INTEGER',
       );
     }
+    if (oldVersion < 6) {
+      await db.execute(_createFoldersSql);
+      await db.execute('ALTER TABLE sources ADD COLUMN folder_id INTEGER');
+    }
   }
+
+  static const _createFoldersSql = '''
+      CREATE TABLE folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''';
 
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
@@ -107,10 +119,12 @@ class AppDatabase {
         type TEXT NOT NULL,
         title TEXT NOT NULL,
         url TEXT NOT NULL,
+        folder_id INTEGER,
         created_at INTEGER NOT NULL,
         UNIQUE(type, url)
       )
     ''');
+    await db.execute(_createFoldersSql);
     await db.execute('''
       CREATE TABLE articles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -248,6 +262,78 @@ class AppDatabase {
 
   Future<List<SourceType>> sourceTypesOf(List<Source> sources) async =>
       sources.map((s) => s.type).toList();
+
+  // ---------------------------------------------------------------- folders
+
+  Future<List<Folder>> getFolders() async {
+    final db = await database;
+    final rows =
+        await db.query('folders', orderBy: 'title COLLATE NOCASE ASC');
+    return rows.map(Folder.fromMap).toList();
+  }
+
+  Future<Folder> insertFolder(String title) async {
+    final db = await database;
+    final folder = Folder(
+      title: title,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    final id = await db.insert('folders', folder.toMap()..remove('id'));
+    await AppLogService.instance.info('Added folder #$id: $title');
+    return folder.copyWith(id: id);
+  }
+
+  Future<void> renameFolder(int id, String title) async {
+    final db = await database;
+    await db.update(
+      'folders',
+      {'title': title},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await AppLogService.instance.info('Renamed folder #$id: $title');
+  }
+
+  /// Deletes a folder. Its sources either move to the top level (default) or
+  /// are deleted too — with their articles and highlights — when
+  /// [deleteSources] is true.
+  Future<void> deleteFolder(int id, {bool deleteSources = false}) async {
+    final db = await database;
+    final members = await db.query(
+      'sources',
+      columns: ['id'],
+      where: 'folder_id = ?',
+      whereArgs: [id],
+    );
+    if (deleteSources) {
+      for (final row in members) {
+        await deleteSource(row['id'] as int);
+      }
+    } else {
+      await db.update(
+        'sources',
+        {'folder_id': null},
+        where: 'folder_id = ?',
+        whereArgs: [id],
+      );
+    }
+    await db.delete('folders', where: 'id = ?', whereArgs: [id]);
+    await AppLogService.instance.info(
+      'Removed folder #$id (${members.length} sources '
+      '${deleteSources ? 'deleted' : 'moved to top level'})',
+    );
+  }
+
+  /// Moves a source into [folderId], or to the top level when null.
+  Future<void> setSourceFolder(int sourceId, int? folderId) async {
+    final db = await database;
+    await db.update(
+      'sources',
+      {'folder_id': folderId},
+      where: 'id = ?',
+      whereArgs: [sourceId],
+    );
+  }
 
   // --------------------------------------------------------------- articles
 

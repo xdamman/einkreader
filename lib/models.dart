@@ -27,6 +27,34 @@ enum SourceType {
       };
 }
 
+/// A single-level grouping of sources, shown as one chip in the feed's
+/// filter strip and as a section in the sources screen.
+class Folder {
+  final int? id;
+  final String title;
+  final int createdAt;
+
+  const Folder({this.id, required this.title, required this.createdAt});
+
+  Folder copyWith({int? id, String? title}) => Folder(
+        id: id ?? this.id,
+        title: title ?? this.title,
+        createdAt: createdAt,
+      );
+
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'title': title,
+        'created_at': createdAt,
+      };
+
+  static Folder fromMap(Map<String, Object?> m) => Folder(
+        id: m['id'] as int?,
+        title: m['title'] as String,
+        createdAt: m['created_at'] as int,
+      );
+}
+
 class Source {
   final int? id;
   final SourceType type;
@@ -34,6 +62,9 @@ class Source {
 
   /// RSS: feed URL. Nostr: npub. Twitter: username (informational).
   final String url;
+
+  /// The folder this source lives in; null = top level.
+  final int? folderId;
   final int createdAt;
 
   const Source({
@@ -41,6 +72,7 @@ class Source {
     required this.type,
     required this.title,
     required this.url,
+    this.folderId,
     required this.createdAt,
   });
 
@@ -49,6 +81,7 @@ class Source {
         type: type,
         title: title ?? this.title,
         url: url,
+        folderId: folderId,
         createdAt: createdAt,
       );
 
@@ -57,6 +90,7 @@ class Source {
         'type': type.name,
         'title': title,
         'url': url,
+        'folder_id': folderId,
         'created_at': createdAt,
       };
 
@@ -65,6 +99,7 @@ class Source {
         type: SourceType.fromName(m['type'] as String),
         title: m['title'] as String,
         url: m['url'] as String,
+        folderId: m['folder_id'] as int?,
         createdAt: m['created_at'] as int,
       );
 }
