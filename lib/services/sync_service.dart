@@ -110,6 +110,9 @@ class SyncService {
     var newArticles = 0;
     final errors = <String>[];
     try {
+      // Pick up highlights added to highlights.md by other apps (cheap
+      // mtime check; see importHighlightsFromArchive).
+      await importHighlightsFromArchive();
       final sources = await _db.getSources();
       await AppLogService.instance.info(
         'Refresh started: ${sources.length} sources',
@@ -179,6 +182,64 @@ class SyncService {
     } finally {
       _syncing = false;
       progress.add(const SyncProgress('', running: false));
+    }
+  }
+
+  /// Imports highlights from the archive's human-editable highlights.md into
+  /// the database — additive only, deduplicated by text. This is what makes
+  /// the file a two-way document: highlights added there by any other app
+  /// (or surviving in the file after a database mishap) reappear in the app.
+  /// A highlight whose article no longer exists is attached to a placeholder
+  /// so it stays attributed. Runs at each sync and app launch, but costs one
+  /// stat() unless the file's mtime changed since the app last touched it.
+  /// Returns how many highlights were imported.
+  Future<int> importHighlightsFromArchive({bool force = false}) async {
+    try {
+      final file = await _archive.highlightsFile();
+      if (!await file.exists()) return 0;
+      final signature = await ArchiveStore.highlightsSignature(file);
+      final prefs = await SharedPreferences.getInstance();
+      if (!force &&
+          prefs.getString(ArchiveStore.highlightsSignaturePrefKey) ==
+              signature) {
+        return 0;
+      }
+      // The writer trims each quoted line, so compare line-trimmed text.
+      String norm(String s) => s
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .join('\n');
+      final entries =
+          ArchiveStore.parseHighlights(await file.readAsString());
+      final known =
+          (await _db.getHighlights()).map((h) => norm(h.text)).toSet();
+      var inserted = 0;
+      for (final entry in entries) {
+        if (!known.add(norm(entry.text))) continue;
+        final article = await _db.articleForImportedHighlight(
+          entry.title,
+          entry.text.split('\n').map((l) => '> $l').join('\n'),
+        );
+        await _db.insertHighlightIfNew(Highlight(
+          articleId: article.id!,
+          text: entry.text,
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+        ));
+        inserted++;
+      }
+      await prefs.setString(
+          ArchiveStore.highlightsSignaturePrefKey, signature);
+      if (inserted > 0) {
+        await AppLogService.instance.info(
+          'Imported $inserted highlight(s) from highlights.md',
+        );
+        progress.add(SyncProgress('', running: _syncing, reload: true));
+      }
+      return inserted;
+    } catch (e) {
+      await AppLogService.instance.warn('Highlights import failed: $e');
+      return 0;
     }
   }
 

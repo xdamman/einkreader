@@ -413,10 +413,28 @@ class ArchiveStore {
 
   // ------------------------------------------------------------- highlights
 
+  /// Preference holding the highlights.md signature (mtime + size) as of the
+  /// last time the app wrote or imported it. A differing signature means the
+  /// file was edited by something else (another app, a sync tool, a restored
+  /// copy) and is worth re-importing; a matching one makes the import a
+  /// no-op, so the check costs a single stat() per sync. Size is part of the
+  /// signature because filesystem mtimes can be second-granular — an edit
+  /// landing within the same second would otherwise go unseen.
+  static const highlightsSignaturePrefKey = 'highlights_md_signature';
+
+  /// The single, human-editable `highlights.md` at the archive root.
+  Future<File> highlightsFile() async =>
+      File(p.join(await _base(), 'highlights.md'));
+
+  /// The change signature stored under [highlightsSignaturePrefKey].
+  static Future<String> highlightsSignature(File file) async {
+    final stat = await file.stat();
+    return '${stat.modified.millisecondsSinceEpoch}:${stat.size}';
+  }
+
   /// Rewrites the single, time-independent `highlights.md` from [highlights]
   /// (newest first), grouped by article.
   Future<void> writeHighlights(List<Highlight> highlights) async {
-    final base = await _base();
     final byArticle = <String, List<Highlight>>{};
     for (final h in highlights) {
       byArticle.putIfAbsent(h.articleTitle ?? 'Untitled', () => []).add(h);
@@ -431,8 +449,42 @@ class ArchiveStore {
         out.writeln();
       }
     });
-    await File(p.join(base, 'highlights.md'))
-        .writeAsString(out.toString(), flush: true);
+    final file = await highlightsFile();
+    await file.writeAsString(out.toString(), flush: true);
+    // Our own writes must not read as external edits at the next import.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        highlightsSignaturePrefKey, await highlightsSignature(file));
+  }
+
+  /// Parses the [writeHighlights] format back into (article title, highlight
+  /// text) entries: `## Title` sections holding blockquote groups, one group
+  /// of consecutive `> ` lines per highlight. Tolerant of hand-edited files —
+  /// anything that isn't a heading or a quote line just separates groups.
+  static List<({String title, String text})> parseHighlights(
+      String markdown) {
+    final entries = <({String title, String text})>[];
+    var title = 'Untitled';
+    final quote = <String>[];
+    void flush() {
+      final text = quote.join('\n').trim();
+      quote.clear();
+      if (text.isNotEmpty) entries.add((title: title, text: text));
+    }
+
+    for (final raw in markdown.split('\n')) {
+      final line = raw.trimRight();
+      if (line.startsWith('## ')) {
+        flush();
+        title = line.substring(3).trim();
+      } else if (line.startsWith('>')) {
+        quote.add(line.replaceFirst(RegExp(r'^>\s?'), '').trim());
+      } else {
+        flush();
+      }
+    }
+    flush();
+    return entries;
   }
 
   static String _yaml(String value) {

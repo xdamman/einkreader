@@ -349,7 +349,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 'directory structure — year/month/source folders per '
                 'article, a favorites copy, and a single highlights.md — '
                 'so your library is easy to back up, restore and browse '
-                'with any application.',
+                'with any application. highlights.md works both ways: '
+                'highlights added to it with any editor are imported into '
+                'the app on the next sync.',
                 style: TextStyle(fontSize: 14),
               ),
               const SizedBox(height: 12),

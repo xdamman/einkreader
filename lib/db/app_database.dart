@@ -679,6 +679,48 @@ class AppDatabase {
     return (await getArticle(raced.id!))!;
   }
 
+  /// The article an imported highlight belongs to: matched by exact title,
+  /// or — when its article is gone (e.g. a removed source) — a minimal
+  /// placeholder under Saved Links carrying the title and the highlight text
+  /// as content, so the highlight stays attributed and readable.
+  Future<Article> articleForImportedHighlight(
+      String title, String contentMarkdown) async {
+    final db = await database;
+    final rows = await db.query(
+      'articles',
+      where: 'title = ?',
+      whereArgs: [title],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return Article.fromMap(rows.first);
+    final source = await ensureSavedLinksSource();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final guid = 'imported-highlights:$title';
+    final id = await db.insert(
+      'articles',
+      Article(
+        sourceId: source.id!,
+        guid: guid,
+        title: title,
+        contentMarkdown: contentMarkdown,
+        fetched: 1,
+        read: 1,
+        publishedAt: now,
+        createdAt: now,
+      ).toMap()
+        ..remove('id'),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    if (id != 0) return (await getArticle(id))!;
+    final existing = await db.query(
+      'articles',
+      where: 'source_id = ? AND guid = ?',
+      whereArgs: [source.id, guid],
+      limit: 1,
+    );
+    return Article.fromMap(existing.first);
+  }
+
   // ------------------------------------------------------------- highlights
 
   Future<int> insertHighlight(Highlight highlight) async {

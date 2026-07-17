@@ -90,6 +90,14 @@ class _HomeScreenState extends State<HomeScreen> {
     // Refresh everything on launch so content is ready for offline reading.
     if (SyncService.instance.autoSyncOnLaunch) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _sync(silent: true));
+    } else {
+      // No auto-sync: still pick up highlights edited into highlights.md by
+      // other apps (a no-op when the file hasn't changed).
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final imported =
+            await SyncService.instance.importHighlightsFromArchive();
+        if (imported > 0 && mounted) _load();
+      });
     }
   }
 
