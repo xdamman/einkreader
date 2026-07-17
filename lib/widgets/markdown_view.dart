@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models.dart';
 import '../services/archive_store.dart';
 import '../theme.dart';
 
@@ -70,11 +71,44 @@ class _MarkdownViewState extends State<MarkdownView> {
 
   @override
   Widget build(BuildContext context) {
-    final blocks = _parseBlocks(widget.markdown);
+    final blocks =
+        _parseBlocks(widget.markdown).where((b) => !_isBoilerplate(b));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [for (final block in blocks) _buildBlock(block)],
     );
+  }
+
+  // --------------------------------------------------------- boilerplate
+
+  /// Standalone call-to-action injected mid-article by newsletter platforms
+  /// (Substack's "Subscribe now", share/comment buttons). Matched only when
+  /// it is the block's entire text, so real prose is never dropped.
+  static final _ctaText = RegExp(
+      r'^(subscribe( now)?|upgrade to paid|pledge( your support)?|'
+      r'share( this post)?|leave a comment|give a gift subscription|'
+      r'get \d+% off( for \d+ year)?|none of the above)$',
+      caseSensitive: false);
+
+  /// A lone link whose target is a subscribe endpoint, e.g.
+  /// `[Subscribe now](https://foo.substack.com/subscribe)`.
+  static final _subscribeLink = RegExp(
+      r'^\[[^\]]*\]\((?:https?://)?[^)\s]*/subscribe\b[^)\s]*\)$');
+
+  /// Whether [block] is newsletter boilerplate to hide. Applies to short text
+  /// blocks and lone subscribe links; content blocks (code, images, quotes)
+  /// are never touched.
+  bool _isBoilerplate(_Block block) {
+    if (block.type != _BlockType.paragraph &&
+        block.type != _BlockType.heading &&
+        block.type != _BlockType.listItem) {
+      return false;
+    }
+    final text = block.text.trim();
+    if (_subscribeLink.hasMatch(text)) return true;
+    // Compare on the visible text, so "**Subscribe now**" matches too.
+    final plain = Article.plainTitle(text).trim();
+    return _ctaText.hasMatch(plain);
   }
 
   // ------------------------------------------------------------ block model
@@ -304,10 +338,13 @@ class _MarkdownViewState extends State<MarkdownView> {
             _highlighted(text.substring(index, match.start), style));
       }
       if (match.group(1) != null || match.group(2) != null) {
-        spans.addAll(_highlighted(match.group(1) ?? match.group(2)!,
+        // Recurse so inline markup nested in the emphasis — most importantly
+        // a [link](url) — still renders, inheriting the bold style.
+        spans.addAll(_inlineSpans(match.group(1) ?? match.group(2)!,
             style.copyWith(fontWeight: FontWeight.w700)));
       } else if (match.group(3) != null || match.group(4) != null) {
-        spans.addAll(_highlighted(match.group(3) ?? match.group(4)!,
+        // Likewise for italics: a link inside *…* must stay a link.
+        spans.addAll(_inlineSpans(match.group(3) ?? match.group(4)!,
             style.copyWith(fontStyle: FontStyle.italic)));
       } else if (match.group(5) != null) {
         spans.addAll(_highlighted(
