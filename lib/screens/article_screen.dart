@@ -397,14 +397,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
           body: ShareActions.highlightsBody(article, _highlights),
         );
       case 'twitter':
-        await ShareActions.onTwitter(context,
-            draft: [
-              article.displayTitle,
-              if (article.url != null) article.url!,
-            ].join('\n'));
+        await ShareActions.tweetArticle(context, article);
       case 'highlights-twitter':
-        await ShareActions.onTwitter(context,
-            draft: ShareActions.highlightsBody(article, _highlights));
+        await ShareActions.tweetHighlights(context, article, _highlights);
     }
   }
 
@@ -537,8 +532,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
         body: ShareActions.highlightsBody(article, [highlight]),
       );
     } else if (action == 'twitter' && article != null) {
-      await ShareActions.onTwitter(context,
-          draft: ShareActions.highlightsBody(article, [highlight]));
+      await ShareActions.tweetHighlights(context, article, [highlight]);
     } else if (action == 'share') {
       final title = _article?.title;
       final shareText = title == null ? highlight.text

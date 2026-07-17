@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
 import 'sync_service.dart';
+import 'twitter_service.dart';
 
 /// Share actions used by the reader's share menu, the in-article highlight
 /// menu and the Highlights tab: prefilled email, an editable tweet sized to
@@ -30,12 +31,45 @@ class ShareActions {
   ///   "passage" — Title (url)
   /// or
   ///   My highlights from Title (url): "h1" "h2" …
-  static String highlightsBody(Article article, List<Highlight> highlights) {
+  /// [withAttribution] is off when the destination already shows the source
+  /// (a native quote tweet embeds the original).
+  static String highlightsBody(Article article, List<Highlight> highlights,
+      {bool withAttribution = true}) {
+    final quotes = highlights.map((h) => '"${h.text}"').join('\n\n');
+    if (!withAttribution) return quotes;
     if (highlights.length == 1) {
-      return '"${highlights.single.text}"\n\n— ${attribution(article)}';
+      return '$quotes\n\n— ${attribution(article)}';
     }
-    return 'My highlights from ${attribution(article)}:\n\n'
-        '${highlights.map((h) => '"${h.text}"').join('\n\n')}';
+    return 'My highlights from ${attribution(article)}:\n\n$quotes';
+  }
+
+  /// Tweets the article: a native quote tweet when the article itself is a
+  /// tweet (the comment starts empty), otherwise title + link.
+  static Future<void> tweetArticle(BuildContext context, Article article) {
+    final quoteTweetId = TwitterService.tweetIdFromUrl(article.url);
+    return onTwitter(
+      context,
+      draft: quoteTweetId != null
+          ? ''
+          : [
+              article.displayTitle,
+              if (article.url != null) article.url!,
+            ].join('\n'),
+      quoteTweetId: quoteTweetId,
+    );
+  }
+
+  /// Tweets highlights; quoting the original tweet natively when the article
+  /// is one (no textual attribution needed — the quote embeds it).
+  static Future<void> tweetHighlights(
+      BuildContext context, Article article, List<Highlight> highlights) {
+    final quoteTweetId = TwitterService.tweetIdFromUrl(article.url);
+    return onTwitter(
+      context,
+      draft: highlightsBody(article, highlights,
+          withAttribution: quoteTweetId == null),
+      quoteTweetId: quoteTweetId,
+    );
   }
 
   static String highlightsSubject(Article article, int count) =>
@@ -55,12 +89,20 @@ class ShareActions {
     await Share.share(body, subject: subject);
   }
 
-  /// Edit-then-post tweet dialog. The character budget adapts to the
-  /// connected account's plan (see TwitterService.tweetMaxLength).
+  /// Edit-then-post tweet dialog. Shows which account will post (so there's
+  /// no doubt which connection is active), adapts the character budget to
+  /// the account's plan (see TwitterService.tweetMaxLength), and posts as a
+  /// native quote tweet when [quoteTweetId] is given.
   static Future<void> onTwitter(BuildContext context,
-      {required String draft}) async {
+      {required String draft, String? quoteTweetId}) async {
     final twitter = SyncService.instance.twitter;
     final maxLength = await twitter.tweetMaxLength();
+    String? username;
+    try {
+      username = await twitter.username;
+    } catch (_) {
+      // Secure storage unavailable; just omit the byline.
+    }
     if (!context.mounted) return;
     final controller = TextEditingController(
         text: draft.length > maxLength
@@ -71,13 +113,33 @@ class ShareActions {
       builder: (dialogContext) => AlertDialog(
         shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
         title: const Text('Share on Twitter'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 8,
-          minLines: 3,
-          maxLength: maxLength,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (username != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Posting as @$username'
+                  '${quoteTweetId != null ? ' · quoting the original post' : ''}',
+                  style: const TextStyle(
+                      fontSize: 13, fontStyle: FontStyle.italic),
+                ),
+              ),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 8,
+              minLines: 3,
+              maxLength: maxLength,
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText:
+                    quoteTweetId != null ? 'Add your comment…' : null,
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -93,7 +155,7 @@ class ShareActions {
     if (text == null || text.isEmpty || !context.mounted) return;
     String message = 'Posted to Twitter';
     try {
-      await twitter.postTweet(text);
+      await twitter.postTweet(text, quoteTweetId: quoteTweetId);
     } catch (e) {
       message = 'Couldn\'t post: $e';
     }

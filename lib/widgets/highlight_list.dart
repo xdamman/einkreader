@@ -125,7 +125,7 @@ class HighlightList extends StatelessWidget {
         await ShareActions.byEmail(context,
             subject: ShareActions.highlightsSubject(article, 1), body: body);
       case 'twitter':
-        await ShareActions.onTwitter(context, draft: body);
+        await ShareActions.tweetHighlights(context, article, [highlight]);
       case 'share':
         await Share.share(body);
     }

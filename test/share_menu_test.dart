@@ -124,6 +124,42 @@ void main() {
       // The attribution appears exactly once.
       expect('example.com/story'.allMatches(body), hasLength(1));
     });
+
+    test('withAttribution: false gives quotes only (for quote tweets)', () {
+      final body = ShareActions.highlightsBody(
+        article,
+        [const Highlight(articleId: 1, text: 'a passage', createdAt: 0)],
+        withAttribution: false,
+      );
+      expect(body, '"a passage"');
+    });
+  });
+
+  group('TwitterService.tweetIdFromUrl', () {
+    test('extracts the status id from tweet URLs', () {
+      expect(
+          TwitterService.tweetIdFromUrl(
+              'https://x.com/xdamman/status/1234567890'),
+          '1234567890');
+      expect(
+          TwitterService.tweetIdFromUrl(
+              'https://twitter.com/xdamman/statuses/42?s=20'),
+          '42');
+      expect(
+          TwitterService.tweetIdFromUrl(
+              'https://mobile.twitter.com/xdamman/status/7'),
+          '7');
+    });
+
+    test('anything else is null', () {
+      expect(TwitterService.tweetIdFromUrl('https://example.com/status/1'),
+          isNull);
+      expect(TwitterService.tweetIdFromUrl('https://x.com/xdamman'), isNull);
+      expect(
+          TwitterService.tweetIdFromUrl('https://x.com/i/status/notanid'),
+          isNull);
+      expect(TwitterService.tweetIdFromUrl(null), isNull);
+    });
   });
 
   group('TwitterService.tweetMaxLength', () {
@@ -174,6 +210,19 @@ void main() {
       );
       await twitter.postTweet('Read this: https://example.com');
       expect(posted, 'Read this: https://example.com');
+    });
+
+    test('quoteTweetId becomes a native quote tweet', () async {
+      Map<String, dynamic>? body;
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async {
+          body = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"data": {"id": "1"}}', 201);
+        }),
+      );
+      await twitter.postTweet('Great thread', quoteTweetId: '1234567890');
+      expect(body, {'text': 'Great thread', 'quote_tweet_id': '1234567890'});
     });
 
     test('a 403 explains the missing write permission', () async {

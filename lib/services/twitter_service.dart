@@ -278,9 +278,30 @@ class TwitterService {
     }
   }
 
-  /// Posts a tweet. Needs the tweet.write scope: accounts connected before
-  /// that scope was requested get a 403 until reconnected in Settings.
-  Future<void> postTweet(String text) async {
+  /// The id of the tweet a twitter.com / x.com status URL points to, or null
+  /// for any other URL. Lets shares of tweet-articles become native quote
+  /// tweets instead of pasted links.
+  static String? tweetIdFromUrl(String? url) {
+    if (url == null) return null;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return null;
+    final host = uri.host.toLowerCase();
+    const tweetHosts = ['twitter.com', 'x.com'];
+    if (!tweetHosts.any((h) => host == h || host.endsWith('.$h'))) {
+      return null;
+    }
+    final segments = uri.pathSegments;
+    final statusIndex =
+        segments.indexWhere((s) => s == 'status' || s == 'statuses');
+    if (statusIndex == -1 || statusIndex + 1 >= segments.length) return null;
+    final id = segments[statusIndex + 1];
+    return RegExp(r'^\d+$').hasMatch(id) ? id : null;
+  }
+
+  /// Posts a tweet, optionally as a native quote of [quoteTweetId]. Needs the
+  /// tweet.write scope: accounts connected before that scope was requested
+  /// get a 403 until reconnected in Settings.
+  Future<void> postTweet(String text, {String? quoteTweetId}) async {
     final token = await _validAccessToken();
     final response = await _client.post(
       Uri.parse('$_apiBase/tweets'),
@@ -288,7 +309,10 @@ class TwitterService {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({'text': text}),
+      body: jsonEncode({
+        'text': text,
+        if (quoteTweetId != null) 'quote_tweet_id': quoteTweetId,
+      }),
     );
     if (response.statusCode == 403) {
       throw Exception(
