@@ -493,25 +493,33 @@ class SyncService {
     );
     var inserted = 0;
     final now = DateTime.now().millisecondsSinceEpoch;
-    for (final tweet in tweets) {
+    for (var tweet in tweets) {
       final author =
           tweet.authorName ??
           (tweet.authorUsername != null ? '@${tweet.authorUsername}' : null);
-      // A native long-form post is itself the article — keep its full text and
-      // don't download a linked page. A short tweet that links to a blog post
-      // gets the linked article downloaded (fetched = 0).
+      // Bookmarks return the same tweets every sync; skip known ones before
+      // any further lookups or image downloads. The existence check uses the
+      // pre-thread URL shape on purpose, matching what was stored.
+      if (await _db.articleExists(
+          sourceId: source.id!,
+          guid: tweet.id,
+          url: tweet.isLongForm
+              ? tweet.tweetUrl
+              : (tweet.articleUrl ?? tweet.tweetUrl))) {
+        continue;
+      }
+      // A new tweet may head a self-thread: keep the whole thread as the
+      // article when it does (one extra lookup, new tweets only).
+      tweet = await twitter.threadOf(tweet) ?? tweet;
+      // A native long-form post (or a thread) is itself the article — keep
+      // its full text and don't download a linked page. A short tweet that
+      // links to a blog post gets the linked article downloaded (fetched=0).
       final downloadsArticle = tweet.articleUrl != null && !tweet.isLongForm;
       // Long-form posts keep the tweet permalink so the body stays;
       // others point at the linked article when there is one.
       final url = tweet.isLongForm
           ? tweet.tweetUrl
           : (tweet.articleUrl ?? tweet.tweetUrl);
-      // Bookmarks return the same tweets every sync; skip known ones before
-      // downloading their images again.
-      if (await _db.articleExists(
-          sourceId: source.id!, guid: tweet.id, url: url)) {
-        continue;
-      }
       final published = tweet.createdAt?.millisecondsSinceEpoch;
       // Download any images embedded in the tweet/article so they read offline.
       var content = downloadsArticle ? null : tweet.text;

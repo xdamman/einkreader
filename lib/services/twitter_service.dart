@@ -28,6 +28,9 @@ class TweetItem {
   /// inline a referenced native article below the tweet.
   final String? linkedTweetId;
 
+  /// The author's user id, needed to look up self-replies (threads).
+  final String? authorId;
+
   const TweetItem({
     required this.id,
     required this.text,
@@ -37,6 +40,7 @@ class TweetItem {
     this.articleUrl,
     this.isLongForm = false,
     this.linkedTweetId,
+    this.authorId,
   });
 
   String get tweetUrl => 'https://x.com/${authorUsername ?? 'i'}/status/$id';
@@ -52,6 +56,22 @@ class TweetItem {
         articleUrl: articleUrl,
         isLongForm: isLongForm,
         linkedTweetId: linkedTweetId,
+        authorId: authorId,
+      );
+
+  /// Returns a copy carrying a whole self-thread as [text]. Marked long-form:
+  /// the thread IS the article — keep it rather than downloading any page the
+  /// first tweet links to.
+  TweetItem asThread(String threadText) => TweetItem(
+        id: id,
+        text: threadText,
+        authorName: authorName,
+        authorUsername: authorUsername,
+        createdAt: createdAt,
+        articleUrl: articleUrl,
+        isLongForm: true,
+        linkedTweetId: linkedTweetId,
+        authorId: authorId,
       );
 }
 
@@ -187,11 +207,14 @@ class TwitterService {
     return Future.wait(items.map(_withLinkedArticle));
   }
 
-  /// Fetches a single tweet by id. When the tweet links to another X post that
-  /// is a native long-form article, the returned item's [text] holds the tweet
-  /// followed by a horizontal rule and the full article body.
-  Future<TweetItem> fetchTweet(String id) async =>
-      _withLinkedArticle(await _fetchTweet(id));
+  /// Fetches a single tweet by id. A self-thread is returned whole (tweets
+  /// separated by horizontal rules); otherwise, when the tweet links to
+  /// another X post that is a native long-form article, the item's [text]
+  /// holds the tweet followed by a rule and the full article body.
+  Future<TweetItem> fetchTweet(String id) async {
+    final item = await _fetchTweet(id);
+    return await threadOf(item) ?? await _withLinkedArticle(item);
+  }
 
   Future<TweetItem> _fetchTweet(String id) async {
     final json = await _get('/tweets/$id', query: _tweetQuery);
@@ -252,7 +275,71 @@ class TwitterService {
       articleUrl: firstExternalUrl(body),
       isLongForm: isLongFormTweet(tweet),
       linkedTweetId: linkedTweetId(tweet, body),
+      authorId: tweet['author_id'] as String?,
     );
+  }
+
+  /// Detects a self-thread under [item]: consecutive replies by the same
+  /// author. Returns the item carrying the whole thread — tweets separated by
+  /// horizontal rules, each with its own images — or null when [item] has no
+  /// thread. One author-timeline lookup (since the root tweet) finds the
+  /// chain; errors just mean "no thread" so a sync never breaks on it.
+  Future<TweetItem?> threadOf(TweetItem item) async {
+    final authorId = item.authorId;
+    if (authorId == null) return null;
+    try {
+      final json = await _get('/users/$authorId/tweets', query: {
+        'since_id': item.id,
+        'max_results': '100',
+        ..._tweetQuery,
+      });
+      final data = (json['data'] as List?) ?? const [];
+      if (data.isEmpty) return null;
+      final media = _mediaFrom(json);
+
+      String? repliedTo(Map<String, dynamic> tweet) {
+        for (final ref
+            in (tweet['referenced_tweets'] as List?) ?? const []) {
+          if (ref is Map && ref['type'] == 'replied_to') {
+            return ref['id'] as String?;
+          }
+        }
+        return null;
+      }
+
+      // The author's replies indexed by the tweet they answer.
+      final byRepliedTo = <String, Map<String, dynamic>>{};
+      for (final tweet in data.cast<Map<String, dynamic>>()) {
+        final target = repliedTo(tweet);
+        if (target != null) byRepliedTo.putIfAbsent(target, () => tweet);
+      }
+
+      // Walk the chain from the root.
+      final parts = <String>[item.text];
+      var currentId = item.id;
+      while (parts.length < 100) {
+        final next = byRepliedTo[currentId];
+        if (next == null) break;
+        parts.add(tweetBodyMarkdown(next, mediaUrls: media));
+        currentId = next['id'] as String;
+      }
+      if (parts.length == 1) return null;
+      await _log((log) =>
+          log.info('Twitter: thread of ${parts.length} tweets under ${item.id}'));
+      return item.asThread(parts.join('\n\n---\n\n'));
+    } catch (e) {
+      await _log((log) =>
+          log.warn('Twitter: thread lookup failed for ${item.id}: $e'));
+      return null;
+    }
+  }
+
+  /// Best-effort logging: threadOf must never throw, including from the log
+  /// call itself (unavailable in plain unit tests).
+  Future<void> _log(Future<void> Function(AppLogService) write) async {
+    try {
+      await write(AppLogService.instance);
+    } catch (_) {}
   }
 
   int? _cachedTweetMaxLength;
