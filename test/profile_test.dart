@@ -2,8 +2,10 @@
 // SharedPreferences → Android Auto Backup), profile metadata publishing, and
 // the private-by-default highlight compose flow.
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:bip340/bip340.dart' as bip340;
+import 'package:crypto/crypto.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/services/nostr_service.dart';
 import 'package:einkreader/services/profile_service.dart';
@@ -11,6 +13,8 @@ import 'package:einkreader/widgets/highlight_compose.dart';
 import 'package:einkreader/widgets/profile_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -170,7 +174,8 @@ void main() {
     });
   });
 
-  testWidgets('profile dialog: opt-in first, then the editor', (tester) async {
+  testWidgets('profile dialog: name-only creation, then the editor',
+      (tester) async {
     ProfileService.instance.debugPublish = (event) async => 1;
     await tester.pumpWidget(MaterialApp(
       home: Builder(
@@ -187,26 +192,63 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
-    // Opt-in: privacy-first copy, nothing created yet.
+    // Opt-in: short privacy copy plus a single name field. No Nostr jargon,
+    // no key talk.
     expect(find.textContaining('private and local-first'), findsOneWidget);
-    expect(find.textContaining('you stay in control'), findsOneWidget);
+    expect(find.text('Your name'), findsOneWidget);
+    expect(find.textContaining('nsec'), findsNothing);
+    expect(find.textContaining('npub'), findsNothing);
     expect(await ProfileService.instance.enabled, isFalse);
 
-    await tester.tap(find.text('Create public profile'));
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Your name'), 'Xavier');
+    await tester.tap(find.text('Create profile'));
     await tester.pumpAndSettle();
     expect(await ProfileService.instance.enabled, isTrue);
+    expect((await ProfileService.instance.profile()).name, 'Xavier');
 
-    // Editor with the backup note.
-    expect(find.text('Name'), findsOneWidget);
+    // Editor: tappable avatar invitation, bio, links; still no key talk.
+    expect(find.text('Tap the avatar to change it'), findsOneWidget);
     expect(find.text('Short bio'), findsOneWidget);
-    expect(find.text('Avatar image URL'), findsOneWidget);
-    expect(find.textContaining("Android's standard app backup"),
-        findsOneWidget);
+    expect(find.text('Social links (one per line)'), findsOneWidget);
+    expect(find.textContaining('secret key'), findsNothing);
 
     await tester.enterText(
-        find.widgetWithText(TextField, 'Name'), 'Xavier');
-    await tester.tap(find.text('Save & publish'));
+        find.widgetWithText(TextField, 'Short bio'), 'Reads on e-ink');
+    await tester.tap(find.text('Save profile'));
     await tester.pumpAndSettle();
-    expect((await ProfileService.instance.profile()).name, 'Xavier');
+    expect((await ProfileService.instance.profile()).about, 'Reads on e-ink');
+  });
+
+  test('uploadAvatar: Blossom PUT with signed authorization', () async {
+    final service = ProfileService.instance;
+    await service.createIdentity();
+    final bytes = Uint8List.fromList(List.generate(64, (i) => i));
+    final hash = sha256.convert(bytes).toString();
+
+    service.debugHttpClient = MockClient((request) async {
+      expect(request.method, 'PUT');
+      expect(request.url.toString(),
+          '${ProfileService.blossomServer}/upload');
+      expect(request.bodyBytes, bytes);
+      final authHeader = request.headers['Authorization']!;
+      expect(authHeader, startsWith('Nostr '));
+      final auth = jsonDecode(
+              utf8.decode(base64Decode(authHeader.substring(6))))
+          as Map<String, dynamic>;
+      expect(auth['kind'], 24242);
+      expect(auth['tags'], anyElement(equals(['t', 'upload'])));
+      expect(auth['tags'], anyElement(equals(['x', hash])));
+      expect(
+          bip340.verify(auth['pubkey'] as String, auth['id'] as String,
+              auth['sig'] as String),
+          isTrue);
+      return http.Response(
+          jsonEncode({'url': '${ProfileService.blossomServer}/$hash.jpg'}),
+          200);
+    });
+    final url = await service.uploadAvatar(bytes);
+    expect(url, '${ProfileService.blossomServer}/$hash.jpg');
+    service.debugHttpClient = null;
   });
 }

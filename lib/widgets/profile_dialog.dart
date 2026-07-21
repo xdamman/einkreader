@@ -1,12 +1,16 @@
+import 'dart:isolate';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 
 import '../services/profile_service.dart';
 
-/// The profile modal behind the avatar icon. First visit offers the opt-in
-/// (private and local-first by default; a profile only makes sharing
-/// possible); once created, it edits name / bio / avatar / links and exposes
-/// the keys for backup.
+/// The profile modal behind the avatar icon. Deliberately short: creating a
+/// profile asks only for a name; the editor then invites tapping the avatar
+/// to change it, adding a bio and social links. The underlying identity
+/// (keys, relays) is an implementation detail kept out of view.
 class ProfileDialog extends StatefulWidget {
   const ProfileDialog({super.key});
 
@@ -21,12 +25,12 @@ class ProfileDialog extends StatefulWidget {
 class _ProfileDialogState extends State<ProfileDialog> {
   final _profileService = ProfileService.instance;
   bool? _enabled; // null while loading
-  String _npub = '';
   final _name = TextEditingController();
   final _about = TextEditingController();
-  final _picture = TextEditingController();
   final _links = TextEditingController();
+  String _picture = '';
   bool _saving = false;
+  bool _uploading = false;
 
   @override
   void initState() {
@@ -38,7 +42,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
   void dispose() {
     _name.dispose();
     _about.dispose();
-    _picture.dispose();
     _links.dispose();
     super.dispose();
   }
@@ -49,9 +52,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
       final profile = await _profileService.profile();
       _name.text = profile.name;
       _about.text = profile.about;
-      _picture.text = profile.picture;
       _links.text = profile.links;
-      _npub = await _profileService.npub;
+      _picture = profile.picture;
     }
     if (!mounted) return;
     setState(() => _enabled = enabled);
@@ -59,38 +61,69 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   Future<void> _create() async {
     await _profileService.createIdentity();
+    // Persist (and best-effort publish) the name right away; details follow
+    // in the editor.
+    await _profileService.saveProfile(Profile(name: _name.text.trim()));
     await _load();
   }
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    final accepted = await _profileService.saveProfile(Profile(
+    await _profileService.saveProfile(Profile(
       name: _name.text.trim(),
       about: _about.text.trim(),
-      picture: _picture.text.trim(),
+      picture: _picture,
       links: _links.text.trim(),
     ));
     if (!mounted) return;
     setState(() => _saving = false);
     Navigator.of(context).pop();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(accepted > 0
-            ? 'Profile saved and published'
-            : 'Profile saved — publish queued in the outbox')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Profile saved')));
   }
 
-  Future<void> _copyNsec() async {
-    await Clipboard.setData(ClipboardData(text: await _profileService.nsec));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Secret key copied — store it somewhere safe')));
+  Future<void> _pickAvatar() async {
+    if (_uploading) return;
+    final picked = await FilePicker.platform
+        .pickFiles(type: FileType.image, withData: true);
+    final bytes = picked?.files.single.bytes;
+    if (bytes == null || !mounted) return;
+    setState(() => _uploading = true);
+    try {
+      // Avatars don't need to be huge; shrink before uploading.
+      final resized = await Isolate.run(() => _shrink(bytes));
+      final url = await _profileService.uploadAvatar(resized);
+      if (!mounted) return;
+      setState(() => _picture = url);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Avatar upload failed: $e')));
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  static Uint8List _shrink(Uint8List bytes) {
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return bytes;
+    final longest =
+        decoded.width > decoded.height ? decoded.width : decoded.height;
+    final resized = longest > 512
+        ? img.copyResize(
+            decoded,
+            width: decoded.width >= decoded.height ? 512 : null,
+            height: decoded.height > decoded.width ? 512 : null,
+          )
+        : decoded;
+    return img.encodeJpg(resized, quality: 85);
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-      title: Text(_enabled == true ? 'Your profile' : 'Public profile'),
+      title: Text(_enabled == true ? 'Your profile' : 'Create a profile'),
       content: switch (_enabled) {
         null => const SizedBox(
             width: 60, height: 60, child: Center(child: Text('…'))),
@@ -105,7 +138,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 child: const Text('Not now')),
             TextButton(
                 onPressed: _create,
-                child: const Text('Create public profile',
+                child: const Text('Create profile',
                     style: TextStyle(fontWeight: FontWeight.w700))),
           ],
         true => [
@@ -114,37 +147,77 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 child: const Text('Close')),
             TextButton(
                 onPressed: _saving ? null : _save,
-                child: Text(_saving ? 'Saving…' : 'Save & publish')),
+                child: Text(_saving ? 'Saving…' : 'Save profile')),
           ],
       },
     );
   }
 
   Widget _optIn() {
-    return const SizedBox(
-      width: 440,
-      child: Text(
-        'einkreader is private and local-first: what you read, highlight '
-        'and note stays on this device.\n\n'
-        'If you like, you can create a public profile to share chosen '
-        'highlights, favorites and comments. Nothing is ever shared '
-        'automatically — you stay in control and pick what to share, '
-        'every time.\n\n'
-        'The profile is a key pair generated on this device (a Nostr '
-        'identity) — no account, no email, no server of ours.',
-        style: TextStyle(fontSize: 14, height: 1.4),
+    return SizedBox(
+      width: 400,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'einkreader is private and local-first: nothing leaves this '
+            'device unless you share it. A public profile lets you share '
+            'chosen highlights and comments — you pick what to share, '
+            'every time.',
+            style: TextStyle(fontSize: 14, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _name,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Your name'),
+            onSubmitted: (_) => _create(),
+          ),
+        ],
       ),
     );
   }
 
   Widget _editor() {
+    final initial =
+        _name.text.trim().isEmpty ? '?' : _name.text.trim()[0].toUpperCase();
     return SizedBox(
-      width: 440,
+      width: 400,
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Center(
+              child: GestureDetector(
+                onTap: _pickAvatar,
+                child: CircleAvatar(
+                  radius: 40,
+                  backgroundColor: Colors.black,
+                  foregroundImage:
+                      _picture.isEmpty ? null : NetworkImage(_picture),
+                  child: _uploading
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(initial,
+                          style: const TextStyle(
+                              fontSize: 30, color: Colors.white)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Center(
+              child: Text(
+                'Tap the avatar to change it',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: _name,
               decoration: const InputDecoration(labelText: 'Name'),
@@ -159,14 +232,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: _picture,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                  labelText: 'Avatar image URL',
-                  hintText: 'https://…/me.jpg'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
               controller: _links,
               maxLines: 3,
               minLines: 2,
@@ -175,26 +240,6 @@ class _ProfileDialogState extends State<ProfileDialog> {
                   labelText: 'Social links (one per line)',
                   hintText: 'https://…',
                   alignLabelWithHint: true),
-            ),
-            const SizedBox(height: 16),
-            Text('Public id: $_npub',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontSize: 12, fontFamily: 'monospace')),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.key_outlined),
-              label: const Text('Copy secret key (nsec)'),
-              onPressed: _copyNsec,
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Your secret key stays on this device and is included in '
-              'Android\'s standard app backup, so restoring einkreader on '
-              'a new device (same Google account) restores your profile. '
-              'Copy it above for an extra safety net.',
-              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
             ),
           ],
         ),

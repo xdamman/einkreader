@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:bip340/bip340.dart' as bip340;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
@@ -46,6 +47,10 @@ class ProfileService {
   /// Test seam: publishes a signed event, returns accepting-relay count.
   @visibleForTesting
   Future<int> Function(Map<String, dynamic> event)? debugPublish;
+
+  /// Test seam for the avatar upload.
+  @visibleForTesting
+  http.Client? debugHttpClient;
 
   Future<int> _publish(Map<String, dynamic> event) =>
       (debugPublish ?? NostrService().publish)(event);
@@ -136,6 +141,50 @@ class ProfileService {
     await AppLogService.instance
         .info('Profile: metadata published to $accepted relay(s)');
     return accepted;
+  }
+
+  /// Media host for avatars (Blossom protocol, BUD-02).
+  static const blossomServer = 'https://blossom.primal.net';
+
+  /// Uploads an avatar image and returns its public URL. The request is
+  /// authorized with a signed kind-24242 event carrying the blob's sha256,
+  /// per the Blossom spec.
+  Future<String> uploadAvatar(Uint8List bytes,
+      {String mime = 'image/jpeg'}) async {
+    final hash = sha256.convert(bytes).toString();
+    final expiration =
+        DateTime.now().millisecondsSinceEpoch ~/ 1000 + 10 * 60;
+    final auth = await signEvent(
+      kind: 24242,
+      content: 'Upload avatar',
+      tags: [
+        ['t', 'upload'],
+        ['x', hash],
+        ['expiration', '$expiration'],
+      ],
+    );
+    final response = await (debugHttpClient ?? http.Client())
+        .put(
+          Uri.parse('$blossomServer/upload'),
+          headers: {
+            'Authorization':
+                'Nostr ${base64Encode(utf8.encode(jsonEncode(auth)))}',
+            'Content-Type': mime,
+          },
+          body: bytes,
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw Exception(
+          'Avatar upload failed (HTTP ${response.statusCode})');
+    }
+    final url =
+        (jsonDecode(response.body) as Map<String, dynamic>)['url'] as String?;
+    if (url == null) {
+      throw Exception('Avatar upload returned no URL');
+    }
+    await AppLogService.instance.info('Profile: avatar uploaded to $url');
+    return url;
   }
 
   /// Publishes a highlight (NIP-84 kind 9802) with an optional comment.
