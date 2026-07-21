@@ -6,6 +6,7 @@ import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
 import '../services/archive_store.dart';
+import '../services/outbox_service.dart';
 import '../services/share_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
@@ -87,6 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // To Read; a shared browser selection also becomes a highlight.
     _shareSub = ShareLinkService.instance.texts.stream.listen(_onSharedText);
     ShareLinkService.instance.init();
+    OutboxService.instance.refreshCount();
     // Refresh everything on launch so content is ready for offline reading.
     if (SyncService.instance.autoSyncOnLaunch) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _sync(silent: true));
@@ -231,6 +233,22 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('eInk Reader'),
         actions: [
+          // Visible only while something couldn't be sent (e.g. a tweet
+          // posted offline): a clear signal that work is waiting, with retry.
+          ValueListenableBuilder<int>(
+            valueListenable: OutboxService.instance.pending,
+            builder: (context, pending, _) => pending == 0
+                ? const SizedBox.shrink()
+                : IconButton(
+                    tooltip: 'Outbox ($pending waiting)',
+                    icon: Badge(
+                      label: Text('$pending'),
+                      backgroundColor: Colors.black,
+                      child: const Icon(Icons.outbox_outlined),
+                    ),
+                    onPressed: _showOutbox,
+                  ),
+          ),
           IconButton(
             tooltip: 'Update all sources',
             icon: syncing
@@ -298,6 +316,69 @@ class _HomeScreenState extends State<HomeScreen> {
       case _HomeTab.debug:
         return const _DebugLogView();
     }
+  }
+
+  /// Lists what's waiting in the outbox with per-item delete and retry-all.
+  Future<void> _showOutbox() async {
+    final items = await OutboxService.instance.items();
+    if (!mounted) return;
+    final retry = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        title: Text('Outbox — ${items.length} waiting'),
+        content: SizedBox(
+          width: 480,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final item in items)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.alternate_email),
+                  title: Text(item.text,
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: item.lastError == null
+                      ? null
+                      : Text(
+                          '${item.attempts} attempt'
+                          '${item.attempts == 1 ? '' : 's'} · '
+                          '${item.lastError}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                  trailing: IconButton(
+                    tooltip: 'Discard',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () async {
+                      await OutboxService.instance.delete(item.id!);
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext, false);
+                      }
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Close')),
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Retry now')),
+        ],
+      ),
+    );
+    if (retry != true || !mounted) return;
+    final (sent, remaining) = await OutboxService.instance.flush();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(remaining == 0
+            ? 'Outbox sent ($sent tweet${sent == 1 ? '' : 's'})'
+            : 'Sent $sent — $remaining still waiting')));
   }
 
   /// The Add source screen covers every kind (RSS, Twitter, Nostr).
@@ -742,6 +823,8 @@ class _DebugLogView extends StatefulWidget {
 class _DebugLogViewState extends State<_DebugLogView> {
   List<AppLogEntry> _entries = [];
   StreamSubscription<void>? _sub;
+  final _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
@@ -753,6 +836,7 @@ class _DebugLogViewState extends State<_DebugLogView> {
   @override
   void dispose() {
     _sub?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -769,6 +853,14 @@ class _DebugLogViewState extends State<_DebugLogView> {
         child: Text('No logs yet.', style: TextStyle(fontSize: 16)),
       );
     }
+    // Case-insensitive substring filter, e.g. "twitter" for the whole story
+    // of a post attempt.
+    final query = _query.trim().toLowerCase();
+    final visible = query.isEmpty
+        ? _entries
+        : _entries
+            .where((e) => e.message.toLowerCase().contains(query))
+            .toList();
     return Column(
       children: [
         Container(
@@ -779,14 +871,34 @@ class _DebugLogViewState extends State<_DebugLogView> {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  '${_entries.length} recent log entries',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search logs… (e.g. twitter)',
+                    isDense: true,
+                    border: const OutlineInputBorder(),
+                    suffixIcon: _query.isEmpty
+                        ? const Icon(Icons.search)
+                        : IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                          ),
                   ),
+                  onChanged: (value) => setState(() => _query = value),
                 ),
               ),
+              const SizedBox(width: 8),
+              Text(
+                query.isEmpty
+                    ? '${_entries.length}'
+                    : '${visible.length}/${_entries.length}',
+                style:
+                    const TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+              ),
+              const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: () async {
                   await AppLogService.instance.clear();
@@ -799,10 +911,10 @@ class _DebugLogViewState extends State<_DebugLogView> {
         ),
         Expanded(
           child: ListView.separated(
-            itemCount: _entries.length,
+            itemCount: visible.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, index) {
-              final entry = _entries[index];
+              final entry = visible[index];
               return Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,

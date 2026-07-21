@@ -14,6 +14,7 @@ import 'app_log.dart';
 import 'extractor.dart';
 import 'feed_parser.dart';
 import 'archive_store.dart';
+import 'outbox_service.dart';
 import 'nostr_service.dart';
 import 'twitter_service.dart';
 
@@ -113,6 +114,9 @@ class SyncService {
       // Pick up highlights added to highlights.md by other apps (cheap
       // mtime check; see importHighlightsFromArchive).
       await importHighlightsFromArchive();
+      // We're syncing, so likely online: retry any tweets stuck in the
+      // outbox.
+      await OutboxService.instance.flush();
       final sources = await _db.getSources();
       await AppLogService.instance.info(
         'Refresh started: ${sources.length} sources',

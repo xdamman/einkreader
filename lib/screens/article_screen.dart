@@ -414,9 +414,20 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (favorite && updated != null) await _archiveFavorite(updated);
   }
 
+  /// The markdown the reader renders (mirrored in build).
+  String get _renderedContent =>
+      _article?.contentMarkdown ??
+      _article?.summary ??
+      '*This article has not been downloaded yet. '
+          'Sync while online to read it offline.*';
+
   Future<void> _saveHighlight() async {
-    final text = _selectedText.trim();
+    var text = _selectedText.trim();
     if (text.isEmpty || _article == null) return;
+    // A selection spanning paragraphs arrives glued (SelectionArea drops the
+    // newlines between blocks); restore them so the highlight paints and
+    // shares correctly.
+    text = MarkdownView.repairSelection(text, _renderedContent);
     await _db.insertHighlight(Highlight(
       articleId: _article!.id!,
       text: text,
@@ -582,10 +593,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
       if (date != null) date,
     ].join(' · ');
 
-    final content = article.contentMarkdown ??
-        article.summary ??
-        '*This article has not been downloaded yet. '
-            'Sync while online to read it offline.*';
+    final content = _renderedContent;
 
     return Scaffold(
       appBar: AppBar(

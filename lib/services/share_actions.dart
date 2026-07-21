@@ -3,6 +3,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
+import 'outbox_service.dart';
 import 'sync_service.dart';
 import 'twitter_service.dart';
 
@@ -27,15 +28,44 @@ class ShareActions {
       ? article.displayTitle
       : '${article.displayTitle} (${article.url})';
 
+  /// [highlights] reordered as they appear in the article text (unlocatable
+  /// ones keep their relative order, after the located ones). The highlights
+  /// list is stored newest-first, which reads backwards when quoting.
+  static List<Highlight> inReadingOrder(
+      Article article, List<Highlight> highlights) {
+    final content = article.contentMarkdown ?? '';
+    int positionOf(Highlight h) {
+      final needle = h.text
+          .split('\n')
+          .map((l) => l.trim())
+          .firstWhere((l) => l.length > 2, orElse: () => h.text.trim());
+      final at = content.indexOf(needle);
+      return at == -1 ? 1 << 30 : at;
+    }
+
+    // Decorate with the original index for a stable sort.
+    final decorated = [
+      for (var i = 0; i < highlights.length; i++)
+        (position: positionOf(highlights[i]), index: i)
+    ]..sort((a, b) {
+        final byPosition = a.position.compareTo(b.position);
+        return byPosition != 0 ? byPosition : a.index.compareTo(b.index);
+      });
+    return [for (final d in decorated) highlights[d.index]];
+  }
+
   /// One or many highlights with a single attribution:
   ///   "passage" — Title (url)
   /// or
   ///   My highlights from Title (url): "h1" "h2" …
-  /// [withAttribution] is off when the destination already shows the source
-  /// (a native quote tweet embeds the original).
+  /// in the order they appear in the article. [withAttribution] is off when
+  /// the destination already shows the source (a native quote tweet embeds
+  /// the original).
   static String highlightsBody(Article article, List<Highlight> highlights,
       {bool withAttribution = true}) {
-    final quotes = highlights.map((h) => '"${h.text}"').join('\n\n');
+    final quotes = inReadingOrder(article, highlights)
+        .map((h) => '"${h.text}"')
+        .join('\n\n');
     if (!withAttribution) return quotes;
     if (highlights.length == 1) {
       return '$quotes\n\n— ${attribution(article)}';
@@ -213,12 +243,22 @@ class ShareActions {
         ],
       ),
     );
-    if (text == null || text.isEmpty || !context.mounted) return;
+    if (text == null || !context.mounted) return;
+    if (text.isEmpty) {
+      // Never drop silently — an empty post must say why nothing happened.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Nothing posted — the tweet was empty')));
+      return;
+    }
     String message = 'Posted to Twitter';
     try {
       await twitter.postTweet(text, quoteTweetId: quoteTweetId);
     } catch (e) {
-      message = 'Couldn\'t post: $e';
+      // Keep the tweet: it lands in the outbox (icon on the home screen)
+      // and is retried on the next sync or manually.
+      await OutboxService.instance
+          .enqueueTweet(text, quoteTweetId: quoteTweetId, error: '$e');
+      message = 'Couldn\'t post now — kept in the outbox for retry';
     }
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)

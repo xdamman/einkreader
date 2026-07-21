@@ -112,6 +112,48 @@ void main() {
     expect(text, isNot(contains('substack.com')));
   });
 
+  group('repairSelection (SelectionArea glues paragraphs)', () {
+    const md = 'First paragraph ends here.\n\n'
+        'Second paragraph sits in the middle.\n\n'
+        'Third paragraph starts here and continues.';
+
+    test('re-inserts the newline at a two-paragraph boundary', () {
+      expect(
+        MarkdownView.repairSelection(
+            'ends here.Second paragraph sits', md),
+        'ends here.\nSecond paragraph sits',
+      );
+    });
+
+    test('spans a whole middle paragraph', () {
+      expect(
+        MarkdownView.repairSelection(
+            'ends here.Second paragraph sits in the middle.Third paragraph',
+            md),
+        'ends here.\nSecond paragraph sits in the middle.\nThird paragraph',
+      );
+    });
+
+    test('single-paragraph selections are untouched', () {
+      expect(MarkdownView.repairSelection('paragraph sits in', md),
+          'paragraph sits in');
+    });
+
+    test('text that cannot be decomposed is returned unchanged', () {
+      expect(MarkdownView.repairSelection('unrelated words entirely', md),
+          'unrelated words entirely');
+    });
+
+    test('sees through inline markup (links render as anchors)', () {
+      const linked = 'Intro with a [link](https://x.com/a) ends.\n\n'
+          'Next paragraph.';
+      expect(
+        MarkdownView.repairSelection('link ends.Next paragraph.', linked),
+        'link ends.\nNext paragraph.',
+      );
+    });
+  });
+
   testWidgets('a real sentence mentioning subscribe is kept', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(

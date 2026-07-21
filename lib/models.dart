@@ -292,6 +292,43 @@ class Article {
       );
 }
 
+/// A tweet that couldn't be posted (offline, API error) waiting for a retry.
+class OutboxItem {
+  final int? id;
+  final String text;
+  final String? quoteTweetId;
+  final int createdAt;
+  final int attempts;
+  final String? lastError;
+
+  const OutboxItem({
+    this.id,
+    required this.text,
+    this.quoteTweetId,
+    required this.createdAt,
+    this.attempts = 0,
+    this.lastError,
+  });
+
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'text': text,
+        'quote_tweet_id': quoteTweetId,
+        'created_at': createdAt,
+        'attempts': attempts,
+        'last_error': lastError,
+      };
+
+  static OutboxItem fromMap(Map<String, Object?> m) => OutboxItem(
+        id: m['id'] as int?,
+        text: m['text'] as String,
+        quoteTweetId: m['quote_tweet_id'] as String?,
+        createdAt: m['created_at'] as int,
+        attempts: (m['attempts'] as int?) ?? 0,
+        lastError: m['last_error'] as String?,
+      );
+}
+
 class Highlight {
   final int? id;
   final int articleId;

@@ -47,7 +47,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -127,7 +127,21 @@ class AppDatabase {
     if (oldVersion < 7) {
       await db.execute('ALTER TABLE sources ADD COLUMN description TEXT');
     }
+    if (oldVersion < 8) {
+      await db.execute(_createOutboxSql);
+    }
   }
+
+  static const _createOutboxSql = '''
+      CREATE TABLE outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL,
+        quote_tweet_id TEXT,
+        created_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+      )
+    ''';
 
   static const _createFoldersSql = '''
       CREATE TABLE folders (
@@ -188,6 +202,7 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX idx_articles_source ON articles(source_id, published_at)',
     );
+    await db.execute(_createOutboxSql);
   }
 
   // ---------------------------------------------------------------- sources
@@ -719,6 +734,37 @@ class AppDatabase {
       limit: 1,
     );
     return Article.fromMap(existing.first);
+  }
+
+  // ---------------------------------------------------------------- outbox
+
+  Future<List<OutboxItem>> outboxItems() async {
+    final db = await database;
+    final rows = await db.query('outbox', orderBy: 'created_at ASC');
+    return rows.map(OutboxItem.fromMap).toList();
+  }
+
+  Future<OutboxItem> insertOutboxItem(OutboxItem item) async {
+    final db = await database;
+    final id = await db.insert('outbox', item.toMap()..remove('id'));
+    return OutboxItem.fromMap((await db.query('outbox',
+            where: 'id = ?', whereArgs: [id], limit: 1))
+        .first);
+  }
+
+  Future<void> deleteOutboxItem(int id) async {
+    final db = await database;
+    await db.delete('outbox', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Records one more failed send attempt for a queued item.
+  Future<void> recordOutboxAttempt(int id, String error) async {
+    final db = await database;
+    await db.rawUpdate(
+      'UPDATE outbox SET attempts = attempts + 1, last_error = ? '
+      'WHERE id = ?',
+      [error, id],
+    );
   }
 
   // ------------------------------------------------------------- highlights

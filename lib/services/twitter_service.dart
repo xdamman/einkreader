@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
 
+import 'app_log.dart';
 import 'twitter_markdown.dart';
 
 /// A tweet reduced to what the reader needs.
@@ -300,9 +301,21 @@ class TwitterService {
 
   /// Posts a tweet, optionally as a native quote of [quoteTweetId]. Needs the
   /// tweet.write scope: accounts connected before that scope was requested
-  /// get a 403 until reconnected in Settings.
+  /// get a 403 until reconnected. Every step logs with a "Twitter:" prefix so
+  /// the debug screen's search surfaces the whole story of a post.
   Future<void> postTweet(String text, {String? quoteTweetId}) async {
-    final token = await _validAccessToken();
+    await AppLogService.instance.info(
+      'Twitter: posting tweet (${text.length} chars'
+      '${quoteTweetId != null ? ', quoting $quoteTweetId' : ''})',
+    );
+    final String token;
+    try {
+      token = await _validAccessToken();
+    } catch (e) {
+      await AppLogService.instance
+          .error('Twitter: no valid access token for posting: $e');
+      rethrow;
+    }
     final response = await _client.post(
       Uri.parse('$_apiBase/tweets'),
       headers: {
@@ -315,14 +328,23 @@ class TwitterService {
       }),
     );
     if (response.statusCode == 403) {
+      await AppLogService.instance
+          .error('Twitter: post refused (403): ${response.body}');
       throw Exception(
-          'Twitter refused the post. Reconnect Twitter in Settings to grant '
-          'the posting permission.');
+          'Twitter refused the post. Reconnect Twitter (Add source) to '
+          'grant the posting permission.');
     }
     if (response.statusCode != 201) {
+      await AppLogService.instance.error(
+          'Twitter: post failed (HTTP ${response.statusCode}): '
+          '${response.body}');
       throw Exception('Twitter API error ${response.statusCode}: '
           '${response.body}');
     }
+    final id =
+        ((jsonDecode(response.body) as Map<String, dynamic>?)?['data']
+            as Map<String, dynamic>?)?['id'];
+    await AppLogService.instance.info('Twitter: tweet posted, id $id');
   }
 
   // ----------------------------------------------------------------- tokens

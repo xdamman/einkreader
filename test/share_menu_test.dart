@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/article_screen.dart';
+import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/share_actions.dart';
 import 'package:einkreader/services/twitter_service.dart';
 import 'package:einkreader/theme.dart';
@@ -170,6 +171,80 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  test('highlights are shared in reading order, not save order', () {
+    const article = Article(
+        sourceId: 1,
+        guid: 'g',
+        title: 'Ordered',
+        contentMarkdown: 'Alpha passage first. Beta passage second. '
+            'Gamma passage third.',
+        createdAt: 0);
+    // Saved newest-first (as getHighlights returns them).
+    final highlights = [
+      const Highlight(articleId: 1, text: 'Gamma passage', createdAt: 3),
+      const Highlight(articleId: 1, text: 'Alpha passage', createdAt: 1),
+      const Highlight(articleId: 1, text: 'Beta passage', createdAt: 2),
+    ];
+    final body = ShareActions.highlightsBody(article, highlights);
+    expect(
+        body.indexOf('Alpha'), lessThan(body.indexOf('Beta')));
+    expect(body.indexOf('Beta'), lessThan(body.indexOf('Gamma')));
+  });
+
+  group('outbox', () {
+    test('failed post is queued, retried, and sent when the API recovers',
+        () async {
+      var failing = true;
+      OutboxService.instance.debugTwitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async => failing
+            ? http.Response('{"detail": "over capacity"}', 503)
+            : http.Response('{"data": {"id": "9"}}', 201)),
+      );
+
+      await OutboxService.instance
+          .enqueueTweet('stuck tweet', error: 'offline');
+      expect(OutboxService.instance.pending.value, 1);
+
+      // Retry while the API still fails: stays queued, attempt recorded.
+      var (sent, remaining) = await OutboxService.instance.flush();
+      expect((sent, remaining), (0, 1));
+      final item = (await OutboxService.instance.items()).single;
+      expect(item.attempts, 2);
+      expect(item.lastError, contains('503'));
+
+      // API recovers: flush drains the queue.
+      failing = false;
+      (sent, remaining) = await OutboxService.instance.flush();
+      expect((sent, remaining), (1, 0));
+      expect(OutboxService.instance.pending.value, 0);
+      OutboxService.instance.debugTwitter = null;
+    });
+  });
+
+  testWidgets('posting an empty tweet says so instead of dropping silently',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => Center(
+            child: OutlinedButton(
+              onPressed: () => ShareActions.onTwitter(context,
+                  draft: '', quoteTweetId: '123'),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Post'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('the tweet was empty'), findsOneWidget);
+  });
+
   group('TwitterService.tweetIdFromUrl', () {
     test('extracts the status id from tweet URLs', () {
       expect(
@@ -268,8 +343,8 @@ void main() {
       );
       expect(
         twitter.postTweet('hello'),
-        throwsA(predicate(
-            (e) => e.toString().contains('Reconnect Twitter in Settings'))),
+        throwsA(
+            predicate((e) => e.toString().contains('Reconnect Twitter'))),
       );
     });
   });

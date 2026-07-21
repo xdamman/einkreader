@@ -36,6 +36,60 @@ class MarkdownView extends StatefulWidget {
 
   @override
   State<MarkdownView> createState() => _MarkdownViewState();
+
+  /// The rendered plain text of each visible block, in order — what
+  /// SelectionArea puts in a selection.
+  static List<String> plainBlockTexts(String markdown) => [
+        for (final block in _MarkdownViewState._parseBlocks(markdown))
+          if (!_MarkdownViewState._isBoilerplate(block))
+            switch (block.type) {
+              _BlockType.code => block.text,
+              _BlockType.image => '',
+              _BlockType.rule => '',
+              _ => _MarkdownViewState._plainInline(block.text),
+            }
+      ]..removeWhere((t) => t.trim().isEmpty);
+
+  /// Re-inserts the newlines Flutter's SelectionArea drops between blocks: a
+  /// selection spanning paragraphs arrives glued ("…ends here.Second
+  /// paragraph…"), which can never be matched or shared correctly. Decomposes
+  /// [selection] as suffix-of-block + whole blocks + prefix-of-block against
+  /// [markdown]'s rendered blocks and joins the parts with '\n'. Returns the
+  /// selection unchanged when it fits inside one block or can't be decomposed.
+  static String repairSelection(String selection, String markdown) {
+    if (selection.isEmpty) return selection;
+    final blocks = plainBlockTexts(markdown);
+    for (final block in blocks) {
+      if (block.contains(selection)) return selection;
+    }
+    for (var i = 0; i < blocks.length; i++) {
+      // Longest prefix of the selection that ends block i.
+      final maxOverlap = selection.length < blocks[i].length
+          ? selection.length
+          : blocks[i].length;
+      for (var overlap = maxOverlap; overlap > 0; overlap--) {
+        if (!blocks[i].endsWith(selection.substring(0, overlap))) continue;
+        final parts = [selection.substring(0, overlap)];
+        var rest = selection.substring(overlap);
+        var matched = rest.isEmpty;
+        for (var j = i + 1; rest.isNotEmpty && j < blocks.length; j++) {
+          if (rest.startsWith(blocks[j])) {
+            parts.add(blocks[j]);
+            rest = rest.substring(blocks[j].length);
+            matched = rest.isEmpty;
+          } else if (blocks[j].startsWith(rest)) {
+            parts.add(rest);
+            rest = '';
+            matched = true;
+          } else {
+            break;
+          }
+        }
+        if (matched && parts.length > 1) return parts.join('\n');
+      }
+    }
+    return selection;
+  }
 }
 
 class _MarkdownViewState extends State<MarkdownView> {
@@ -98,7 +152,7 @@ class _MarkdownViewState extends State<MarkdownView> {
   /// Whether [block] is newsletter boilerplate to hide. Applies to short text
   /// blocks and lone subscribe links; content blocks (code, images, quotes)
   /// are never touched.
-  bool _isBoilerplate(_Block block) {
+  static bool _isBoilerplate(_Block block) {
     if (block.type != _BlockType.paragraph &&
         block.type != _BlockType.heading &&
         block.type != _BlockType.listItem) {
@@ -221,7 +275,7 @@ class _MarkdownViewState extends State<MarkdownView> {
   static final _listLine = RegExp(r'^(\s*)([-*+]|\d+[.)])\s+(.*)$');
   static final _headingLine = RegExp(r'^(#{1,6})\s+(.*)$');
 
-  List<_Block> _parseBlocks(String markdown) {
+  static List<_Block> _parseBlocks(String markdown) {
     final blocks = <_Block>[];
     final lines = markdown.split('\n');
     final paragraph = <String>[];
@@ -328,6 +382,34 @@ class _MarkdownViewState extends State<MarkdownView> {
       r'`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
       r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
       r'\\\[([^\]]+?)\\\]\(([^)\s]+)(?:\s+"[^"]*")?\)');
+
+  /// The plain text [_inlineSpans] renders for [text] — same branches, but
+  /// producing a string. Keeps [MarkdownView.plainBlockTexts] in lockstep
+  /// with what SelectionArea actually sees.
+  static String _plainInline(String text) {
+    final out = StringBuffer();
+    var index = 0;
+    for (final match in _inlinePattern.allMatches(text)) {
+      if (match.start > index) {
+        out.write(_unescape(text.substring(index, match.start)));
+      }
+      if (match.group(1) != null || match.group(2) != null) {
+        out.write(_plainInline(match.group(1) ?? match.group(2)!));
+      } else if (match.group(3) != null || match.group(4) != null) {
+        out.write(_plainInline(match.group(3) ?? match.group(4)!));
+      } else if (match.group(5) != null) {
+        out.write(match.group(5));
+      } else if (match.group(6) != null || match.group(10) != null) {
+        out.write(_unescape((match.group(6) ?? match.group(10))!));
+      } else if (match.group(8) != null) {
+        final alt = match.group(8)!;
+        if (alt.isNotEmpty) out.write('[image: $alt]');
+      }
+      index = match.end;
+    }
+    if (index < text.length) out.write(_unescape(text.substring(index)));
+    return out.toString();
+  }
 
   List<InlineSpan> _inlineSpans(String text, TextStyle style) {
     final spans = <InlineSpan>[];
