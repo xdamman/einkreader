@@ -80,19 +80,30 @@ class AppDatabase {
     _db = null;
   }
 
+  /// Adds a column unless the table already has it. Every ADD COLUMN
+  /// migration must go through this: a step may run against a table that a
+  /// LATER step's shape already includes (the v0.2.0 lockout: step 8 created
+  /// the outbox from a shared constant step 10 had since extended, so the
+  /// duplicate ALTER threw and the whole upgrade rolled back, locking users
+  /// out of an intact database).
+  Future<void> _addColumnIfMissing(
+      Database db, String table, String column, String definition) async {
+    final info = await db.rawQuery('PRAGMA table_info($table)');
+    if (info.any((row) => row['name'] == column)) return;
+    await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+  }
+
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      await db.execute(
-        'ALTER TABLE articles ADD COLUMN read_later INTEGER NOT NULL DEFAULT 0',
-      );
-      await db.execute(
-        'ALTER TABLE articles ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0',
-      );
+      await _addColumnIfMissing(
+          db, 'articles', 'read_later', 'INTEGER NOT NULL DEFAULT 0');
+      await _addColumnIfMissing(
+          db, 'articles', 'favorite', 'INTEGER NOT NULL DEFAULT 0');
     }
     if (oldVersion < 3) {
-      await db.execute('ALTER TABLE articles ADD COLUMN url_key TEXT');
+      await _addColumnIfMissing(db, 'articles', 'url_key', 'TEXT');
       await db.execute(
-        'CREATE INDEX idx_articles_url_key ON articles(url_key)',
+        'CREATE INDEX IF NOT EXISTS idx_articles_url_key ON articles(url_key)',
       );
       // Backfill the canonical key for existing rows so dedup works against
       // already-stored articles.
@@ -110,37 +121,50 @@ class AppDatabase {
       }
     }
     if (oldVersion < 4) {
-      await db.execute(
-        'ALTER TABLE articles ADD COLUMN scroll_position REAL NOT NULL DEFAULT 0',
-      );
-      await db.execute('ALTER TABLE articles ADD COLUMN scrolled_at INTEGER');
+      await _addColumnIfMissing(
+          db, 'articles', 'scroll_position', 'REAL NOT NULL DEFAULT 0');
+      await _addColumnIfMissing(db, 'articles', 'scrolled_at', 'INTEGER');
     }
     if (oldVersion < 5) {
-      await db.execute(
-        'ALTER TABLE articles ADD COLUMN via_article_id INTEGER',
-      );
+      await _addColumnIfMissing(db, 'articles', 'via_article_id', 'INTEGER');
     }
     if (oldVersion < 6) {
-      await db.execute(_createFoldersSql);
-      await db.execute('ALTER TABLE sources ADD COLUMN folder_id INTEGER');
+      // Frozen historical shape: migration steps must never reuse a live
+      // constant that later steps may extend.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS folders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+      ''');
+      await _addColumnIfMissing(db, 'sources', 'folder_id', 'INTEGER');
     }
     if (oldVersion < 7) {
-      await db.execute('ALTER TABLE sources ADD COLUMN description TEXT');
+      await _addColumnIfMissing(db, 'sources', 'description', 'TEXT');
     }
     if (oldVersion < 8) {
-      await db.execute(_createOutboxSql);
+      // Frozen as 0.1.15 shipped it (no kind/payload — step 10 adds those).
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS outbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          text TEXT NOT NULL,
+          quote_tweet_id TEXT,
+          created_at INTEGER NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT
+        )
+      ''');
     }
     if (oldVersion < 9) {
-      await db.execute('ALTER TABLE highlights ADD COLUMN comment TEXT');
-      await db.execute(
-        'ALTER TABLE highlights ADD COLUMN shared INTEGER NOT NULL DEFAULT 0',
-      );
+      await _addColumnIfMissing(db, 'highlights', 'comment', 'TEXT');
+      await _addColumnIfMissing(
+          db, 'highlights', 'shared', 'INTEGER NOT NULL DEFAULT 0');
     }
     if (oldVersion < 10) {
-      await db.execute(
-        "ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'tweet'",
-      );
-      await db.execute('ALTER TABLE outbox ADD COLUMN payload TEXT');
+      await _addColumnIfMissing(
+          db, 'outbox', 'kind', "TEXT NOT NULL DEFAULT 'tweet'");
+      await _addColumnIfMissing(db, 'outbox', 'payload', 'TEXT');
     }
   }
 
