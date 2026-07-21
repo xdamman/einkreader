@@ -17,9 +17,12 @@ export const RESERVED = new Set([
 const BLOB_PATH = 'nostr-registry.json';
 
 export async function loadRegistry() {
-  const { blobs } = await list({ prefix: BLOB_PATH, limit: 1 });
-  if (!blobs.length) return {};
-  const res = await fetch(blobs[0].url, { cache: 'no-store' });
+  // Exact-pathname match: list() is prefix-based and would also return a
+  // stray suffixed blob (e.g. from a manual CLI upload).
+  const { blobs } = await list({ prefix: BLOB_PATH });
+  const blob = blobs.find((b) => b.pathname === BLOB_PATH);
+  if (!blob) return {};
+  const res = await fetch(blob.url, { cache: 'no-store' });
   if (!res.ok) return {};
   return await res.json();
 }
