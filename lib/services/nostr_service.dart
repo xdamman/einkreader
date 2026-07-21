@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// A note or URL referenced from the user's Nostr bookmarks or likes.
@@ -30,6 +31,39 @@ class NostrService {
     'wss://nos.lol',
     'wss://relay.nostr.band',
   ];
+
+  /// Preference holding the user's relay list (Settings → Nostr relays).
+  /// Absent or empty falls back to [defaultRelays].
+  static const relaysPrefKey = 'nostr_relays';
+
+  /// The relays currently in use.
+  static Future<List<String>> relays() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getStringList(relaysPrefKey);
+    return (stored == null || stored.isEmpty) ? defaultRelays : stored;
+  }
+
+  static Future<void> saveRelays(List<String> relays) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(relaysPrefKey, relays);
+  }
+
+  /// True when [relay] answers a WebSocket handshake within [timeout].
+  static Future<bool> checkRelay(String relay,
+      {Duration timeout = const Duration(seconds: 5)}) async {
+    WebSocketChannel? channel;
+    try {
+      channel = WebSocketChannel.connect(Uri.parse(relay));
+      await channel.ready.timeout(timeout);
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      try {
+        await channel?.sink.close();
+      } catch (_) {}
+    }
+  }
 
   static final _urlRegExp = RegExp(r'https?://[^\s<>"\)\]]+');
 
@@ -202,7 +236,7 @@ class NostrService {
   Future<List<Map<String, dynamic>>> _query(Map<String, dynamic> filter,
       {Duration timeout = const Duration(seconds: 8)}) async {
     final results = await Future.wait(
-        defaultRelays.map((relay) => _queryRelay(relay, filter, timeout)));
+        (await relays()).map((relay) => _queryRelay(relay, filter, timeout)));
     final merged = <String, Map<String, dynamic>>{};
     for (final events in results) {
       for (final event in events) {
@@ -257,7 +291,7 @@ class NostrService {
   Future<int> publish(Map<String, dynamic> event,
       {Duration timeout = const Duration(seconds: 8)}) async {
     final results = await Future.wait(
-        defaultRelays.map((relay) => _publishTo(relay, event, timeout)));
+        (await relays()).map((relay) => _publishTo(relay, event, timeout)));
     return results.where((ok) => ok).length;
   }
 

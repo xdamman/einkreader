@@ -341,7 +341,9 @@ class _HomeScreenState extends State<HomeScreen> {
               for (final item in items)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.alternate_email),
+                  leading: Icon(item.kind == 'nostr'
+                      ? Icons.cell_tower
+                      : Icons.alternate_email),
                   title: Text(item.text,
                       maxLines: 2, overflow: TextOverflow.ellipsis),
                   subtitle: item.lastError == null
@@ -383,7 +385,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(remaining == 0
-            ? 'Outbox sent ($sent tweet${sent == 1 ? '' : 's'})'
+            ? 'Outbox sent ($sent item${sent == 1 ? '' : 's'})'
             : 'Sent $sent — $remaining still waiting')));
   }
 

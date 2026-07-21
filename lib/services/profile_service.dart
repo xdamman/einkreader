@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 import 'app_log.dart';
 import 'nostr_service.dart';
+import 'outbox_service.dart';
 
 /// The user's fields as edited in the profile modal.
 class Profile {
@@ -48,6 +49,22 @@ class ProfileService {
 
   Future<int> _publish(Map<String, dynamic> event) =>
       (debugPublish ?? NostrService().publish)(event);
+
+  /// Publishes, or queues in the outbox when no relay accepted (offline,
+  /// relays down). Returns accepting-relay count; 0 always means "queued".
+  Future<int> _publishOrQueue(
+      Map<String, dynamic> event, String description) async {
+    try {
+      final accepted = await _publish(event);
+      if (accepted > 0) return accepted;
+      await OutboxService.instance.enqueueNostrEvent(event,
+          description: description, error: 'No relay accepted the event');
+    } catch (e) {
+      await OutboxService.instance
+          .enqueueNostrEvent(event, description: description, error: '$e');
+    }
+    return 0;
+  }
 
   /// Whether the user opted in and has an identity.
   Future<bool> get enabled async =>
@@ -115,7 +132,7 @@ class ProfileService {
         for (final link in links.skip(1)) ['r', link],
       ],
     );
-    final accepted = await _publish(event);
+    final accepted = await _publishOrQueue(event, 'Profile update');
     await AppLogService.instance
         .info('Profile: metadata published to $accepted relay(s)');
     return accepted;
@@ -134,7 +151,10 @@ class ProfileService {
           ['comment', highlight.comment!],
       ],
     );
-    final accepted = await _publish(event);
+    final preview = highlight.text.length > 60
+        ? '${highlight.text.substring(0, 60)}…'
+        : highlight.text;
+    final accepted = await _publishOrQueue(event, 'Highlight: "$preview"');
     await AppLogService.instance
         .info('Profile: highlight published to $accepted relay(s)');
     return accepted;

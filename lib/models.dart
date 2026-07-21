@@ -292,19 +292,31 @@ class Article {
       );
 }
 
-/// A tweet that couldn't be posted (offline, API error) waiting for a retry.
+/// An outgoing event that couldn't be sent yet (offline, API error) waiting
+/// for a retry: a tweet, or a signed Nostr event (profile update, shared
+/// highlight).
 class OutboxItem {
+  /// 'tweet' or 'nostr'.
+  final String kind;
   final int? id;
+
+  /// The tweet body, or a human-readable description for nostr events.
   final String text;
   final String? quoteTweetId;
+
+  /// The signed Nostr event as JSON (kind 'nostr' only). Signed events can
+  /// be re-sent as-is at any time.
+  final String? payload;
   final int createdAt;
   final int attempts;
   final String? lastError;
 
   const OutboxItem({
     this.id,
+    this.kind = 'tweet',
     required this.text,
     this.quoteTweetId,
+    this.payload,
     required this.createdAt,
     this.attempts = 0,
     this.lastError,
@@ -312,8 +324,10 @@ class OutboxItem {
 
   Map<String, Object?> toMap() => {
         'id': id,
+        'kind': kind,
         'text': text,
         'quote_tweet_id': quoteTweetId,
+        'payload': payload,
         'created_at': createdAt,
         'attempts': attempts,
         'last_error': lastError,
@@ -321,8 +335,10 @@ class OutboxItem {
 
   static OutboxItem fromMap(Map<String, Object?> m) => OutboxItem(
         id: m['id'] as int?,
+        kind: (m['kind'] as String?) ?? 'tweet',
         text: m['text'] as String,
         quoteTweetId: m['quote_tweet_id'] as String?,
+        payload: m['payload'] as String?,
         createdAt: m['created_at'] as int,
         attempts: (m['attempts'] as int?) ?? 0,
         lastError: m['last_error'] as String?,

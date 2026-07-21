@@ -153,7 +153,7 @@ class HighlightList extends StatelessWidget {
               .publishHighlight(article, highlight);
           message = accepted > 0
               ? 'Shared to your profile'
-              : 'Sharing failed — try again when online';
+              : 'Queued in the outbox — will share when online';
         } catch (e) {
           message = 'Sharing failed: $e';
         }

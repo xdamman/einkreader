@@ -47,7 +47,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -136,13 +136,21 @@ class AppDatabase {
         'ALTER TABLE highlights ADD COLUMN shared INTEGER NOT NULL DEFAULT 0',
       );
     }
+    if (oldVersion < 10) {
+      await db.execute(
+        "ALTER TABLE outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'tweet'",
+      );
+      await db.execute('ALTER TABLE outbox ADD COLUMN payload TEXT');
+    }
   }
 
   static const _createOutboxSql = '''
       CREATE TABLE outbox (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL DEFAULT 'tweet',
         text TEXT NOT NULL,
         quote_tweet_id TEXT,
+        payload TEXT,
         created_at INTEGER NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0,
         last_error TEXT

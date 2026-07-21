@@ -76,7 +76,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(accepted > 0
             ? 'Profile saved and published'
-            : 'Profile saved — will publish when online')));
+            : 'Profile saved — publish queued in the outbox')));
   }
 
   Future<void> _copyNsec() async {

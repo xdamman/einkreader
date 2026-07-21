@@ -15,6 +15,7 @@ import '../services/backup_service.dart';
 import '../services/build_config.dart';
 import '../services/sync_service.dart';
 import '../services/update_service.dart';
+import '../widgets/relay_settings.dart';
 import 'sources_screen.dart';
 
 /// App settings: source management entry point, storage location, backup /
@@ -330,6 +331,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const SourcesScreen())),
             ),
+            const Text('Nostr relays', style: sectionStyle),
+            const SizedBox(height: 8),
+            const RelaySettings(),
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
             if (kCustomStorageSupported) ...[
               const SizedBox(height: 32),
               const Divider(),

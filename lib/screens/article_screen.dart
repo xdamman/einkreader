@@ -464,7 +464,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
             await ProfileService.instance.publishHighlight(article, highlight);
         message = accepted > 0
             ? 'Highlight saved and shared to your profile'
-            : 'Highlight saved — sharing failed, kept locally';
+            : 'Highlight saved — share queued in the outbox';
       } catch (e) {
         message = 'Highlight saved — sharing failed: $e';
       }
@@ -582,7 +582,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
             .publishHighlight(article, highlight);
         message = accepted > 0
             ? 'Shared to your profile'
-            : 'Sharing failed — try again when online';
+            : 'Queued in the outbox — will share when online';
       } catch (e) {
         message = 'Sharing failed: $e';
       }
