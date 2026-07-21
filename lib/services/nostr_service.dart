@@ -1,8 +1,41 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+
+/// A profile found on Nostr (kind-0 metadata).
+class NostrProfile {
+  final String pubkey; // hex
+  final String name;
+  final String about;
+  final String picture;
+
+  const NostrProfile({
+    required this.pubkey,
+    this.name = '',
+    this.about = '',
+    this.picture = '',
+  });
+}
+
+/// A long-form article (kind 30023, NIP-23): content is already Markdown.
+class NostrLongRead {
+  final String id;
+  final String title;
+  final String? summary;
+  final String contentMarkdown;
+  final DateTime? publishedAt;
+
+  const NostrLongRead({
+    required this.id,
+    required this.title,
+    this.summary,
+    required this.contentMarkdown,
+    this.publishedAt,
+  });
+}
 
 /// A note or URL referenced from the user's Nostr bookmarks or likes.
 class NostrItem {
@@ -26,11 +59,20 @@ class NostrItem {
 /// (kind 10003, NIP-51) and recent reactions (kind 7, NIP-25) from a set of
 /// public relays. No private key is ever needed.
 class NostrService {
+  NostrService({http.Client? client}) : _http = client ?? http.Client();
+
+  /// For NIP-05 (name@domain) lookups.
+  final http.Client _http;
+
   static const defaultRelays = [
     'wss://relay.damus.io',
     'wss://nos.lol',
     'wss://relay.nostr.band',
   ];
+
+  /// Relays known to implement NIP-50 full-text search (used only for
+  /// profile search, independent of the user's relay list).
+  static const searchRelays = ['wss://relay.nostr.band'];
 
   /// Preference holding the user's relay list (Settings → Nostr relays).
   /// Absent or empty falls back to [defaultRelays].
@@ -219,6 +261,161 @@ class NostrService {
     return items;
   }
 
+  /// Encodes a hex pubkey as npub1… (NIP-19).
+  static String npubEncode(String hexPubkey) => bech32Encode('npub', [
+        for (var i = 0; i < hexPubkey.length; i += 2)
+          int.parse(hexPubkey.substring(i, i + 2), radix: 16)
+      ]);
+
+  static NostrProfile _profileFromEvent(Map<String, dynamic> event) {
+    Map<String, dynamic> meta;
+    try {
+      meta = jsonDecode((event['content'] as String?) ?? '{}')
+          as Map<String, dynamic>;
+    } catch (_) {
+      meta = const {};
+    }
+    return NostrProfile(
+      pubkey: (event['pubkey'] as String?) ?? '',
+      name: (meta['display_name'] as String?)?.trim().isNotEmpty == true
+          ? (meta['display_name'] as String).trim()
+          : ((meta['name'] as String?) ?? '').trim(),
+      about: ((meta['about'] as String?) ?? '').trim(),
+      picture: ((meta['picture'] as String?) ?? '').trim(),
+    );
+  }
+
+  /// Loads a profile's kind-0 metadata; null when none is found.
+  Future<NostrProfile?> fetchProfile(String npub) async {
+    final pubkey = decodeNpub(npub);
+    final events = await _query({
+      'kinds': [0],
+      'authors': [pubkey],
+      'limit': 1,
+    });
+    if (events.isEmpty) return null;
+    events.sort((a, b) =>
+        (b['created_at'] as int? ?? 0).compareTo(a['created_at'] as int? ?? 0));
+    return _profileFromEvent(events.first);
+  }
+
+  /// A followed profile's recent short notes (kind 1), replies excluded.
+  Future<List<NostrItem>> fetchAuthorNotes(String npub) async {
+    final pubkey = decodeNpub(npub);
+    final events = await _query({
+      'kinds': [1],
+      'authors': [pubkey],
+      'limit': 50,
+    });
+    final items = <NostrItem>[];
+    for (final event in events) {
+      final tags = (event['tags'] as List?) ?? const [];
+      final isReply = tags.any(
+          (tag) => tag is List && tag.isNotEmpty && tag[0] == 'e');
+      if (isReply) continue;
+      final content = (event['content'] as String?) ?? '';
+      if (content.trim().isEmpty) continue;
+      final createdAt = event['created_at'] as int?;
+      items.add(NostrItem(
+        id: (event['id'] as String?) ?? '',
+        content: content,
+        authorPubkey: event['pubkey'] as String?,
+        createdAt: createdAt != null
+            ? DateTime.fromMillisecondsSinceEpoch(createdAt * 1000)
+            : null,
+        articleUrl: firstUrl(content),
+      ));
+    }
+    return items;
+  }
+
+  /// A followed profile's long-form articles (kind 30023): ready-made
+  /// Markdown, no page download needed.
+  Future<List<NostrLongRead>> fetchLongReads(String npub) async {
+    final pubkey = decodeNpub(npub);
+    final events = await _query({
+      'kinds': [30023],
+      'authors': [pubkey],
+      'limit': 30,
+    });
+    String? tagValue(List tags, String name) {
+      for (final tag in tags) {
+        if (tag is List && tag.length >= 2 && tag[0] == name) {
+          return tag[1] as String?;
+        }
+      }
+      return null;
+    }
+
+    final reads = <NostrLongRead>[];
+    for (final event in events) {
+      final content = (event['content'] as String?) ?? '';
+      if (content.trim().isEmpty) continue;
+      final tags = (event['tags'] as List?) ?? const [];
+      final publishedAt = int.tryParse(tagValue(tags, 'published_at') ?? '') ??
+          event['created_at'] as int?;
+      reads.add(NostrLongRead(
+        id: (event['id'] as String?) ?? '',
+        title: tagValue(tags, 'title') ?? 'Untitled',
+        summary: tagValue(tags, 'summary'),
+        contentMarkdown: content,
+        publishedAt: publishedAt != null
+            ? DateTime.fromMillisecondsSinceEpoch(publishedAt * 1000)
+            : null,
+      ));
+    }
+    return reads;
+  }
+
+  /// Full-text profile search (NIP-50) on the search relays. Returns the
+  /// latest kind-0 per matching pubkey.
+  Future<List<NostrProfile>> searchProfiles(String query) async {
+    final events = await _query(
+      {
+        'kinds': [0],
+        'search': query,
+        'limit': 10,
+      },
+      onRelays: searchRelays,
+    );
+    // Latest metadata per pubkey.
+    final byPubkey = <String, Map<String, dynamic>>{};
+    for (final event in events) {
+      final pubkey = event['pubkey'] as String?;
+      if (pubkey == null) continue;
+      final existing = byPubkey[pubkey];
+      if (existing == null ||
+          (event['created_at'] as int? ?? 0) >
+              (existing['created_at'] as int? ?? 0)) {
+        byPubkey[pubkey] = event;
+      }
+    }
+    return byPubkey.values.map(_profileFromEvent).toList();
+  }
+
+  /// Resolves a NIP-05 identifier (name@domain) to a hex pubkey via the
+  /// domain's /.well-known/nostr.json. Throws when it can't be resolved.
+  Future<String> resolveNip05(String identifier) async {
+    final parts = identifier.split('@');
+    if (parts.length != 2 || parts[0].isEmpty || parts[1].isEmpty) {
+      throw const FormatException('Expected name@domain');
+    }
+    final name = parts[0].toLowerCase();
+    final uri = Uri.https(parts[1], '/.well-known/nostr.json', {'name': name});
+    final response =
+        await _http.get(uri).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) {
+      throw Exception('NIP-05 lookup failed (HTTP ${response.statusCode})');
+    }
+    final names = (jsonDecode(response.body)
+        as Map<String, dynamic>)['names'] as Map<String, dynamic>?;
+    final pubkey = names?[name] as String?;
+    if (pubkey == null) {
+      throw Exception('No "$name" at ${parts[1]}');
+    }
+    return pubkey;
+  }
+
   /// Returns the first http(s) URL in a note, skipping bare media files.
   static String? firstUrl(String content) {
     for (final match in _urlRegExp.allMatches(content)) {
@@ -232,11 +429,13 @@ class NostrService {
     return null;
   }
 
-  /// Sends one REQ to every relay and merges events until EOSE or timeout.
+  /// Sends one REQ to every relay (or [onRelays]) and merges events until
+  /// EOSE or timeout.
   Future<List<Map<String, dynamic>>> _query(Map<String, dynamic> filter,
-      {Duration timeout = const Duration(seconds: 8)}) async {
-    final results = await Future.wait(
-        (await relays()).map((relay) => _queryRelay(relay, filter, timeout)));
+      {Duration timeout = const Duration(seconds: 8),
+      List<String>? onRelays}) async {
+    final results = await Future.wait((onRelays ?? await relays())
+        .map((relay) => _queryRelay(relay, filter, timeout)));
     final merged = <String, Map<String, dynamic>>{};
     for (final events in results) {
       for (final event in events) {

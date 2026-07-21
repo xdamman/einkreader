@@ -53,6 +53,8 @@ class _SourcesScreenState extends State<SourcesScreen> {
         SourceType.twitterLikes => Icons.favorite_outline,
         SourceType.nostrBookmarks => Icons.bookmark_outline,
         SourceType.nostrLikes => Icons.favorite_outline,
+        SourceType.nostrNotes => Icons.notes,
+        SourceType.nostrLongReads => Icons.article_outlined,
         SourceType.savedLinks => Icons.link,
       };
 

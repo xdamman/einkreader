@@ -29,11 +29,18 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   final _controller = TextEditingController();
   final _clientIdController = TextEditingController();
   final _npubController = TextEditingController();
+  final _followController = TextEditingController();
   bool _busy = false;
   bool _twitterBusy = false;
   bool _twitterConnected = false;
   String? _twitterUsername;
   String? _error;
+
+  // What to subscribe to when following a Nostr profile; all on by default.
+  bool _followNotes = true;
+  bool _followLongReads = true;
+  bool _followBookmarks = true;
+  bool _followBusy = false;
 
   @override
   void initState() {
@@ -46,7 +53,102 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
     _controller.dispose();
     _clientIdController.dispose();
     _npubController.dispose();
+    _followController.dispose();
     super.dispose();
+  }
+
+  /// Resolves what the user typed to a profile: an npub directly, a NIP-05
+  /// identifier (name@domain) via its domain's well-known file, or free text
+  /// through NIP-50 relay search with a picker for the matches.
+  Future<String?> _resolveFollowInput(String input) async {
+    final nostr = NostrService();
+    if (input.startsWith('npub1')) return NostrService.decodeNpub(input);
+    if (input.contains('@')) return nostr.resolveNip05(input);
+    final matches = await nostr.searchProfiles(input);
+    if (matches.isEmpty) {
+      _toast('No Nostr profile found for "$input"');
+      return null;
+    }
+    if (!mounted) return null;
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        title: const Text('Which profile?'),
+        content: SizedBox(
+          width: 440,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final match in matches)
+                ListTile(
+                  title: Text(match.name.isEmpty
+                      ? '${NostrService.npubEncode(match.pubkey).substring(0, 16)}…'
+                      : match.name),
+                  subtitle: match.about.isEmpty
+                      ? null
+                      : Text(match.about,
+                          maxLines: 2, overflow: TextOverflow.ellipsis),
+                  onTap: () => Navigator.pop(dialogContext, match.pubkey),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _follow() async {
+    final input = _followController.text.trim();
+    if (input.isEmpty) return;
+    if (!_followNotes && !_followLongReads && !_followBookmarks) {
+      _toast('Pick at least one thing to follow');
+      return;
+    }
+    setState(() => _followBusy = true);
+    try {
+      final pubkey = await _resolveFollowInput(input);
+      if (pubkey == null) return;
+      final npub = NostrService.npubEncode(pubkey);
+      final profile = await NostrService().fetchProfile(npub);
+      final name = (profile?.name.isNotEmpty ?? false)
+          ? profile!.name
+          : '${npub.substring(0, 12)}…';
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final sources = <Source>[
+        if (_followNotes)
+          await _db.insertSource(Source(
+              type: SourceType.nostrNotes,
+              title: '$name · Notes',
+              url: npub,
+              createdAt: now)),
+        if (_followLongReads)
+          await _db.insertSource(Source(
+              type: SourceType.nostrLongReads,
+              title: '$name · Long reads',
+              url: npub,
+              createdAt: now)),
+        if (_followBookmarks)
+          await _db.insertSource(Source(
+              type: SourceType.nostrBookmarks,
+              title: '$name · Bookmarks',
+              url: npub,
+              createdAt: now)),
+      ];
+      _followController.clear();
+      _toast('Following $name');
+      // Pull in the new sources' items right away.
+      unawaited(SyncService.instance.syncSources(sources));
+    } catch (e) {
+      _toast('Could not follow: $e');
+    } finally {
+      if (mounted) setState(() => _followBusy = false);
+    }
   }
 
   Future<void> _loadAccounts() async {
@@ -357,6 +459,53 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
             OutlinedButton(
               onPressed: _addNostr,
               child: const Text('Add Nostr sources'),
+            ),
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+            const Text('Follow a Nostr profile', style: sectionStyle),
+            const SizedBox(height: 8),
+            const Text(
+              'Turn someone\'s Nostr presence into feeds. Enter their npub, '
+              'their verified address (name@domain), or just a name to '
+              'search.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _followController,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'npub, name@domain, or name',
+                hintText: 'npub1… / jack@cash.app / fiatjaf',
+              ),
+              onSubmitted: (_) => _follow(),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Notes'),
+              subtitle: const Text('Their short posts'),
+              value: _followNotes,
+              onChanged: (v) => setState(() => _followNotes = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Long reads'),
+              subtitle: const Text('Their long-form articles'),
+              value: _followLongReads,
+              onChanged: (v) => setState(() => _followLongReads = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Bookmarks'),
+              subtitle: const Text('What they save publicly'),
+              value: _followBookmarks,
+              onChanged: (v) => setState(() => _followBookmarks = v),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _followBusy ? null : _follow,
+              child: Text(_followBusy ? 'Looking up…' : 'Follow'),
             ),
           ],
         ),

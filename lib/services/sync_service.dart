@@ -66,7 +66,8 @@ class SyncService {
   final AppDatabase _db = AppDatabase.instance;
   final http.Client _http;
   final TwitterService twitter;
-  final nostr = NostrService();
+  /// Mutable for tests (a fake subclass can stand in).
+  NostrService nostr = NostrService();
   final _archive = ArchiveStore.instance;
 
   final progress = StreamController<SyncProgress>.broadcast(sync: true);
@@ -379,6 +380,13 @@ class SyncService {
         );
       case SourceType.nostrLikes:
         return _insertNostrItems(source, await nostr.fetchLikes(source.url));
+      case SourceType.nostrNotes:
+        return _insertNostrItems(
+          source,
+          await nostr.fetchAuthorNotes(source.url),
+        );
+      case SourceType.nostrLongReads:
+        return _insertLongReads(source, await nostr.fetchLongReads(source.url));
       case SourceType.savedLinks:
         // Local queue only: its articles are inserted when the user saves a
         // link and downloaded by the pending-content pass below.
@@ -538,6 +546,32 @@ class SyncService {
     await AppLogService.instance.info(
       'Processed tweets for source #${source.id}: '
       '$inserted inserted, ${tweets.length - inserted} skipped',
+    );
+    return inserted;
+  }
+
+  /// Long-form articles arrive as ready Markdown — stored complete, no page
+  /// download needed.
+  Future<int> _insertLongReads(
+      Source source, List<NostrLongRead> reads) async {
+    var inserted = 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final read in reads) {
+      final isNew = await _db.insertArticleIfNew(Article(
+        sourceId: source.id!,
+        guid: read.id,
+        title: read.title,
+        summary: read.summary,
+        contentMarkdown: read.contentMarkdown,
+        publishedAt: read.publishedAt?.millisecondsSinceEpoch,
+        fetched: 1,
+        createdAt: now,
+      ));
+      if (isNew) inserted++;
+    }
+    await AppLogService.instance.info(
+      'Processed ${reads.length} long reads for source #${source.id}: '
+      '$inserted inserted',
     );
     return inserted;
   }

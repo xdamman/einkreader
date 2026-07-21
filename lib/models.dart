@@ -8,6 +8,12 @@ enum SourceType {
   nostrBookmarks,
   nostrLikes,
 
+  /// A followed profile's short notes (kind 1).
+  nostrNotes,
+
+  /// A followed profile's long-form articles (kind 30023, NIP-23).
+  nostrLongReads,
+
   /// Built-in queue of links the user saved from inside articles. Nothing to
   /// pull remotely — its articles are inserted locally with fetched = 0 and
   /// downloaded by the regular pending-content pass.
@@ -23,6 +29,8 @@ enum SourceType {
         SourceType.twitterLikes => 'Twitter Likes',
         SourceType.nostrBookmarks => 'Nostr Bookmarks',
         SourceType.nostrLikes => 'Nostr Likes',
+        SourceType.nostrNotes => 'Nostr Notes',
+        SourceType.nostrLongReads => 'Nostr Long Reads',
         SourceType.savedLinks => 'Saved Links',
       };
 }
