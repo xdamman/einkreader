@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../db/app_database.dart';
 import '../services/app_log.dart';
 import '../services/archive_store.dart';
 import '../services/backup_service.dart';
@@ -55,6 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _archiveDir;
   bool _customArchiveDir = false;
   bool _movingArchive = false;
+  bool _tidying = false;
 
   @override
   void initState() {
@@ -211,6 +213,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _tidyArchive() async {
+    if (SyncService.instance.isSyncing) {
+      _toast('Wait for the current sync to finish first');
+      return;
+    }
+    setState(() => _tidying = true);
+    try {
+      final moved = await ArchiveStore.instance.tidyArchive();
+      final rewritten =
+          await AppDatabase.instance.stripMonthFromImageRefs();
+      _toast(moved == 0
+          ? 'Archive already tidy'
+          : 'Tidied: moved $moved files'
+              '${rewritten > 0 ? ', updated $rewritten articles' : ''}');
+    } catch (e) {
+      _toast('Tidy failed: $e');
+    } finally {
+      if (mounted) setState(() => _tidying = false);
+    }
+  }
+
   Future<void> _chooseArchiveDir() async {
     final path = await FilePicker.platform.getDirectoryPath(
       dialogTitle: 'Choose the library folder',
@@ -353,12 +376,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 8),
               const Text(
                 'Everything is stored as plain Markdown files in a clear '
-                'directory structure — year/month/source folders per '
-                'article, a favorites copy, and a single highlights.md — '
-                'so your library is easy to back up, restore and browse '
-                'with any application. highlights.md works both ways: '
-                'highlights added to it with any editor are imported into '
-                'the app on the next sync.',
+                'directory structure — a folder per year, then per source '
+                '(so archiving a year is moving one folder), a favorites '
+                'copy, and a single highlights.md — easy to back up, '
+                'restore and browse with any application. highlights.md '
+                'works both ways: highlights added to it with any editor '
+                'are imported into the app on the next sync.',
                 style: TextStyle(fontSize: 14),
               ),
               const SizedBox(height: 12),
@@ -389,6 +412,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: const Icon(Icons.folder_open),
                 label: Text(_movingArchive ? 'Moving…' : 'Choose folder'),
                 onPressed: _movingArchive ? null : _chooseArchiveDir,
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.cleaning_services_outlined),
+                label: Text(_tidying ? 'Tidying…' : 'Tidy archive'),
+                onPressed: _tidying ? null : _tidyArchive,
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Folds older year/month folders into the year/source '
+                'layout and collects stray year folders left next to the '
+                'archive by earlier versions.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
               ),
               if (_customArchiveDir) ...[
                 const SizedBox(height: 8),

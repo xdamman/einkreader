@@ -19,11 +19,10 @@ void main() {
       expect(ArchiveStore.slug('a' * 100).length, lessThanOrEqualTo(60));
     });
 
-    test('month / day / source paths', () {
+    test('day / source paths (year first, no month folder)', () {
       final date = DateTime(2026, 6, 12);
-      expect(ArchiveStore.monthDir(date), '2026/06');
       expect(ArchiveStore.dayStamp(date), '20260612');
-      expect(ArchiveStore.sourceDir(date, 'Stratechery'), '2026/06/stratechery');
+      expect(ArchiveStore.sourceDir(date, 'Stratechery'), '2026/stratechery');
     });
   });
 
@@ -79,7 +78,7 @@ void main() {
           article: article.copyWith(contentMarkdown: localized),
           markdown: localized);
 
-      final file = File(p.join(tmp.path, '2026', '06', 'stratechery',
+      final file = File(p.join(tmp.path, '2026', 'stratechery',
           '20260612-aggregation-theory.md'));
       expect(file.existsSync(), isTrue);
       final text = file.readAsStringSync();
@@ -101,10 +100,10 @@ void main() {
           article: article.copyWith(contentMarkdown: localized),
           markdown: localized);
 
-      final favMd = File(p.join(tmp.path, '2026', '06', 'favorites',
+      final favMd = File(p.join(tmp.path, '2026', 'favorites',
           '20260612-aggregation-theory.md'));
       expect(favMd.existsSync(), isTrue);
-      final favImages = Directory(p.join(tmp.path, '2026', '06', 'favorites',
+      final favImages = Directory(p.join(tmp.path, '2026', 'favorites',
           'images'));
       expect(favImages.listSync().whereType<File>(), isNotEmpty);
     });

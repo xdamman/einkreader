@@ -807,6 +807,34 @@ class AppDatabase {
     );
   }
 
+  /// Rewrites stored `eink-img://YYYY/MM/…` image references to the current
+  /// year-first layout (`eink-img://YYYY/…`) after an archive tidy moved the
+  /// files. Returns how many articles changed.
+  Future<int> stripMonthFromImageRefs() async {
+    final db = await database;
+    final rows = await db.query(
+      'articles',
+      columns: ['id', 'content_markdown'],
+      where: "content_markdown LIKE '%eink-img://%'",
+    );
+    final legacyRef = RegExp(r'eink-img://((?:19|20)\d{2})/\d{2}/');
+    var changed = 0;
+    for (final row in rows) {
+      final content = row['content_markdown'] as String;
+      final updated = content.replaceAllMapped(
+          legacyRef, (m) => 'eink-img://${m[1]}/');
+      if (updated == content) continue;
+      await db.update(
+        'articles',
+        {'content_markdown': updated},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+      changed++;
+    }
+    return changed;
+  }
+
   // ------------------------------------------------------------- highlights
 
   Future<int> insertHighlight(Highlight highlight) async {

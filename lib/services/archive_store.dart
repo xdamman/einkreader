@@ -12,13 +12,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 import 'app_log.dart';
 
-/// On-device archive of everything the reader keeps offline, laid out so a year,
-/// month or single source can be archived or deleted by moving a folder:
+/// On-device archive of everything the reader keeps offline, laid out year
+/// first so a whole year (or one source's year) can be archived by moving a
+/// single folder; the filename keeps the full date:
 ///
 /// ```
-/// base/YYYY/MM/source-slug/YYYYMMDD-article-slug.md
-/// base/YYYY/MM/source-slug/images/hash.ext
-/// base/YYYY/MM/favorites/...            (copies kept even if a source goes)
+/// base/YYYY/source-slug/YYYYMMDD-article-slug.md
+/// base/YYYY/source-slug/images/hash.ext
+/// base/YYYY/favorites/...               (copies kept even if a source goes)
 /// base/highlights.md                    (all highlights, time-independent)
 /// ```
 ///
@@ -158,9 +159,6 @@ class ArchiveStore {
 
   static String _two(int n) => n.toString().padLeft(2, '0');
 
-  /// "YYYY/MM" for an article's date.
-  static String monthDir(DateTime date) => '${date.year}/${_two(date.month)}';
-
   /// "YYYYMMDD" stamp used to prefix article filenames.
   static String dayStamp(DateTime date) =>
       '${date.year}${_two(date.month)}${_two(date.day)}';
@@ -177,10 +175,10 @@ class ArchiveStore {
         : capped.replaceAll(RegExp(r'-+$'), '');
   }
 
-  /// Relative directory holding a source's content for a given month, e.g.
-  /// "2026/06/stratechery".
+  /// Relative directory holding a source's content for a given year, e.g.
+  /// "2026/stratechery" — year first so archiving a year is one move.
   static String sourceDir(DateTime date, String sourceTitle) =>
-      '${monthDir(date)}/${slug(sourceTitle)}';
+      '${date.year}/${slug(sourceTitle)}';
 
   /// The local date an article is filed under (its publish date, else fetch).
   static DateTime articleDate(Article article) =>
@@ -328,7 +326,7 @@ class ArchiveStore {
     );
   }
 
-  /// Copies [article] (and its images) into `YYYY/MM/favorites/`, so a favorited
+  /// Copies [article] (and its images) into `YYYY/favorites/`, so a favorited
   /// or highlighted article survives even if its source is later removed.
   Future<void> copyToFavorites({
     required Source source,
@@ -337,7 +335,7 @@ class ArchiveStore {
   }) async {
     final date = articleDate(article);
     await _writeMarkdownFile(
-      relDir: '${monthDir(date)}/favorites',
+      relDir: '${date.year}/favorites',
       article: article,
       source: source,
       markdown: markdown,
@@ -409,6 +407,114 @@ class ArchiveStore {
     }
     out.write(markdown.substring(index));
     return out.toString();
+  }
+
+  // ------------------------------------------------------------------- tidy
+
+  static final _yearName = RegExp(r'^(19|20)\d{2}$');
+  static final _monthName = RegExp(r'^\d{2}$');
+
+  /// One-tap cleanup for archives left messy by older layouts or interrupted
+  /// moves:
+  ///  - folds the legacy `YYYY/MM/name/**` layout into `YYYY/name/**`
+  ///  - adopts stray legacy year trees (`YYYY/MM/...`) sitting in the base's
+  ///    PARENT folder — remnants of an earlier archive location — into the
+  ///    base (only unmistakable year/month trees are touched)
+  /// Callers should then rewrite stored image references (see
+  /// AppDatabase.stripMonthFromImageRefs). Returns how many files moved.
+  Future<int> tidyArchive() async {
+    final base = await _base();
+    var moved = 0;
+
+    Future<void> moveFile(File file, String destPath) async {
+      final dest = File(destPath);
+      if (await dest.exists()) {
+        // Same content twice (interrupted move): keep one. Different
+        // content: keep both, suffixed.
+        if ((await dest.length()) == (await file.length())) {
+          await file.delete();
+          return;
+        }
+        final dir = p.dirname(destPath);
+        final name = p.basenameWithoutExtension(destPath);
+        final ext = p.extension(destPath);
+        return moveFile(file, p.join(dir, '$name~1$ext'));
+      }
+      await dest.parent.create(recursive: true);
+      try {
+        await file.rename(destPath);
+      } on FileSystemException {
+        // Cross-device: copy then delete.
+        await file.copy(destPath);
+        await file.delete();
+      }
+      moved++;
+    }
+
+    /// Folds one `YYYY/MM/**` tree into `<destBase>/YYYY/**`.
+    Future<void> foldYear(Directory yearDir, String year) async {
+      await for (final month in yearDir.list()) {
+        if (month is! Directory ||
+            !_monthName.hasMatch(p.basename(month.path))) {
+          continue;
+        }
+        await for (final entity in month.list(recursive: true)) {
+          if (entity is! File) continue;
+          final rel = p.relative(entity.path, from: month.path);
+          await moveFile(entity, p.join(base, year, rel));
+        }
+        // Every file has moved (or deduped); what remains is empty dirs.
+        final noFilesLeft =
+            await month.list(recursive: true).where((e) => e is File).isEmpty;
+        if (noFilesLeft) await month.delete(recursive: true);
+      }
+    }
+
+    // 1. Legacy month layer inside the base.
+    await for (final entry in Directory(base).list()) {
+      if (entry is Directory && _yearName.hasMatch(p.basename(entry.path))) {
+        await foldYear(entry, p.basename(entry.path));
+      }
+    }
+
+    // 2. Stray year trees in the parent of a user-chosen base (an earlier
+    // archive location, or an interrupted move). Only year-named folders
+    // containing month-named folders qualify — nothing else is touched.
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString(dirPrefKey) != null) {
+      final parent = Directory(p.dirname(base));
+      if (await parent.exists()) {
+        await for (final entry in parent.list()) {
+          if (entry is! Directory ||
+              p.equals(entry.path, base) ||
+              !_yearName.hasMatch(p.basename(entry.path))) {
+            continue;
+          }
+          final noMonthDirs = await entry
+              .list()
+              .where((e) =>
+                  e is Directory && _monthName.hasMatch(p.basename(e.path)))
+              .isEmpty;
+          if (noMonthDirs) continue; // not our legacy layout: leave it
+          await foldYear(entry, p.basename(entry.path));
+          if (await entry.list().isEmpty) await entry.delete();
+        }
+      }
+    }
+
+    // Drop directories the folding emptied.
+    Future<void> pruneEmpty(Directory dir) async {
+      await for (final entry in dir.list()) {
+        if (entry is Directory) {
+          await pruneEmpty(entry);
+          if (await entry.list().isEmpty) await entry.delete();
+        }
+      }
+    }
+
+    await pruneEmpty(Directory(base));
+    await AppLogService.instance.info('Archive tidy: moved $moved files');
+    return moved;
   }
 
   // ------------------------------------------------------------- highlights
