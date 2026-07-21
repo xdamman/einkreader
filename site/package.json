@@ -1,0 +1,14 @@
+{
+  "name": "einkreader-site",
+  "private": true,
+  "type": "module",
+  "description": "einkreader.app: landing page + NIP-05 usernames (name@einkreader.app)",
+  "dependencies": {
+    "@noble/curves": "^1.6.0",
+    "@noble/hashes": "^1.5.0",
+    "@vercel/blob": "^0.27.0"
+  },
+  "scripts": {
+    "test": "node test/registry.test.mjs"
+  }
+}

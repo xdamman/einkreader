@@ -26,21 +26,33 @@ class _ProfileDialogState extends State<ProfileDialog> {
   final _profileService = ProfileService.instance;
   bool? _enabled; // null while loading
   final _name = TextEditingController();
+  final _username = TextEditingController();
   final _about = TextEditingController();
   final _links = TextEditingController();
   String _picture = '';
+  String? _address;
+  bool _addressPending = false;
   bool _saving = false;
   bool _uploading = false;
+  bool _usernameEdited = false;
+  String? _usernameError;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // Suggest a username from the name as they type, until they take over.
+    _name.addListener(() {
+      if (_enabled == false && !_usernameEdited) {
+        _username.text = ProfileService.suggestUsername(_name.text);
+      }
+    });
   }
 
   @override
   void dispose() {
     _name.dispose();
+    _username.dispose();
     _about.dispose();
     _links.dispose();
     super.dispose();
@@ -54,13 +66,31 @@ class _ProfileDialogState extends State<ProfileDialog> {
       _about.text = profile.about;
       _links.text = profile.links;
       _picture = profile.picture;
+      _address = await _profileService.nip05Address;
+      _addressPending = await _profileService.username == null;
     }
     if (!mounted) return;
     setState(() => _enabled = enabled);
   }
 
   Future<void> _create() async {
+    final username = _username.text.trim();
+    if (!ProfileService.usernameRule.hasMatch(username)) {
+      setState(() => _usernameError =
+          'At least 5 characters: a–z, 0–9 and _ only');
+      return;
+    }
+    setState(() => _usernameError = null);
     await _profileService.createIdentity();
+    try {
+      // Offline just means "pending": creation always succeeds locally.
+      await _profileService.registerUsername(username);
+    } on UsernameTakenException {
+      if (!mounted) return;
+      setState(() => _usernameError =
+          '"$username" is taken — pick another');
+      return;
+    }
     // Persist (and best-effort publish) the name right away; details follow
     // in the editor.
     await _profileService.saveProfile(Profile(name: _name.text.trim()));
@@ -172,6 +202,19 @@ class _ProfileDialogState extends State<ProfileDialog> {
             controller: _name,
             autofocus: true,
             decoration: const InputDecoration(labelText: 'Your name'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _username,
+            autocorrect: false,
+            onChanged: (_) => _usernameEdited = true,
+            decoration: InputDecoration(
+              labelText: 'Username',
+              suffixText: '@einkreader.app',
+              errorText: _usernameError,
+              helperText:
+                  'Your public address — people use it to tag and follow you',
+            ),
             onSubmitted: (_) => _create(),
           ),
         ],
@@ -217,6 +260,38 @@ class _ProfileDialogState extends State<ProfileDialog> {
                 style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
               ),
             ),
+            if (_address != null) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(width: 1.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      _address!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'monospace'),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _addressPending
+                          ? 'Registering when back online — this will be '
+                              'your address to be tagged and followed'
+                          : 'Share this address so people can tag you and '
+                              'subscribe to your highlights',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             TextField(
               controller: _name,

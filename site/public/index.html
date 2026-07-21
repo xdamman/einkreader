@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>einkreader — a calm, offline-first reader for e-ink</title>
+  <meta name="description" content="An open-source reading app for e-ink tablets: RSS, Twitter bookmarks and Nostr in one calm, offline library you own — plain Markdown files, highlights, and sharing only when you choose.">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Georgia, 'Times New Roman', serif;
+      color: #111; background: #fff; line-height: 1.6;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+    header { padding: 72px 0 40px; text-align: center; }
+    h1 { font-size: 44px; letter-spacing: -1px; }
+    .tagline { font-size: 20px; margin-top: 12px; color: #333; }
+    .cta {
+      display: inline-block; margin-top: 28px; padding: 14px 28px;
+      border: 2px solid #111; color: #111; text-decoration: none;
+      font-size: 17px; font-weight: bold;
+    }
+    .cta:hover { background: #111; color: #fff; }
+    .cta-sub { display: block; margin-top: 10px; font-size: 13px; color: #666; }
+    .hero { text-align: center; padding: 24px 0 8px; }
+    .hero img {
+      max-width: 100%; height: auto; border: 1px solid #111;
+    }
+    section { padding: 48px 0; border-top: 1px solid #ddd; }
+    h2 { font-size: 26px; margin-bottom: 20px; }
+    .features {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 28px;
+    }
+    .feature h3 { font-size: 17px; margin-bottom: 6px; }
+    .feature p { font-size: 15px; color: #333; }
+    .shots {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+    }
+    .shots figure { text-align: center; }
+    .shots img { max-width: 100%; height: auto; border: 1px solid #111; }
+    .shots figcaption { font-size: 13px; color: #555; margin-top: 8px; font-style: italic; }
+    footer { border-top: 1px solid #ddd; padding: 36px 0 56px; font-size: 14px; color: #555; text-align: center; }
+    footer a { color: #111; }
+    code { font-family: monospace; background: #f2f2f2; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <header class="wrap">
+    <h1>einkreader</h1>
+    <p class="tagline">A calm, offline-first reading app for e-ink tablets.</p>
+    <a class="cta" href="https://github.com/xdamman/einkreader/releases/latest">Download the APK</a>
+    <span class="cta-sub">Free &amp; open source · Android · built for e-ink</span>
+  </header>
+
+  <div class="hero wrap">
+    <img src="/screenshots/home_tablet.png" alt="einkreader home screen on a tablet: a date-grouped feed of articles across sources" width="960">
+  </div>
+
+  <section>
+    <div class="wrap">
+      <h2>Everything you want to read, in one quiet place</h2>
+      <div class="features">
+        <div class="feature">
+          <h3>All your sources</h3>
+          <p>RSS feeds, Twitter bookmarks, Nostr profiles — notes, long reads and bookmarks — organized in folders. Share any link into the app or paste one; it downloads to read later.</p>
+        </div>
+        <div class="feature">
+          <h3>Truly offline</h3>
+          <p>Articles and images download in full at sync. Threads are stitched together whole. Read on a plane, in a park, wherever — nothing needs a connection.</p>
+        </div>
+        <div class="feature">
+          <h3>Files you own</h3>
+          <p>Your whole library is plain Markdown in a clear <code>year/source</code> folder structure, plus a single editable <code>highlights.md</code>. Back up, sync, or browse it with any app — no lock-in, ever.</p>
+        </div>
+        <div class="feature">
+          <h3>Highlight &amp; note</h3>
+          <p>Select text to highlight, attach a private note, and find everything again in one place. Your reading position is remembered per article.</p>
+        </div>
+        <div class="feature">
+          <h3>Share on your terms</h3>
+          <p>Private and local-first by default. If you want, create a public profile and share chosen highlights — to your followers, by email, or as a quote tweet. You pick what to share, every time.</p>
+        </div>
+        <div class="feature">
+          <h3>Made for e-ink</h3>
+          <p>High-contrast black &amp; white, no animations to smear, discrete page refreshes, and layouts tuned for tablets like the iFLYTEK AINOTE and Boox devices.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Screenshots</h2>
+      <div class="shots">
+        <figure>
+          <img src="/screenshots/reader_tablet.png" alt="Reading an article with a highlight">
+          <figcaption>Reading, with inline highlights</figcaption>
+        </figure>
+        <figure>
+          <img src="/screenshots/highlights_tablet.png" alt="The highlights tab listing saved passages">
+          <figcaption>Every highlight, in one place</figcaption>
+        </figure>
+        <figure>
+          <img src="/screenshots/sources_tablet.png" alt="Managing sources and folders">
+          <figcaption>Sources, organized in folders</figcaption>
+        </figure>
+        <figure>
+          <img src="/screenshots/home_phone.png" alt="The feed on a phone">
+          <figcaption>Works on phones too</figcaption>
+        </figure>
+        <figure>
+          <img src="/screenshots/reader_phone.png" alt="Reading on a phone">
+          <figcaption>The same calm reading, pocket-sized</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>Open source on <a href="https://github.com/xdamman/einkreader">GitHub</a> · Readers get a free <code>name@einkreader.app</code> address to be tagged and followed.</p>
+      <p style="margin-top:8px">Local-first: nothing leaves your device unless you share it.</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/.well-known/nostr.json",
+      "destination": "/api/nostr-json"
+    }
+  ]
+}

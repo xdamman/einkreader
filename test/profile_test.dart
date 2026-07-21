@@ -177,6 +177,8 @@ void main() {
   testWidgets('profile dialog: name-only creation, then the editor',
       (tester) async {
     ProfileService.instance.debugPublish = (event) async => 1;
+    ProfileService.instance.debugHttpClient = MockClient(
+        (request) async => http.Response(jsonEncode({'ok': true}), 200));
     await tester.pumpWidget(MaterialApp(
       home: Builder(
         builder: (context) => Scaffold(
@@ -202,13 +204,27 @@ void main() {
 
     await tester.enterText(
         find.widgetWithText(TextField, 'Your name'), 'Xavier');
+    await tester.pump();
+    // The username is auto-suggested from the name, editable, with the
+    // domain shown as a suffix.
+    expect(find.text('@einkreader.app'), findsOneWidget);
+    expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'Username'))
+            .controller!
+            .text,
+        'xavier');
     await tester.tap(find.text('Create profile'));
     await tester.pumpAndSettle();
     expect(await ProfileService.instance.enabled, isTrue);
     expect((await ProfileService.instance.profile()).name, 'Xavier');
+    expect(await ProfileService.instance.username, 'xavier');
 
-    // Editor: tappable avatar invitation, bio, links; still no key talk.
+    // Editor: tappable avatar invitation, the full address made obvious,
+    // bio, links; still no key talk.
     expect(find.text('Tap the avatar to change it'), findsOneWidget);
+    expect(find.text('xavier@einkreader.app'), findsOneWidget);
+    expect(find.textContaining('tag you and'), findsOneWidget);
     expect(find.text('Short bio'), findsOneWidget);
     expect(find.text('Social links (one per line)'), findsOneWidget);
     expect(find.textContaining('secret key'), findsNothing);
@@ -218,6 +234,91 @@ void main() {
     await tester.tap(find.text('Save profile'));
     await tester.pumpAndSettle();
     expect((await ProfileService.instance.profile()).about, 'Reads on e-ink');
+  });
+
+  test('suggestUsername: valid, padded, capped', () {
+    expect(ProfileService.suggestUsername('Xavier Damman'), 'xavierdamman');
+    expect(ProfileService.suggestUsername('Bob'), 'bobreader');
+    expect(ProfileService.suggestUsername('X Æ A-12'), 'xa12reader');
+    expect(ProfileService.suggestUsername('a' * 30), 'a' * 20);
+    for (final input in ['Xavier Damman', 'Bob', '@!']) {
+      expect(
+          ProfileService.usernameRule
+              .hasMatch(ProfileService.suggestUsername(input)),
+          isTrue,
+          reason: 'suggestion for "$input" must always be valid');
+    }
+  });
+
+  test('registerUsername: success, taken, and offline-pending', () async {
+    final service = ProfileService.instance;
+    await service.createIdentity();
+    final pubkey = await service.publicKeyHex;
+
+    // Success: POSTs a signed proof, stores the name for the nip05 address.
+    service.debugHttpClient = MockClient((request) async {
+      expect(request.url.toString(), 'https://einkreader.app/api/register');
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body['name'], 'xavier');
+      expect(body['pubkey'], pubkey);
+      final event = body['event'] as Map<String, dynamic>;
+      expect(event['kind'], 27235);
+      expect(event['content'], 'xavier');
+      expect(
+          bip340.verify(event['pubkey'] as String, event['id'] as String,
+              event['sig'] as String),
+          isTrue);
+      return http.Response(
+          jsonEncode({'ok': true, 'nip05': 'xavier@einkreader.app'}), 200);
+    });
+    expect(await service.registerUsername('xavier'), isTrue);
+    expect(await service.username, 'xavier');
+    expect(await service.nip05Address, 'xavier@einkreader.app');
+
+    // The published kind-0 metadata carries the address.
+    Map<String, dynamic>? published;
+    service.debugPublish = (event) async {
+      published = event;
+      return 1;
+    };
+    await service.saveProfile(const Profile(name: 'Xavier'));
+    expect(jsonDecode(published!['content'] as String)['nip05'],
+        'xavier@einkreader.app');
+
+    // Taken: surfaces so the user can pick another.
+    service.debugHttpClient = MockClient((request) async =>
+        http.Response(jsonEncode({'error': 'Username is taken'}), 409));
+    await expectLater(service.registerUsername('someone'),
+        throwsA(isA<UsernameTakenException>()));
+
+    // Bad format never reaches the network.
+    await expectLater(service.registerUsername('abc'), throwsFormatException);
+
+    service.debugHttpClient = null;
+  });
+
+  test('offline registration stays pending and retries on save', () async {
+    final service = ProfileService.instance;
+    await service.createIdentity();
+    service.debugPublish = (event) async => 1;
+
+    var online = false;
+    service.debugHttpClient = MockClient((request) async {
+      if (!online) throw Exception('offline');
+      return http.Response(jsonEncode({'ok': true}), 200);
+    });
+    expect(await service.registerUsername('xavier'), isFalse);
+    expect(await service.username, isNull);
+    expect(await service.pendingUsername, 'xavier');
+    expect(await service.nip05Address, 'xavier@einkreader.app',
+        reason: 'the address is shown even while pending');
+
+    // Back online: the next profile save completes the registration.
+    online = true;
+    await service.saveProfile(const Profile(name: 'Xavier'));
+    expect(await service.username, 'xavier');
+    expect(await service.pendingUsername, isNull);
+    service.debugHttpClient = null;
   });
 
   test('uploadAvatar: Blossom PUT with signed authorization', () async {

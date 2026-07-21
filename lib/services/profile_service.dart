@@ -12,6 +12,15 @@ import 'app_log.dart';
 import 'nostr_service.dart';
 import 'outbox_service.dart';
 
+/// Thrown when a username is already registered to someone else.
+class UsernameTakenException implements Exception {
+  final String name;
+  const UsernameTakenException(this.name);
+
+  @override
+  String toString() => '"$name" is already taken';
+}
+
 /// The user's fields as edited in the profile modal.
 class Profile {
   final String name;
@@ -43,6 +52,15 @@ class ProfileService {
   static const _kAbout = 'profile_about';
   static const _kPicture = 'profile_picture';
   static const _kLinks = 'profile_links';
+  static const _kUsername = 'profile_username';
+  static const _kUsernamePending = 'profile_username_pending';
+
+  /// Every reader can claim a free name@einkreader.app address (NIP-05).
+  static const nip05Domain = 'einkreader.app';
+
+  /// Username rule, mirrored by the registration server: 5–20 chars,
+  /// lowercase letters, digits and underscore.
+  static final usernameRule = RegExp(r'^[a-z0-9_]{5,20}$');
 
   /// Test seam: publishes a signed event, returns accepting-relay count.
   @visibleForTesting
@@ -112,14 +130,18 @@ class ProfileService {
     );
   }
 
-  /// Saves the fields locally and publishes them as kind-0 metadata.
-  /// Returns how many relays accepted the update (0 = saved locally only).
+  /// Saves the fields locally and publishes them as kind-0 metadata
+  /// (including the nip05 address once registered). Also retries a pending
+  /// username registration. Returns how many relays accepted the update
+  /// (0 = saved locally only).
   Future<int> saveProfile(Profile profile) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kName, profile.name);
     await prefs.setString(_kAbout, profile.about);
     await prefs.setString(_kPicture, profile.picture);
     await prefs.setString(_kLinks, profile.links);
+    await retryPendingUsername();
+    final registered = await username;
     final links = profile.links
         .split('\n')
         .map((l) => l.trim())
@@ -131,6 +153,7 @@ class ProfileService {
         if (profile.name.isNotEmpty) 'name': profile.name,
         if (profile.about.isNotEmpty) 'about': profile.about,
         if (profile.picture.isNotEmpty) 'picture': profile.picture,
+        if (registered != null) 'nip05': '$registered@$nip05Domain',
         if (links.isNotEmpty) 'website': links.first,
       }),
       tags: [
@@ -141,6 +164,91 @@ class ProfileService {
     await AppLogService.instance
         .info('Profile: metadata published to $accepted relay(s)');
     return accepted;
+  }
+
+  /// Suggests a valid username from a display name: lowercased, invalid
+  /// characters dropped, padded to the 5-char minimum, capped at 20.
+  static String suggestUsername(String displayName) {
+    var slug = displayName
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9_]+'), '');
+    if (slug.length < 5) slug = '${slug}reader';
+    if (slug.length < 5) slug = 'reader${slug.hashCode.abs() % 10000}';
+    return slug.length > 20 ? slug.substring(0, 20) : slug;
+  }
+
+  /// The claimed username (without the domain), when one is registered.
+  Future<String?> get username async =>
+      (await SharedPreferences.getInstance()).getString(_kUsername);
+
+  /// A username chosen while offline, still waiting for its registration.
+  Future<String?> get pendingUsername async =>
+      (await SharedPreferences.getInstance())
+          .getString(_kUsernamePending);
+
+  /// The full address to show the user, from either state.
+  Future<String?> get nip05Address async {
+    final name = await username ?? await pendingUsername;
+    return name == null ? null : '$name@$nip05Domain';
+  }
+
+  /// Claims [name]@einkreader.app for this profile's key: POSTs the
+  /// registration with a signed proof-of-ownership event. On success the
+  /// name is stored; a taken name throws [UsernameTakenException]; any
+  /// other failure (offline, server) stores the wish as pending — retried
+  /// on the next [saveProfile].
+  Future<bool> registerUsername(String name) async {
+    if (!usernameRule.hasMatch(name)) {
+      throw const FormatException(
+          'Username must be 5–20 characters: a–z, 0–9 and _ only');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final event = await signEvent(kind: 27235, content: name);
+    try {
+      final response = await (debugHttpClient ?? http.Client())
+          .post(
+            Uri.https(nip05Domain, '/api/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'name': name,
+              'pubkey': await publicKeyHex,
+              'event': event,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 409) {
+        throw UsernameTakenException(name);
+      }
+      if (response.statusCode != 200) {
+        throw Exception('Registration failed '
+            '(HTTP ${response.statusCode}: ${response.body})');
+      }
+      await prefs.setString(_kUsername, name);
+      await prefs.remove(_kUsernamePending);
+      await AppLogService.instance
+          .info('Profile: registered $name@$nip05Domain');
+      return true;
+    } on UsernameTakenException {
+      rethrow;
+    } catch (e) {
+      await prefs.setString(_kUsernamePending, name);
+      await AppLogService.instance
+          .warn('Profile: username registration pending ($name): $e');
+      return false;
+    }
+  }
+
+  /// Retries a pending registration; quiet no-op when nothing is pending
+  /// or the name got taken meanwhile (the user picks another in the modal).
+  Future<void> retryPendingUsername() async {
+    final pending = await pendingUsername;
+    if (pending == null) return;
+    try {
+      await registerUsername(pending);
+    } on UsernameTakenException {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kUsernamePending);
+    }
   }
 
   /// Media host for avatars (Blossom protocol, BUD-02).
