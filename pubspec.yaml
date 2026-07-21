@@ -34,6 +34,7 @@ dependencies:
   share_plus: ^10.1.4
   # Request "All files access" so the archive can live in a user-chosen folder.
   permission_handler: ^12.0.0
+  bip340: ^0.3.1
 
 dev_dependencies:
   flutter_test:

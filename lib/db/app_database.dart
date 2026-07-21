@@ -47,7 +47,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -130,6 +130,12 @@ class AppDatabase {
     if (oldVersion < 8) {
       await db.execute(_createOutboxSql);
     }
+    if (oldVersion < 9) {
+      await db.execute('ALTER TABLE highlights ADD COLUMN comment TEXT');
+      await db.execute(
+        'ALTER TABLE highlights ADD COLUMN shared INTEGER NOT NULL DEFAULT 0',
+      );
+    }
   }
 
   static const _createOutboxSql = '''
@@ -196,6 +202,8 @@ class AppDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
         text TEXT NOT NULL,
+        comment TEXT,
+        shared INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       )
     ''');

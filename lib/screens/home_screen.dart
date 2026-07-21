@@ -12,6 +12,7 @@ import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
 import '../widgets/clipboard_link_prompt.dart';
 import '../widgets/highlight_list.dart';
+import '../widgets/profile_dialog.dart';
 import '../widgets/resume_reading.dart';
 import 'add_source_screen.dart';
 import 'settings_screen.dart';
@@ -259,6 +260,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   )
                 : const Icon(Icons.sync),
             onPressed: syncing ? null : _sync,
+          ),
+          IconButton(
+            tooltip: 'Profile',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: () => ProfileDialog.show(context),
           ),
           IconButton(
             tooltip: 'Settings',

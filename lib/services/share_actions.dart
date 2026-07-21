@@ -63,8 +63,10 @@ class ShareActions {
   /// the original).
   static String highlightsBody(Article article, List<Highlight> highlights,
       {bool withAttribution = true}) {
+    // A highlight's own comment travels with its quote.
     final quotes = inReadingOrder(article, highlights)
-        .map((h) => '"${h.text}"')
+        .map((h) => '"${h.text}"'
+            '${(h.comment ?? '').isEmpty ? '' : '\n\n${h.comment}'}')
         .join('\n\n');
     if (!withAttribution) return quotes;
     if (highlights.length == 1) {

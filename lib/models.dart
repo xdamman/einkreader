@@ -333,6 +333,12 @@ class Highlight {
   final int? id;
   final int articleId;
   final String text;
+
+  /// The reader's own note on this highlight. Private unless shared.
+  final String? comment;
+
+  /// 1 when the user chose to share this highlight to their public profile.
+  final int shared;
   final int createdAt;
 
   /// Populated by joins for display purposes.
@@ -342,6 +348,8 @@ class Highlight {
     this.id,
     required this.articleId,
     required this.text,
+    this.comment,
+    this.shared = 0,
     required this.createdAt,
     this.articleTitle,
   });
@@ -350,6 +358,8 @@ class Highlight {
         'id': id,
         'article_id': articleId,
         'text': text,
+        'comment': comment,
+        'shared': shared,
         'created_at': createdAt,
       };
 
@@ -357,6 +367,8 @@ class Highlight {
         id: m['id'] as int?,
         articleId: m['article_id'] as int,
         text: m['text'] as String,
+        comment: m['comment'] as String?,
+        shared: (m['shared'] as int?) ?? 0,
         createdAt: m['created_at'] as int,
         articleTitle: m['article_title'] as String?,
       );

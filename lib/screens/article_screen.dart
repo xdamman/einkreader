@@ -8,8 +8,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/archive_store.dart';
+import '../services/profile_service.dart';
 import '../services/share_actions.dart';
 import '../services/sync_service.dart';
+import '../widgets/highlight_compose.dart';
 import '../theme.dart';
 import '../widgets/markdown_view.dart';
 
@@ -423,26 +425,56 @@ class _ArticleScreenState extends State<ArticleScreen> {
 
   Future<void> _saveHighlight() async {
     var text = _selectedText.trim();
-    if (text.isEmpty || _article == null) return;
+    final article = _article;
+    if (text.isEmpty || article == null) return;
     // A selection spanning paragraphs arrives glued (SelectionArea drops the
     // newlines between blocks); restore them so the highlight paints and
     // shares correctly.
     text = MarkdownView.repairSelection(text, _renderedContent);
-    await _db.insertHighlight(Highlight(
-      articleId: _article!.id!,
+    final profileEnabled = await ProfileService.instance.enabled;
+    final twitterConnected = await ShareActions.twitterConnected();
+    if (!mounted) return;
+    // Comment + share toggles; plain Save keeps it a private local note.
+    final compose = await HighlightComposeDialog.show(
+      context,
+      selection: text,
+      profileEnabled: profileEnabled,
+      twitterConnected: twitterConnected,
+    );
+    if (compose == null || !mounted) return;
+    final highlight = Highlight(
+      articleId: article.id!,
       text: text,
+      comment: compose.comment.isEmpty ? null : compose.comment,
+      shared: compose.shareToProfile ? 1 : 0,
       createdAt: DateTime.now().millisecondsSinceEpoch,
-    ));
+    );
+    await _db.insertHighlight(highlight);
     final highlights = await _db.getHighlights(articleId: _currentId);
     if (!mounted) return;
     setState(() => _highlights = highlights);
     // A highlighted article is worth keeping: copy it to favorites and refresh
     // the time-independent highlights file.
-    await _archiveFavorite(_article!);
+    await _archiveFavorite(article);
     await _rewriteHighlights();
+    var message = 'Highlight saved';
+    if (compose.shareToProfile) {
+      try {
+        final accepted =
+            await ProfileService.instance.publishHighlight(article, highlight);
+        message = accepted > 0
+            ? 'Highlight saved and shared to your profile'
+            : 'Highlight saved — sharing failed, kept locally';
+      } catch (e) {
+        message = 'Highlight saved — sharing failed: $e';
+      }
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Highlight saved')));
+        .showSnackBar(SnackBar(content: Text(message)));
+    if (compose.shareToTwitter && mounted) {
+      await ShareActions.tweetHighlights(context, article, [highlight]);
+    }
   }
 
   /// Re-downloads and re-processes the article, then re-renders it.
@@ -492,6 +524,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (match == null) return;
     final highlight = match;
     final twitterConnected = await ShareActions.twitterConnected();
+    final profileEnabled = await ProfileService.instance.enabled;
     if (!mounted) return;
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -509,6 +542,12 @@ class _ArticleScreenState extends State<ArticleScreen> {
               ),
             ),
             const Divider(height: 1),
+            if (profileEnabled)
+              ListTile(
+                leading: const Icon(Icons.account_circle_outlined),
+                title: const Text('Share to profile'),
+                onTap: () => Navigator.pop(context, 'profile'),
+              ),
             ListTile(
               leading: const Icon(Icons.email_outlined),
               title: const Text('Share by email'),
@@ -536,7 +575,21 @@ class _ArticleScreenState extends State<ArticleScreen> {
     );
     if (!mounted || action == null) return;
     final article = _article;
-    if (action == 'email' && article != null) {
+    if (action == 'profile' && article != null) {
+      String message;
+      try {
+        final accepted = await ProfileService.instance
+            .publishHighlight(article, highlight);
+        message = accepted > 0
+            ? 'Shared to your profile'
+            : 'Sharing failed — try again when online';
+      } catch (e) {
+        message = 'Sharing failed: $e';
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } else if (action == 'email' && article != null) {
       await ShareActions.byEmail(
         context,
         subject: ShareActions.highlightsSubject(article, 1),
