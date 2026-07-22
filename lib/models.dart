@@ -17,7 +17,11 @@ enum SourceType {
   /// Built-in queue of links the user saved from inside articles. Nothing to
   /// pull remotely — its articles are inserted locally with fetched = 0 and
   /// downloaded by the regular pending-content pass.
-  savedLinks;
+  savedLinks,
+
+  /// Built-in feed of emails sent to the user's name@einkreader.app address
+  /// by their whitelisted sender.
+  email;
 
   static SourceType fromName(String name) =>
       SourceType.values.firstWhere((t) => t.name == name,
@@ -32,6 +36,7 @@ enum SourceType {
         SourceType.nostrNotes => 'Nostr Notes',
         SourceType.nostrLongReads => 'Nostr Long Reads',
         SourceType.savedLinks => 'Saved Links',
+        SourceType.email => 'Email',
       };
 }
 

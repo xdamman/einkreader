@@ -29,6 +29,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
   final _username = TextEditingController();
   final _about = TextEditingController();
   final _links = TextEditingController();
+  final _senderEmail = TextEditingController();
   String _picture = '';
   String? _address;
   bool _addressPending = false;
@@ -55,6 +56,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
     _username.dispose();
     _about.dispose();
     _links.dispose();
+    _senderEmail.dispose();
     super.dispose();
   }
 
@@ -66,6 +68,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
       _about.text = profile.about;
       _links.text = profile.links;
       _picture = profile.picture;
+      _senderEmail.text = await _profileService.allowedSender;
       _address = await _profileService.nip05Address;
       _addressPending = await _profileService.username == null;
     }
@@ -82,6 +85,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
     }
     setState(() => _usernameError = null);
     await _profileService.createIdentity();
+    final sender = _senderEmail.text.trim();
+    if (sender.isNotEmpty) await _profileService.setAllowedSender(sender);
     try {
       // Offline just means "pending": creation always succeeds locally.
       await _profileService.registerUsername(username);
@@ -99,6 +104,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
+    await _profileService.setAllowedSender(_senderEmail.text.trim());
     await _profileService.saveProfile(Profile(
       name: _name.text.trim(),
       about: _about.text.trim(),
@@ -186,7 +192,8 @@ class _ProfileDialogState extends State<ProfileDialog> {
   Widget _optIn() {
     return SizedBox(
       width: 400,
-      child: Column(
+      child: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -217,7 +224,20 @@ class _ProfileDialogState extends State<ProfileDialog> {
             ),
             onSubmitted: (_) => _create(),
           ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _senderEmail,
+            autocorrect: false,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Your email (optional)',
+              helperText: 'Emails you send from this address to your '
+                  '@einkreader.app address land in your reading feed',
+              helperMaxLines: 2,
+            ),
+          ),
         ],
+        ),
       ),
     );
   }
@@ -315,6 +335,21 @@ class _ProfileDialogState extends State<ProfileDialog> {
                   labelText: 'Social links (one per line)',
                   hintText: 'https://…',
                   alignLabelWithHint: true),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _senderEmail,
+              autocorrect: false,
+              keyboardType: TextInputType.emailAddress,
+              decoration: InputDecoration(
+                labelText: 'Email to your feed (optional)',
+                helperText: _address == null
+                    ? 'Set a sender address to email content into your feed'
+                    : 'Emails from this address to $_address land in your '
+                        'reading feed — links get downloaded, and PDF, EPUB '
+                        'or image attachments are included',
+                helperMaxLines: 3,
+              ),
             ),
           ],
         ),

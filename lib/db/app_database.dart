@@ -665,6 +665,20 @@ class AppDatabase {
     ));
   }
 
+  /// The built-in source holding emails sent to name@einkreader.app,
+  /// created on first use.
+  Future<Source> ensureEmailSource() async {
+    const url = 'local:email';
+    final existing = await getSourceByTypeAndUrl(SourceType.email, url);
+    if (existing != null) return existing;
+    return insertSource(Source(
+      type: SourceType.email,
+      title: 'Email',
+      url: url,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    ));
+  }
+
   /// Saves a link found inside [viaArticleId] to read later: bookmarked, and
   /// queued for download (fetched = 0) so the next online sync fetches its
   /// content. If the same story is already stored under any source, it is

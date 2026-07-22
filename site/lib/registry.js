@@ -64,16 +64,41 @@ export function verifyAuthEvent(event, { name, nowSeconds, maxAgeSeconds = 600 }
   return ok ? null : 'bad signature';
 }
 
+// Registry values are objects { pubkey, sender? } where sender is the one
+// email address allowed to mail content to name@einkreader.app. Old entries
+// may be bare pubkey strings; pubkeyOf reads both shapes.
+export function pubkeyOf(entry) {
+  return typeof entry === 'string' ? entry : entry?.pubkey;
+}
+
+export function senderOf(entry) {
+  return typeof entry === 'object' ? entry?.sender : undefined;
+}
+
 // Applies a registration to the registry object (pure; no I/O).
-// Returns { status, body }. A pubkey re-registering replaces its old name.
-export function applyRegistration(registry, { name, pubkey }) {
-  const existing = registry[name];
+// Returns { status, body }. A pubkey re-registering replaces its old name;
+// re-registering the same name updates the allowed sender.
+export function applyRegistration(registry, { name, pubkey, sender }) {
+  const existing = pubkeyOf(registry[name]);
   if (existing && existing !== pubkey) {
     return { status: 409, body: { error: 'Username is taken' } };
   }
-  for (const [otherName, otherKey] of Object.entries(registry)) {
-    if (otherKey === pubkey && otherName !== name) delete registry[otherName];
+  for (const [otherName, entry] of Object.entries(registry)) {
+    if (pubkeyOf(entry) === pubkey && otherName !== name) {
+      delete registry[otherName];
+    }
   }
-  registry[name] = pubkey;
+  registry[name] = {
+    pubkey,
+    ...(sender ? { sender: String(sender).toLowerCase() } : {}),
+  };
   return { status: 200, body: { ok: true, nip05: `${name}@einkreader.app` } };
+}
+
+// The registry entry (name + value) owned by [pubkey], if any.
+export function entryForPubkey(registry, pubkey) {
+  for (const [name, entry] of Object.entries(registry)) {
+    if (pubkeyOf(entry) === pubkey) return { name, entry };
+  }
+  return null;
 }

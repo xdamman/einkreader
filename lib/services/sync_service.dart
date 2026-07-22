@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
@@ -16,6 +17,7 @@ import 'feed_parser.dart';
 import 'archive_store.dart';
 import 'outbox_service.dart';
 import 'nostr_service.dart';
+import 'profile_service.dart';
 import 'twitter_service.dart';
 
 class SyncProgress {
@@ -140,6 +142,7 @@ class SyncService {
           },
       ]);
       newArticles = counts.fold(0, (sum, value) => sum + value);
+      newArticles += await _fetchInboxEmails();
       await _fetchPendingContent();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('last_sync', DateTime.now().millisecondsSinceEpoch);
@@ -391,6 +394,9 @@ class SyncService {
         // Local queue only: its articles are inserted when the user saves a
         // link and downloaded by the pending-content pass below.
         return 0;
+      case SourceType.email:
+        // Filled by the inbox fetch in syncAll, not per-source.
+        return 0;
     }
   }
 
@@ -619,6 +625,105 @@ class SyncService {
       '$inserted inserted, ${items.length - inserted} skipped',
     );
     return inserted;
+  }
+
+  /// Pulls emails sent to the user's name@einkreader.app address (already
+  /// converted to Markdown server-side, whitelisted sender only) and turns
+  /// each into an article under the built-in Email source. Like a tweet, an
+  /// email that is mostly a link gets the linked page downloaded with the
+  /// email kept as intro; a substantial email (or one with attachments) IS
+  /// the content, its images localized for offline reading. Processed items
+  /// are acknowledged (deleted server-side). Never breaks a sync.
+  Future<int> _fetchInboxEmails() async {
+    try {
+      final profile = ProfileService.instance;
+      if (!await profile.enabled || await profile.username == null) return 0;
+      final auth = await profile.inboxAuthHeader();
+      final listResponse = await _http.get(
+        Uri.https(ProfileService.nip05Domain, '/api/inbox'),
+        headers: {'Authorization': auth},
+      ).timeout(const Duration(seconds: 20));
+      if (listResponse.statusCode != 200) return 0;
+      final items = ((jsonDecode(listResponse.body)
+                  as Map<String, dynamic>)['items'] as List?) ??
+          const [];
+      if (items.isEmpty) return 0;
+
+      final source = await _db.ensureEmailSource();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      var inserted = 0;
+      final processedIds = <String>[];
+      for (final raw in items.cast<Map<String, dynamic>>()) {
+        final id = raw['id'] as String?;
+        final url = raw['url'] as String?;
+        if (id == null || url == null) continue;
+        try {
+          final itemResponse = await _http
+              .get(Uri.parse(url))
+              .timeout(const Duration(seconds: 20));
+          if (itemResponse.statusCode != 200) continue;
+          final item =
+              jsonDecode(itemResponse.body) as Map<String, dynamic>;
+          final markdown = (item['markdown'] as String?) ?? '';
+          final link = item['url'] as String?;
+          // A short link-bearing email without attachments reads like a
+          // tweet: fetch the page, keep the email as the intro.
+          final linkOnly = link != null &&
+              markdown.length < 600 &&
+              !markdown.contains('![');
+          String? content;
+          if (!linkOnly) {
+            content = await _archive.localizeMarkdown(
+              markdown,
+              relDir: _relDirFor(
+                  source, item['receivedAt'] as int?, now),
+              maxDimension: _maxImageDimension,
+            );
+          }
+          final article = Article(
+            sourceId: source.id!,
+            guid: id,
+            title: (item['subject'] as String?) ?? 'Email',
+            author: item['from'] as String?,
+            url: link,
+            publishedAt: item['receivedAt'] as int?,
+            summary: markdown,
+            contentMarkdown: content,
+            fetched: linkOnly ? 0 : 1,
+            createdAt: now,
+          );
+          if (await _db.insertArticleIfNew(article)) {
+            inserted++;
+            if (content != null) {
+              await _archive.writeArticle(
+                  source: source, article: article, markdown: content);
+            }
+          }
+          processedIds.add(id);
+        } catch (e) {
+          await AppLogService.instance
+              .warn('Email: could not process inbox item $id: $e');
+        }
+      }
+      if (processedIds.isNotEmpty) {
+        await _http.delete(
+          Uri.https(ProfileService.nip05Domain, '/api/inbox'),
+          headers: {
+            'Authorization': auth,
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'ids': processedIds}),
+        ).timeout(const Duration(seconds: 20));
+        await AppLogService.instance.info(
+            'Email: ingested $inserted of ${processedIds.length} '
+            'inbox item(s)');
+        progress.add(SyncProgress('', running: _syncing, reload: true));
+      }
+      return inserted;
+    } catch (e) {
+      await AppLogService.instance.warn('Email: inbox fetch failed: $e');
+      return 0;
+    }
   }
 
   /// Downloads and extracts content for all articles still missing it.

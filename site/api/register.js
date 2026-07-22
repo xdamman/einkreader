@@ -19,7 +19,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'POST only' });
   }
 
-  const { name, pubkey, event } = req.body ?? {};
+  const { name, pubkey, event, sender } = req.body ?? {};
+  if (sender != null &&
+      (typeof sender !== 'string' ||
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender))) {
+    return res.status(400).json({ error: 'Invalid sender email' });
+  }
   if (typeof name !== 'string' || !NAME_RULE.test(name)) {
     return res.status(400).json({
       error: 'Username must be 5–20 characters: a–z, 0–9 and _ only',
@@ -38,7 +43,8 @@ export default async function handler(req, res) {
   if (invalid) return res.status(401).json({ error: invalid });
 
   const registry = await loadRegistry();
-  const { status, body } = applyRegistration(registry, { name, pubkey });
+  const { status, body } =
+      applyRegistration(registry, { name, pubkey, sender });
   if (status === 200) await saveRegistry(registry);
   return res.status(status).json(body);
 }

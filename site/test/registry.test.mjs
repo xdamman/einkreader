@@ -8,6 +8,7 @@ import {
   RESERVED,
   applyRegistration,
   eventId,
+  pubkeyOf,
   verifyAuthEvent,
 } from '../lib/registry.js';
 
@@ -79,6 +80,6 @@ const rename =
 assert.equal(rename.status, 200);
 assert.equal(rename.body.nip05, 'xdamman@einkreader.app');
 assert.equal(registry.xavier, undefined, 'old name released on rename');
-assert.equal(registry.xdamman, 'a'.repeat(64));
+assert.equal(pubkeyOf(registry.xdamman), 'a'.repeat(64));
 
 console.log('registry tests passed');

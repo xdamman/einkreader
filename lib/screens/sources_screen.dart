@@ -56,6 +56,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
         SourceType.nostrNotes => Icons.notes,
         SourceType.nostrLongReads => Icons.article_outlined,
         SourceType.savedLinks => Icons.link,
+        SourceType.email => Icons.email_outlined,
       };
 
   @override

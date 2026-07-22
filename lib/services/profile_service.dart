@@ -54,6 +54,7 @@ class ProfileService {
   static const _kLinks = 'profile_links';
   static const _kUsername = 'profile_username';
   static const _kUsernamePending = 'profile_username_pending';
+  static const _kAllowedSender = 'profile_allowed_sender';
 
   /// Every reader can claim a free name@einkreader.app address (NIP-05).
   static const nip05Domain = 'einkreader.app';
@@ -192,6 +193,36 @@ class ProfileService {
     return name == null ? null : '$name@$nip05Domain';
   }
 
+  /// The one email address allowed to send content to name@einkreader.app
+  /// (empty = the email-to-feed feature is off).
+  Future<String> get allowedSender async =>
+      (await SharedPreferences.getInstance()).getString(_kAllowedSender) ??
+      '';
+
+  /// Stores the allowed sender and pushes it to the registration server
+  /// (via a re-registration of the same name — idempotent). When offline the
+  /// server update rides the pending-username retry at the next save.
+  Future<void> setAllowedSender(String sender) async {
+    final prefs = await SharedPreferences.getInstance();
+    final normalized = sender.trim().toLowerCase();
+    if (normalized == (await allowedSender)) return;
+    await prefs.setString(_kAllowedSender, normalized);
+    final name = await username ?? await pendingUsername;
+    if (name != null) {
+      try {
+        await registerUsername(name);
+      } on UsernameTakenException {
+        // Can't happen for our own name; ignore defensively.
+      }
+    }
+  }
+
+  /// Authorization header for the inbox API: a fresh signed proof-of-key.
+  Future<String> inboxAuthHeader() async {
+    final event = await signEvent(kind: 27235, content: 'inbox');
+    return 'Nostr ${base64Encode(utf8.encode(jsonEncode(event)))}';
+  }
+
   /// Claims [name]@einkreader.app for this profile's key: POSTs the
   /// registration with a signed proof-of-ownership event. On success the
   /// name is stored; a taken name throws [UsernameTakenException]; any
@@ -204,6 +235,7 @@ class ProfileService {
     }
     final prefs = await SharedPreferences.getInstance();
     final event = await signEvent(kind: 27235, content: name);
+    final sender = await allowedSender;
     try {
       final response = await (debugHttpClient ?? http.Client())
           .post(
@@ -213,6 +245,7 @@ class ProfileService {
               'name': name,
               'pubkey': await publicKeyHex,
               'event': event,
+              if (sender.isNotEmpty) 'sender': sender,
             }),
           )
           .timeout(const Duration(seconds: 15));
