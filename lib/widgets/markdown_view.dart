@@ -373,15 +373,18 @@ class _MarkdownViewState extends State<MarkdownView> {
 
   // ---------------------------------------------------------- inline spans
 
-  // The last alternative is a backslash-escaped link \[text\](url): html2md
-  // escapes brackets that arrived as literal text, but bracketed text followed
-  // by a parenthesized URL is in practice always a real link — render it as
-  // one instead of leaving mangled text.
+  // The link alternatives allow EMPTY anchor text: pages carry invisible
+  // heading self-links (`<a href="#…"></a>Title` → `[](url)Title`), which
+  // must vanish rather than render literally. The last alternative is a
+  // backslash-escaped link \[text\](url): html2md escapes brackets that
+  // arrived as literal text, but bracketed text followed by a parenthesized
+  // URL is in practice always a real link — render it as one instead of
+  // leaving mangled text.
   static final _inlinePattern = RegExp(
       r'\*\*(.+?)\*\*|__(.+?)__|\*([^*\s][^*]*?)\*|_([^_\s][^_]*?)_|'
-      r'`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
+      r'`([^`]+)`|\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
       r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
-      r'\\\[([^\]]+?)\\\]\(([^)\s]+)(?:\s+"[^"]*")?\)');
+      r'\\\[([^\]]*?)\\\]\(([^)\s]+)(?:\s+"[^"]*")?\)');
 
   /// The plain text [_inlineSpans] renders for [text] — same branches, but
   /// producing a string. Keeps [MarkdownView.plainBlockTexts] in lockstep
@@ -439,19 +442,23 @@ class _MarkdownViewState extends State<MarkdownView> {
       } else if (match.group(6) != null || match.group(10) != null) {
         final url = (match.group(7) ?? match.group(11))!;
         final anchor = _unescape((match.group(6) ?? match.group(10))!);
-        final recognizer = TapGestureRecognizer()
-          ..onTap = () {
-            final onLinkTap = widget.onLinkTap;
-            if (onLinkTap != null) {
-              onLinkTap(url, anchor);
-            } else {
-              launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-            }
-          };
-        _recognizers.add(recognizer);
-        spans.addAll(_highlighted(
-            anchor, style.copyWith(decoration: TextDecoration.underline),
-            recognizer: recognizer));
+        // Empty anchor text = an invisible in-page anchor: show nothing.
+        if (anchor.isNotEmpty) {
+          final recognizer = TapGestureRecognizer()
+            ..onTap = () {
+              final onLinkTap = widget.onLinkTap;
+              if (onLinkTap != null) {
+                onLinkTap(url, anchor);
+              } else {
+                launchUrl(Uri.parse(url),
+                    mode: LaunchMode.externalApplication);
+              }
+            };
+          _recognizers.add(recognizer);
+          spans.addAll(_highlighted(
+              anchor, style.copyWith(decoration: TextDecoration.underline),
+              recognizer: recognizer));
+        }
       } else if (match.group(8) != null) {
         // Inline image: render as caption text only.
         final alt = match.group(8)!;

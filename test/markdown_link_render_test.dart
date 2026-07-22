@@ -112,6 +112,76 @@ void main() {
     expect(text, isNot(contains('substack.com')));
   });
 
+  group('links render everywhere', () {
+    /// Asserts [anchorText] is an underlined, tappable link span and that
+    /// neither raw brackets nor the URL leak into the rendered text.
+    Future<void> expectLink(WidgetTester tester, String markdown,
+        String anchorText) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: MarkdownView(markdown: markdown))),
+      ));
+      final spans = _spans(tester);
+      final text = spans.map((s) => s.$1).join();
+      expect(text, contains(anchorText), reason: markdown);
+      expect(text, isNot(contains('[')), reason: markdown);
+      expect(text, isNot(contains('example.com')), reason: markdown);
+      final anchor = spans.firstWhere((s) => s.$1.contains(anchorText));
+      expect(anchor.$2?.decoration, TextDecoration.underline,
+          reason: markdown);
+    }
+
+    testWidgets('inside italics (*…* and _…_)', (tester) async {
+      await expectLink(tester,
+          'See *the [report](https://example.com/r) today*.', 'report');
+      await expectLink(tester,
+          'See _the [report](https://example.com/r) today_.', 'report');
+    });
+
+    testWidgets('inside bold (**…** and __…__)', (tester) async {
+      await expectLink(tester,
+          'Read **the [post](https://example.com/p)** now.', 'post');
+      await expectLink(tester,
+          'Read __the [post](https://example.com/p)__ now.', 'post');
+    });
+
+    testWidgets('inside every heading level', (tester) async {
+      for (final marker in ['#', '##', '###', '####']) {
+        await expectLink(
+            tester,
+            '$marker About [the docs](https://example.com/docs) here',
+            'the docs');
+      }
+    });
+
+    testWidgets('bold link inside a heading', (tester) async {
+      await expectLink(
+          tester,
+          '## Intro to **[the guide](https://example.com/guide)**',
+          'the guide');
+    });
+
+    testWidgets('empty-anchor links (heading self-links) vanish',
+        (tester) async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+          body: MarkdownView(
+            markdown:
+                '## [](https://example.com/blog/buzz#hive-to-survive)'
+                'Hive to Survive\n\n'
+                'Body [](https://example.com/anchor)text continues.',
+          ),
+        ),
+      ));
+      final text = _spans(tester).map((s) => s.$1).join();
+      expect(text, contains('Hive to Survive'));
+      expect(text, contains('Body text continues.'));
+      expect(text, isNot(contains('[')));
+      expect(text, isNot(contains('example.com')));
+    });
+  });
+
   group('repairSelection (SelectionArea glues paragraphs)', () {
     const md = 'First paragraph ends here.\n\n'
         'Second paragraph sits in the middle.\n\n'
