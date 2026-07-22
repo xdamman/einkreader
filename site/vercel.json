@@ -3,6 +3,10 @@
     {
       "source": "/.well-known/nostr.json",
       "destination": "/api/nostr-json"
+    },
+    {
+      "source": "/:name([a-z0-9_]{5,20})",
+      "destination": "/api/profile-page?name=:name"
     }
   ]
 }

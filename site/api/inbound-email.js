@@ -59,17 +59,38 @@ export default async function handler(req, res) {
   }
   const pubkey = pubkeyOf(entry);
 
-  const markdown = emailToMarkdown({ html: email?.html, text: email?.text });
+  // The webhook is a notification only: the body and attachment contents
+  // live behind Resend's API.
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'api key missing' });
+  const emailId = email?.email_id;
+  if (!emailId) return res.status(200).json({ dropped: 'no email id' });
+  const fullResponse = await fetch(
+      `https://api.resend.com/emails/receiving/${emailId}`,
+      { headers: { Authorization: `Bearer ${apiKey}` } });
+  if (!fullResponse.ok) {
+    // Let Resend retry: the email may not be readable yet.
+    return res.status(500).json({ error: 'could not fetch email' });
+  }
+  const full = await fullResponse.json();
+
+  const markdown = emailToMarkdown({ html: full?.html, text: full?.text });
   const attachmentsMarkdown = [];
-  for (const attachment of email?.attachments ?? []) {
+  for (const meta of email?.attachments ?? []) {
     try {
-      const content = attachment?.content;
-      if (!content) continue;
-      const buffer = Buffer.from(content, 'base64');
-      if (buffer.length === 0 || buffer.length > MAX_ATTACHMENT) continue;
-      const type = (attachment.content_type ?? attachment.contentType ?? '')
-          .toLowerCase();
-      const filename = attachment.filename ?? 'attachment';
+      const detail = await (await fetch(
+          `https://api.resend.com/emails/receiving/${emailId}` +
+              `/attachments/${meta.id}`,
+          { headers: { Authorization: `Bearer ${apiKey}` } })).json();
+      if (!detail?.download_url ||
+          (detail.size ?? 0) > MAX_ATTACHMENT) {
+        continue;
+      }
+      const buffer =
+          Buffer.from(await (await fetch(detail.download_url)).arrayBuffer());
+      if (buffer.length === 0) continue;
+      const type = (meta.content_type ?? '').toLowerCase();
+      const filename = meta.filename ?? 'attachment';
       if (type.startsWith('image/')) {
         const stored = await put(`inbox/${pubkey}/${filename}`, buffer, {
           access: 'public',
@@ -92,7 +113,7 @@ export default async function handler(req, res) {
   }
 
   const item = buildItem({
-    subject: email?.subject,
+    subject: full?.subject ?? email?.subject,
     from,
     markdown,
     attachmentsMarkdown,
