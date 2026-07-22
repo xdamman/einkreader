@@ -1,6 +1,5 @@
 // The opt-in public profile: locally-generated Nostr identity (backed up via
-// SharedPreferences → Android Auto Backup), profile metadata publishing, and
-// the private-by-default highlight compose flow.
+// SharedPreferences → Android Auto Backup) and profile metadata publishing.
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -9,7 +8,6 @@ import 'package:crypto/crypto.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/services/nostr_service.dart';
 import 'package:einkreader/services/profile_service.dart';
-import 'package:einkreader/widgets/highlight_compose.dart';
 import 'package:einkreader/widgets/profile_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -109,69 +107,6 @@ void main() {
         anyElement(equals(['r', 'https://example.com/story'])));
     expect(published!['tags'],
         anyElement(equals(['comment', 'my thought'])));
-  });
-
-  group('HighlightComposeDialog', () {
-    Future<HighlightComposeResult?> run(WidgetTester tester,
-        {required bool profileEnabled,
-        required bool twitterConnected,
-        required Future<void> Function(WidgetTester) interact}) async {
-      HighlightComposeResult? result;
-      await tester.pumpWidget(MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: Center(
-              child: OutlinedButton(
-                onPressed: () async {
-                  result = await HighlightComposeDialog.show(context,
-                      selection: 'the selected passage',
-                      profileEnabled: profileEnabled,
-                      twitterConnected: twitterConnected);
-                },
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      await interact(tester);
-      await tester.pumpAndSettle();
-      return result;
-    }
-
-    testWidgets('defaults to a private note (no toggles without profile)',
-        (tester) async {
-      final result = await run(tester,
-          profileEnabled: false,
-          twitterConnected: true, interact: (tester) async {
-        expect(find.text('the selected passage'), findsOneWidget);
-        expect(find.text('Share to profile'), findsNothing);
-        await tester.enterText(
-            find.byType(TextField), 'a private thought');
-        await tester.tap(find.text('Save'));
-      });
-      expect(result!.comment, 'a private thought');
-      expect(result.shareToProfile, isFalse);
-      expect(result.shareToTwitter, isFalse);
-    });
-
-    testWidgets('share toggle reveals the Twitter cross-post toggle',
-        (tester) async {
-      final result = await run(tester,
-          profileEnabled: true,
-          twitterConnected: true, interact: (tester) async {
-        expect(find.text('Also share on Twitter'), findsNothing);
-        await tester.tap(find.text('Share to profile'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Also share on Twitter'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Save & share'));
-      });
-      expect(result!.shareToProfile, isTrue);
-      expect(result.shareToTwitter, isTrue);
-    });
   });
 
   testWidgets('profile dialog: name-only creation, then the editor',

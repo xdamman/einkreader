@@ -7,11 +7,13 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/article_screen.dart';
+import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/share_actions.dart';
 import 'package:einkreader/services/twitter_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/highlight_list.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -30,9 +32,9 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfiNoIsolate;
-    db.debugDatabasePath = p.join(
-        Directory.systemTemp.createTempSync('einkreader_share_menu').path,
-        'test.db');
+    final tmp = Directory.systemTemp.createTempSync('einkreader_share_menu');
+    db.debugDatabasePath = p.join(tmp.path, 'test.db');
+    ArchiveStore.instance.debugConfigure(basePath: p.join(tmp.path, 'a'));
 
     final source = await db.insertSource(Source(
         type: SourceType.rss, title: 'Feed', url: 'https://x', createdAt: 0));
@@ -97,6 +99,69 @@ void main() {
     expect(find.text('Share by email'), findsOneWidget);
     expect(find.text('Share…'), findsOneWidget);
     expect(find.text('Share on Twitter'), findsNothing);
+  });
+
+  testWidgets(
+      'tapping a highlight opens an anchored menu: note, share, remove',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: ArticleScreen(articleId: articleId),
+    ));
+    await settle(tester);
+
+    // Fire the highlight span's tap (recognizers live on the painted span).
+    TapGestureRecognizer? highlightTap;
+    void walk(InlineSpan span) {
+      if (span is TextSpan) {
+        if (span.style?.backgroundColor != null &&
+            span.recognizer is TapGestureRecognizer) {
+          highlightTap = span.recognizer as TapGestureRecognizer;
+        }
+        (span.children ?? const <InlineSpan>[]).forEach(walk);
+      }
+    }
+
+    for (final rich in tester.widgetList<RichText>(find.byType(RichText))) {
+      walk(rich.text);
+    }
+    expect(highlightTap, isNotNull, reason: 'highlight is painted+tappable');
+    highlightTap!.onTapUp!(TapUpDetails(
+        kind: PointerDeviceKind.touch,
+        globalPosition: const Offset(300, 300)));
+    await settle(tester);
+
+    // The anchored menu (no bottom sheet) with everything in one place.
+    expect(find.text('Add note'), findsOneWidget);
+    expect(find.text('Share by email'), findsOneWidget);
+    expect(find.text('Remove highlight'), findsOneWidget);
+
+    // Attach a note, reopen: the entry now reads "Edit note".
+    await tester.tap(find.text('Add note'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), 'a thought');
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+    final noted = (await tester.runAsync(() => db.getHighlights()))!
+        .firstWhere((h) => h.articleId == articleId);
+    expect(noted.comment, 'a thought');
+
+    highlightTap!.onTapUp!(TapUpDetails(
+        kind: PointerDeviceKind.touch,
+        globalPosition: const Offset(300, 300)));
+    await settle(tester);
+    expect(find.text('Edit note'), findsOneWidget);
+
+    // Remove it — and restore afterwards for the later tests in this file.
+    await tester.tap(find.text('Remove highlight'));
+    await settle(tester);
+    expect(
+        (await tester.runAsync(() => db.getHighlights(articleId: articleId)))!,
+        isEmpty);
+    await tester.runAsync(() => db.insertHighlight(Highlight(
+        articleId: articleId,
+        text: 'A fine passage worth quoting.',
+        createdAt: 1)));
   });
 
   group('ShareActions.highlightsBody', () {

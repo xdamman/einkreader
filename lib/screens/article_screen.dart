@@ -11,7 +11,6 @@ import '../services/archive_store.dart';
 import '../services/profile_service.dart';
 import '../services/share_actions.dart';
 import '../services/sync_service.dart';
-import '../widgets/highlight_compose.dart';
 import '../theme.dart';
 import '../widgets/markdown_view.dart';
 
@@ -423,6 +422,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
       '*This article has not been downloaded yet. '
           'Sync while online to read it offline.*';
 
+  /// Saves the selection as a highlight immediately — no dialog, so marking
+  /// several passages in a row stays fast. Notes, sharing and removal live
+  /// in the small menu that opens when tapping the painted highlight.
   Future<void> _saveHighlight() async {
     var text = _selectedText.trim();
     final article = _article;
@@ -431,25 +433,11 @@ class _ArticleScreenState extends State<ArticleScreen> {
     // newlines between blocks); restore them so the highlight paints and
     // shares correctly.
     text = MarkdownView.repairSelection(text, _renderedContent);
-    final profileEnabled = await ProfileService.instance.enabled;
-    final twitterConnected = await ShareActions.twitterConnected();
-    if (!mounted) return;
-    // Comment + share toggles; plain Save keeps it a private local note.
-    final compose = await HighlightComposeDialog.show(
-      context,
-      selection: text,
-      profileEnabled: profileEnabled,
-      twitterConnected: twitterConnected,
-    );
-    if (compose == null || !mounted) return;
-    final highlight = Highlight(
+    await _db.insertHighlight(Highlight(
       articleId: article.id!,
       text: text,
-      comment: compose.comment.isEmpty ? null : compose.comment,
-      shared: compose.shareToProfile ? 1 : 0,
       createdAt: DateTime.now().millisecondsSinceEpoch,
-    );
-    await _db.insertHighlight(highlight);
+    ));
     final highlights = await _db.getHighlights(articleId: _currentId);
     if (!mounted) return;
     setState(() => _highlights = highlights);
@@ -457,24 +445,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
     // the time-independent highlights file.
     await _archiveFavorite(article);
     await _rewriteHighlights();
-    var message = 'Highlight saved';
-    if (compose.shareToProfile) {
-      try {
-        final accepted =
-            await ProfileService.instance.publishHighlight(article, highlight);
-        message = accepted > 0
-            ? 'Highlight saved and shared to your profile'
-            : 'Highlight saved — share queued in the outbox';
-      } catch (e) {
-        message = 'Highlight saved — sharing failed: $e';
-      }
-    }
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
-    if (compose.shareToTwitter && mounted) {
-      await ShareActions.tweetHighlights(context, article, [highlight]);
-    }
+        .showSnackBar(const SnackBar(content: Text('Highlighted')));
   }
 
   /// Re-downloads and re-processes the article, then re-renders it.
@@ -512,8 +485,11 @@ class _ArticleScreenState extends State<ArticleScreen> {
     await ArchiveStore.instance.writeHighlights(await _db.getHighlights());
   }
 
-  /// Tapping a painted highlight offers to share or remove it.
-  Future<void> _manageHighlight(String text) async {
+  /// Tapping a painted highlight opens a small menu anchored at the tap
+  /// point — not a bottom sheet: on e-ink, repainting a few menu rows next
+  /// to the finger beats redrawing a whole drawer. It carries everything:
+  /// note, sharing, removal.
+  Future<void> _manageHighlight(String text, Offset position) async {
     Highlight? match;
     for (final h in _highlights) {
       if (h.text == text) {
@@ -526,56 +502,38 @@ class _ArticleScreenState extends State<ArticleScreen> {
     final twitterConnected = await ShareActions.twitterConnected();
     final profileEnabled = await ProfileService.instance.enabled;
     if (!mounted) return;
-    final action = await showModalBottomSheet<String>(
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final hasNote = (highlight.comment ?? '').isNotEmpty;
+    final action = await showMenu<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text(
-                highlight.text,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 15, fontStyle: FontStyle.italic),
-              ),
-            ),
-            const Divider(height: 1),
-            if (profileEnabled)
-              ListTile(
-                leading: const Icon(Icons.account_circle_outlined),
-                title: const Text('Share to profile'),
-                onTap: () => Navigator.pop(context, 'profile'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.email_outlined),
-              title: const Text('Share by email'),
-              onTap: () => Navigator.pop(context, 'email'),
-            ),
-            if (twitterConnected)
-              ListTile(
-                leading: const Icon(Icons.alternate_email),
-                title: const Text('Share on Twitter'),
-                onTap: () => Navigator.pop(context, 'twitter'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.share_outlined),
-              title: const Text('Share…'),
-              onTap: () => Navigator.pop(context, 'share'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('Remove highlight'),
-              onTap: () => Navigator.pop(context, 'remove'),
-            ),
-          ],
-        ),
+      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+      position: RelativeRect.fromRect(
+        Rect.fromCenter(center: position, width: 1, height: 1),
+        Offset.zero & overlay.size,
       ),
+      items: [
+        PopupMenuItem(
+            value: 'note',
+            child: Text(hasNote ? 'Edit note' : 'Add note')),
+        if (profileEnabled)
+          const PopupMenuItem(
+              value: 'profile', child: Text('Share to profile')),
+        const PopupMenuItem(value: 'email', child: Text('Share by email')),
+        if (twitterConnected)
+          const PopupMenuItem(
+              value: 'twitter', child: Text('Share on Twitter')),
+        const PopupMenuItem(value: 'share', child: Text('Share…')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+            value: 'remove', child: Text('Remove highlight')),
+      ],
     );
     if (!mounted || action == null) return;
     final article = _article;
-    if (action == 'profile' && article != null) {
+    if (action == 'note') {
+      await _editNote(highlight);
+    } else if (action == 'profile' && article != null) {
       String message;
       try {
         final accepted = await ProfileService.instance
@@ -611,6 +569,41 @@ class _ArticleScreenState extends State<ArticleScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Highlight removed')));
     }
+  }
+
+  /// Small dialog to attach (or edit) a private note on a highlight.
+  Future<void> _editNote(Highlight highlight) async {
+    final controller = TextEditingController(text: highlight.comment ?? '');
+    final note = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        title: const Text('Note'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 4,
+          minLines: 2,
+          decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'Your private note on this passage'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (note == null || !mounted) return;
+    await _db.updateHighlightComment(highlight.id!, note);
+    final highlights = await _db.getHighlights(articleId: _currentId);
+    if (!mounted) return;
+    setState(() => _highlights = highlights);
   }
 
   /// Origin shown before the title in the top bar: the feed's name, or — for

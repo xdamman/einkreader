@@ -17,9 +17,10 @@ class MarkdownView extends StatefulWidget {
   final List<String> highlights;
   final double fontSize;
 
-  /// Called with the full highlight text when the user taps a painted
-  /// highlight, so the reader can offer to share or remove it.
-  final void Function(String highlightText)? onHighlightTap;
+  /// Called with the full highlight text and the tap position when the user
+  /// taps a painted highlight, so the reader can anchor a small menu there
+  /// (share / note / remove).
+  final void Function(String highlightText, Offset position)? onHighlightTap;
 
   /// Called when a link is tapped, with its URL and anchor text. When null,
   /// links open in the external browser.
@@ -538,7 +539,8 @@ class _MarkdownViewState extends State<MarkdownView> {
       if (recognizer == null && widget.onHighlightTap != null) {
         final full = range.$3;
         final tap = TapGestureRecognizer()
-          ..onTap = () => widget.onHighlightTap!(full);
+          ..onTapUp = (details) =>
+              widget.onHighlightTap!(full, details.globalPosition);
         _recognizers.add(tap);
         spanRecognizer = tap;
       }

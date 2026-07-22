@@ -872,6 +872,16 @@ class AppDatabase {
     return true;
   }
 
+  Future<void> updateHighlightComment(int id, String? comment) async {
+    final db = await database;
+    await db.update(
+      'highlights',
+      {'comment': (comment ?? '').isEmpty ? null : comment},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<void> deleteHighlight(int id) async {
     final db = await database;
     await db.delete('highlights', where: 'id = ?', whereArgs: [id]);
