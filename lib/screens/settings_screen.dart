@@ -16,7 +16,10 @@ import '../services/backup_service.dart';
 import '../services/build_config.dart';
 import '../services/sync_service.dart';
 import '../services/update_service.dart';
+import '../services/plugin_service.dart';
 import '../widgets/relay_settings.dart';
+import 'contacts_screen.dart';
+import 'plugin_pitch_screen.dart';
 import 'sources_screen.dart';
 
 /// App settings: source management entry point, storage location, backup /
@@ -34,6 +37,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _developerMode = false;
+  bool _supporter = false;
+  bool _twitterPluginOn = false;
+  bool _emailPluginOn = false;
 
   late final _updates = widget.updateService ?? UpdateService();
   UpdateInfo? _update;
@@ -68,11 +74,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     final developerMode = await AppLogService.instance.isDeveloperModeEnabled();
     final archiveDir = await ArchiveStore.instance.baseDir();
+    final supporter = await PluginService.instance.isSupporter;
+    final twitterOn = await PluginService.instance.twitterOn;
+    final emailOn = await PluginService.instance.emailOn;
     if (!mounted) return;
     setState(() {
       _developerMode = developerMode;
       _archiveDir = archiveDir;
       _customArchiveDir = prefs.getString(ArchiveStore.dirPrefKey) != null;
+      _supporter = supporter;
+      _twitterPluginOn = twitterOn;
+      _emailPluginOn = emailOn;
     });
     if (developerMode && _update == null) _checkForUpdate();
   }
@@ -324,6 +336,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _openPitch() async {
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const PluginPitchScreen()));
+    _load();
+  }
+
   void _toast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -354,6 +372,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const SourcesScreen())),
             ),
+            const Text('Plugins', style: sectionStyle),
+            const SizedBox(height: 8),
+            const Text(
+              'einkreader is free forever. Plugins run on our servers and '
+              'need the supporter subscription.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            _PluginCard(
+              title: '@ Twitter',
+              description: 'Sync your bookmarks as a source · share '
+                  'highlights as tweets & quote-tweets',
+              enabled: _supporter,
+              on: _twitterPluginOn,
+              onChanged: (v) async {
+                await PluginService.instance.setTwitterOn(v);
+                _load();
+              },
+              onLockedTap: _openPitch,
+            ),
+            const SizedBox(height: 10),
+            _PluginCard(
+              title: '✉ Email',
+              description: 'Send anything to your @einkreader.app address '
+                  'to read it · one-tap shares from your address',
+              enabled: _supporter,
+              on: _emailPluginOn,
+              onChanged: (v) async {
+                await PluginService.instance.setEmailOn(v);
+                _load();
+              },
+              onLockedTap: _openPitch,
+            ),
+            const SizedBox(height: 12),
+            if (!_supporter)
+              OutlinedButton(
+                onPressed: _openPitch,
+                child: const Text('Subscribe to activate plugins'),
+              )
+            else
+              const Text('Supporter · early access',
+                  style: TextStyle(
+                      fontSize: 12, fontStyle: FontStyle.italic)),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.people_outline),
+              label: const Text('Contacts'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const ContactsScreen())),
+            ),
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
             const Text('Nostr relays', style: sectionStyle),
             const SizedBox(height: 8),
             const RelaySettings(),
@@ -485,6 +556,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'einkreader — a minimal offline reader for e-ink devices.\n'
               'All content is stored on this device.',
               style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A plugin card: capabilities in plain words, a toggle that is inert until
+/// the subscription unlocks it (tapping then opens the pitch).
+class _PluginCard extends StatelessWidget {
+  final String title;
+  final String description;
+  final bool enabled;
+  final bool on;
+  final ValueChanged<bool> onChanged;
+  final VoidCallback onLockedTap;
+
+  const _PluginCard({
+    required this.title,
+    required this.description,
+    required this.enabled,
+    required this.on,
+    required this.onChanged,
+    required this.onLockedTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? null : onLockedTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(width: 1.5),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 4),
+                  Text(description, style: const TextStyle(fontSize: 12.5)),
+                  if (!enabled)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text('requires subscription',
+                          style: TextStyle(
+                              fontSize: 11, fontStyle: FontStyle.italic)),
+                    ),
+                ],
+              ),
+            ),
+            Switch(
+              value: on && enabled,
+              onChanged: enabled ? onChanged : null,
             ),
           ],
         ),

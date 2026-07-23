@@ -54,6 +54,7 @@ export default async function handler(req, res) {
          <p class="about">No such reader here (yet).</p></header>`));
   }
 
+  const qid = String(req.query.qid ?? '').toLowerCase();
   const events = await queryRelays(
       { kinds: [0, 9802], authors: [pubkey], limit: 60 });
   const metaEvent = events
@@ -63,9 +64,14 @@ export default async function handler(req, res) {
   try {
     meta = JSON.parse(metaEvent?.content ?? '{}');
   } catch {}
-  const highlights = events
+  let highlights = events
       .filter((e) => e.kind === 9802)
       .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+  // Quote permalink: /name/q/<id-prefix> narrows the page to one highlight.
+  if (qid) {
+    highlights = highlights.filter((e) =>
+        String(e.id ?? '').startsWith(qid));
+  }
 
   const tag = (event, key) =>
       (event.tags ?? []).find((t) => t?.[0] === key)?.[1];
@@ -101,8 +107,16 @@ export default async function handler(req, res) {
           `<a href="${esc(l)}" rel="nofollow">${esc(l)}</a>`).join('')}</p>`
           : ''}
     </header>
-    <h2>Highlights</h2>
+    <h2>${qid ? 'Highlight' : 'Highlights'}</h2>
     ${highlightHtml ||
-        '<p class="empty">No shared highlights yet.</p>'}
+        (qid
+            ? '<p class="empty">This highlight isn\u2019t on the relays ' +
+              'yet \u2014 it may still be on its way.</p>'
+            : '<p class="empty">No shared highlights yet.</p>')}
+    ${qid
+        ? `<p style="margin-top:18px;font-size:14px">` +
+          `<a href="/${esc(name)}">All of ${esc(displayName)}\u2019s ` +
+          `highlights \u2192</a></p>`
+        : ''}
   `));
 }

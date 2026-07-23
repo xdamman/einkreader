@@ -329,8 +329,11 @@ class ProfileService {
   }
 
   /// Publishes a highlight (NIP-84 kind 9802) with an optional comment.
-  /// Returns how many relays accepted it.
-  Future<int> publishHighlight(Article article, Highlight highlight) async {
+  /// Returns the accepting-relay count (0 = queued in the outbox) and the
+  /// event id — the id is what quote permalinks point at, valid either way
+  /// since queued events re-send verbatim.
+  Future<({int accepted, String eventId})> publishHighlight(
+      Article article, Highlight highlight) async {
     final event = await signEvent(
       kind: 9802,
       content: highlight.text,
@@ -347,7 +350,41 @@ class ProfileService {
     final accepted = await _publishOrQueue(event, 'Highlight: "$preview"');
     await AppLogService.instance
         .info('Profile: highlight published to $accepted relay(s)');
-    return accepted;
+    return (accepted: accepted, eventId: event['id'] as String);
+  }
+
+  /// The public permalink for a highlight shared to the profile.
+  Future<String?> quoteLink(String eventId) async {
+    final name = await username ?? await pendingUsername;
+    if (name == null) return null;
+    return 'https://$nip05Domain/$name/q/${eventId.substring(0, 12)}';
+  }
+
+  /// One-tap email share (Email plugin): the server sends from
+  /// name@einkreader.app with Reply-To the user's own address; delivery is
+  /// real, not a mailto handoff. Throws on failure.
+  Future<void> sendShareEmail({
+    required String to,
+    required String subject,
+    required String text,
+  }) async {
+    final event = await signEvent(kind: 27235, content: 'send-share');
+    final response = await (debugHttpClient ?? http.Client())
+        .post(
+          Uri.https(nip05Domain, '/api/send-share'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization':
+                'Nostr ${base64Encode(utf8.encode(jsonEncode(event)))}',
+          },
+          body: jsonEncode({'to': to, 'subject': subject, 'text': text}),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode != 200) {
+      throw Exception('Send failed (HTTP ${response.statusCode}: '
+          '${response.body})');
+    }
+    await AppLogService.instance.info('Profile: share emailed to $to');
   }
 
   /// Builds and Schnorr-signs a Nostr event (NIP-01).

@@ -135,10 +135,16 @@ void main() {
       expect((await app.getHighlights()).map((h) => h.text),
           ['an old highlight']);
 
-      // And the new columns work end-to-end.
+      // And the new tables/columns work end-to-end.
       await app.insertOutboxItem(const OutboxItem(
           kind: 'nostr', text: 'queued', payload: '{}', createdAt: 2));
       expect((await app.outboxItems()).single.kind, 'nostr');
+      await app.insertContact(const Contact(
+          name: 'Marc', address: 'marc@example.com', createdAt: 2));
+      final highlightId = (await app.getHighlights()).single.id!;
+      await app.insertShare(Share(
+          highlightId: highlightId, medium: 'profile', createdAt: 2));
+      expect((await app.getShares()).single.medium, 'profile');
       await app.debugReset();
     });
   }

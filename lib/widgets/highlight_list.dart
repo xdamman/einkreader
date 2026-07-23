@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../screens/article_screen.dart';
+import '../screens/share_screen.dart';
 import '../services/archive_store.dart';
-import '../services/profile_service.dart';
-import '../services/share_actions.dart';
 
 /// All saved highlights, newest first. Tapping one opens its article, the
 /// trailing button shares it (email / Twitter / system sheet); a long-press
@@ -109,65 +107,11 @@ class HighlightList extends StatelessWidget {
   }
 
   Future<void> _share(BuildContext context, Highlight highlight) async {
-    // Anchor the menu at the share button (see the Builder in _tile);
-    // measured before any await, while the context is synchronously valid.
-    final button = context.findRenderObject() as RenderBox;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
-    final position = RelativeRect.fromRect(
-      Rect.fromPoints(
-        button.localToGlobal(Offset.zero, ancestor: overlay),
-        button.localToGlobal(button.size.bottomRight(Offset.zero),
-            ancestor: overlay),
-      ),
-      Offset.zero & overlay.size,
-    );
     final article =
         await AppDatabase.instance.getArticle(highlight.articleId);
     if (article == null || !context.mounted) return;
-    final twitterConnected = await ShareActions.twitterConnected();
-    final profileEnabled = await ProfileService.instance.enabled;
-    if (!context.mounted) return;
-    final action = await showMenu<String>(
-      context: context,
-      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-      position: position,
-      items: [
-        if (profileEnabled)
-          const PopupMenuItem(
-              value: 'profile', child: Text('Share to profile')),
-        const PopupMenuItem(value: 'email', child: Text('Share by email')),
-        if (twitterConnected)
-          const PopupMenuItem(
-              value: 'twitter', child: Text('Share on Twitter')),
-        const PopupMenuItem(value: 'share', child: Text('Share…')),
-      ],
-    );
-    if (action == null || !context.mounted) return;
-    final body = ShareActions.highlightsBody(article, [highlight]);
-    switch (action) {
-      case 'profile':
-        String message;
-        try {
-          final accepted = await ProfileService.instance
-              .publishHighlight(article, highlight);
-          message = accepted > 0
-              ? 'Shared to your profile'
-              : 'Queued in the outbox — will share when online';
-        } catch (e) {
-          message = 'Sharing failed: $e';
-        }
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
-      case 'email':
-        await ShareActions.byEmail(context,
-            subject: ShareActions.highlightsSubject(article, 1), body: body);
-      case 'twitter':
-        await ShareActions.tweetHighlights(context, article, [highlight]);
-      case 'share':
-        await Share.share(body);
-    }
+    await ShareScreen.open(context, article: article, highlight: highlight);
+    onChanged();
   }
 
   Future<void> _confirmDelete(

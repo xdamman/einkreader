@@ -17,6 +17,7 @@ import 'feed_parser.dart';
 import 'archive_store.dart';
 import 'outbox_service.dart';
 import 'nostr_service.dart';
+import 'plugin_service.dart';
 import 'profile_service.dart';
 import 'twitter_service.dart';
 
@@ -638,6 +639,8 @@ class SyncService {
     try {
       final profile = ProfileService.instance;
       if (!await profile.enabled || await profile.username == null) return 0;
+      // Inbound email is the Email plugin.
+      if (!await PluginService.instance.emailActive) return 0;
       final auth = await profile.inboxAuthHeader();
       final listResponse = await _http.get(
         Uri.https(ProfileService.nip05Domain, '/api/inbox'),

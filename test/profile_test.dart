@@ -8,7 +8,7 @@ import 'package:crypto/crypto.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/services/nostr_service.dart';
 import 'package:einkreader/services/profile_service.dart';
-import 'package:einkreader/widgets/profile_dialog.dart';
+import 'package:einkreader/screens/profile_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -100,7 +100,8 @@ void main() {
         text: 'the passage',
         comment: 'my thought',
         createdAt: 0);
-    await service.publishHighlight(article, highlight);
+    final result = await service.publishHighlight(article, highlight);
+    expect(result.eventId, published!['id']);
     expect(published!['kind'], 9802);
     expect(published!['content'], 'the passage');
     expect(published!['tags'],
@@ -114,19 +115,7 @@ void main() {
     ProfileService.instance.debugPublish = (event) async => 1;
     ProfileService.instance.debugHttpClient = MockClient(
         (request) async => http.Response(jsonEncode({'ok': true}), 200));
-    await tester.pumpWidget(MaterialApp(
-      home: Builder(
-        builder: (context) => Scaffold(
-          body: Center(
-            child: OutlinedButton(
-              onPressed: () => ProfileDialog.show(context),
-              child: const Text('open'),
-            ),
-          ),
-        ),
-      ),
-    ));
-    await tester.tap(find.text('open'));
+    await tester.pumpWidget(const MaterialApp(home: ProfileScreen()));
     await tester.pumpAndSettle();
 
     // Opt-in: short privacy copy plus a single name field. No Nostr jargon,
@@ -149,7 +138,8 @@ void main() {
             .controller!
             .text,
         'xavier');
-    await tester.tap(find.text('Create profile'));
+    await tester.ensureVisible(find.text('Create profile'));
+    await tester.tap(find.text('Create profile'), warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(await ProfileService.instance.enabled, isTrue);
     expect((await ProfileService.instance.profile()).name, 'Xavier');
@@ -164,10 +154,12 @@ void main() {
     expect(find.text('Social links (one per line)'), findsOneWidget);
     expect(find.textContaining('secret key'), findsNothing);
 
+    // Auto-save: editing then leaving the screen persists and publishes.
     await tester.enterText(
         find.widgetWithText(TextField, 'Short bio'), 'Reads on e-ink');
-    await tester.tap(find.text('Save profile'));
-    await tester.pumpAndSettle();
+    final state =
+        tester.state(find.byType(ProfileScreen)) as dynamic;
+    await tester.runAsync(() => state.debugPersistForTest());
     expect((await ProfileService.instance.profile()).about, 'Reads on e-ink');
   });
 

@@ -96,9 +96,11 @@ void main() {
 
     await tester.tap(find.byTooltip('Share highlight').first);
     await settle(tester);
-    expect(find.text('Share by email'), findsOneWidget);
-    expect(find.text('Share…'), findsOneWidget);
-    expect(find.text('Share on Twitter'), findsNothing);
+    await settle(tester); // the composer's own async load
+    // The full composer opens as a screen, free rows first.
+    expect(find.text('Share highlight'), findsOneWidget);
+    expect(find.text('Compose an email…'), findsOneWidget);
+    expect(find.text('Tweet it'), findsOneWidget); // visible but locked
   });
 
   testWidgets(
@@ -131,9 +133,9 @@ void main() {
         globalPosition: const Offset(300, 300)));
     await settle(tester);
 
-    // The anchored menu (no bottom sheet) with everything in one place.
+    // The anchored menu (no bottom sheet): note, composer, remove.
     expect(find.text('Add note'), findsOneWidget);
-    expect(find.text('Share by email'), findsOneWidget);
+    expect(find.text('Share…'), findsOneWidget);
     expect(find.text('Remove highlight'), findsOneWidget);
 
     // Attach a note, reopen: the entry now reads "Edit note".

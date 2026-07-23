@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/services/archive_store.dart';
+import 'package:einkreader/services/plugin_service.dart';
 import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/services/twitter_service.dart';
@@ -38,6 +39,9 @@ void main() {
         (request) async => http.Response(jsonEncode({'ok': true}), 200));
     await ProfileService.instance.registerUsername('xavier');
     ProfileService.instance.debugHttpClient = null;
+    // Inbound email is the Email plugin.
+    await PluginService.instance.activateEarlyAccess();
+    await PluginService.instance.setEmailOn(true);
   });
 
   test('registerUsername carries the allowed sender', () async {

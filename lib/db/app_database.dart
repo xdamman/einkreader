@@ -47,7 +47,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -166,7 +166,32 @@ class AppDatabase {
           db, 'outbox', 'kind', "TEXT NOT NULL DEFAULT 'tweet'");
       await _addColumnIfMissing(db, 'outbox', 'payload', 'TEXT');
     }
+    if (oldVersion < 11) {
+      await db.execute(_createContactsSql);
+      await db.execute(_createSharesSql);
+    }
   }
+
+  static const _createContactsSql = '''
+      CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'email',
+        address TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''';
+
+  static const _createSharesSql = '''
+      CREATE TABLE IF NOT EXISTS shares (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        highlight_id INTEGER NOT NULL,
+        medium TEXT NOT NULL,
+        recipient TEXT,
+        ref TEXT,
+        created_at INTEGER NOT NULL
+      )
+    ''';
 
   static const _createOutboxSql = '''
       CREATE TABLE outbox (
@@ -243,6 +268,8 @@ class AppDatabase {
       'CREATE INDEX idx_articles_source ON articles(source_id, published_at)',
     );
     await db.execute(_createOutboxSql);
+    await db.execute(_createContactsSql);
+    await db.execute(_createSharesSql);
   }
 
   // ---------------------------------------------------------------- sources
@@ -847,6 +874,65 @@ class AppDatabase {
       changed++;
     }
     return changed;
+  }
+
+  // --------------------------------------------------------------- contacts
+
+  Future<List<Contact>> getContacts() async {
+    final db = await database;
+    final rows =
+        await db.query('contacts', orderBy: 'name COLLATE NOCASE ASC');
+    return rows.map(Contact.fromMap).toList();
+  }
+
+  Future<Contact> insertContact(Contact contact) async {
+    final db = await database;
+    final id = await db.insert('contacts', contact.toMap()..remove('id'));
+    return Contact.fromMap((await db.query('contacts',
+            where: 'id = ?', whereArgs: [id], limit: 1))
+        .first);
+  }
+
+  Future<void> deleteContact(int id) async {
+    final db = await database;
+    await db.delete('contacts', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ----------------------------------------------------------------- shares
+
+  Future<void> insertShare(Share share) async {
+    final db = await database;
+    await db.insert('shares', share.toMap()..remove('id'));
+  }
+
+  /// All shares newest-first, joined with their highlight and article for
+  /// the Shared column.
+  Future<List<Share>> getShares() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT s.*, h.text AS highlight_text, h.comment AS highlight_comment,
+             a.title AS article_title, a.id AS article_id
+      FROM shares s
+      JOIN highlights h ON h.id = s.highlight_id
+      JOIN articles a ON a.id = h.article_id
+      ORDER BY s.created_at DESC
+    ''');
+    return rows.map(Share.fromMap).toList();
+  }
+
+  /// The published profile event id for this highlight, if it was ever
+  /// shared to the profile (used to build the quote permalink).
+  Future<String?> profileShareRef(int highlightId) async {
+    final db = await database;
+    final rows = await db.query(
+      'shares',
+      columns: ['ref'],
+      where: "highlight_id = ? AND medium IN ('profile','link') "
+          'AND ref IS NOT NULL',
+      whereArgs: [highlightId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first['ref'] as String?;
   }
 
   // ------------------------------------------------------------- highlights

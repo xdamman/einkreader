@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart' as share_plus;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
@@ -132,7 +132,7 @@ class ShareActions {
     } catch (_) {
       // Fall through to the generic share sheet.
     }
-    await Share.share(body, subject: subject);
+    await share_plus.Share.share(body, subject: subject);
   }
 
   /// Account facts the tweet dialog adapts to, resolved while it is already

@@ -2,17 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/archive_store.dart';
-import '../services/profile_service.dart';
 import '../services/share_actions.dart';
 import '../services/sync_service.dart';
 import '../theme.dart';
 import '../widgets/markdown_view.dart';
+import 'share_screen.dart';
 
 /// Reader screen. Select any text and choose "Highlight" from the selection
 /// menu to save it; saved highlights are painted inline with a grey wash and
@@ -499,8 +498,6 @@ class _ArticleScreenState extends State<ArticleScreen> {
     }
     if (match == null) return;
     final highlight = match;
-    final twitterConnected = await ShareActions.twitterConnected();
-    final profileEnabled = await ProfileService.instance.enabled;
     if (!mounted) return;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
@@ -516,13 +513,6 @@ class _ArticleScreenState extends State<ArticleScreen> {
         PopupMenuItem(
             value: 'note',
             child: Text(hasNote ? 'Edit note' : 'Add note')),
-        if (profileEnabled)
-          const PopupMenuItem(
-              value: 'profile', child: Text('Share to profile')),
-        const PopupMenuItem(value: 'email', child: Text('Share by email')),
-        if (twitterConnected)
-          const PopupMenuItem(
-              value: 'twitter', child: Text('Share on Twitter')),
         const PopupMenuItem(value: 'share', child: Text('Share…')),
         const PopupMenuDivider(),
         const PopupMenuItem(
@@ -533,33 +523,13 @@ class _ArticleScreenState extends State<ArticleScreen> {
     final article = _article;
     if (action == 'note') {
       await _editNote(highlight);
-    } else if (action == 'profile' && article != null) {
-      String message;
-      try {
-        final accepted = await ProfileService.instance
-            .publishHighlight(article, highlight);
-        message = accepted > 0
-            ? 'Shared to your profile'
-            : 'Queued in the outbox — will share when online';
-      } catch (e) {
-        message = 'Sharing failed: $e';
-      }
+    } else if (action == 'share' && article != null) {
+      // The full composer: comment + every destination in one place.
+      await ShareScreen.open(context,
+          article: article, highlight: highlight);
+      final highlights = await _db.getHighlights(articleId: _currentId);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
-    } else if (action == 'email' && article != null) {
-      await ShareActions.byEmail(
-        context,
-        subject: ShareActions.highlightsSubject(article, 1),
-        body: ShareActions.highlightsBody(article, [highlight]),
-      );
-    } else if (action == 'twitter' && article != null) {
-      await ShareActions.tweetHighlights(context, article, [highlight]);
-    } else if (action == 'share') {
-      final title = _article?.title;
-      final shareText = title == null ? highlight.text
-          : '"${highlight.text}"\n\n— $title';
-      await Share.share(shareText);
+      setState(() => _highlights = highlights);
     } else if (action == 'remove') {
       await _db.deleteHighlight(highlight.id!);
       final highlights = await _db.getHighlights(articleId: _currentId);

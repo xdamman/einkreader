@@ -12,16 +12,18 @@ import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
 import '../widgets/clipboard_link_prompt.dart';
 import '../widgets/highlight_list.dart';
-import '../widgets/profile_dialog.dart';
 import '../widgets/resume_reading.dart';
+import '../widgets/shared_list.dart';
 import 'add_source_screen.dart';
+import 'profile_screen.dart';
 import 'settings_screen.dart';
 
 enum _HomeTab {
   feed('Feed'),
   toRead('To Read'),
+  read('Read'),
   highlights('Highlights'),
-  favorites('Favorites'),
+  shared('Shared'),
   debug('Debug');
 
   final String label;
@@ -49,6 +51,10 @@ class _HomeScreenState extends State<HomeScreen> {
   int? _feedFolderId;
   List<Article> _articles = [];
   List<Highlight> _highlights = [];
+  List<Share> _shares = [];
+
+  /// ★ filter on the Read tab (Favorites folded in as a chip).
+  bool _readFavoritesOnly = false;
   List<Source> _sources = [];
   List<Folder> _folders = [];
   Map<int, String> _sourceTitles = {};
@@ -172,6 +178,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final articles = await _db.getArticles();
       final highlights = await _db.getHighlights();
+      final shares = await _db.getShares();
       final sources = await _db.getSources();
       final folders = await _db.getFolders();
       final developerMode =
@@ -184,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _articles = articles;
         _highlights = highlights;
+        _shares = shares;
         _sources = sources;
         _folders = folders;
         _sourceTitles = {for (final s in sources) s.id!: s.title};
@@ -264,7 +272,11 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             tooltip: 'Profile',
             icon: const Icon(Icons.account_circle_outlined),
-            onPressed: () => ProfileDialog.show(context),
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const ProfileScreen()));
+              _load();
+            },
           ),
           IconButton(
             tooltip: 'Settings',
@@ -307,18 +319,59 @@ class _HomeScreenState extends State<HomeScreen> {
               'icon on any article in the feed.',
           onChanged: _load,
         );
+      case _HomeTab.read:
+        final read = _articles
+            .where((a) =>
+                a.read == 1 && (!_readFavoritesOnly || a.favorite == 1))
+            .toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(width: 1)),
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  _ReadFilterChip(
+                    label: 'All',
+                    selected: !_readFavoritesOnly,
+                    onTap: () =>
+                        setState(() => _readFavoritesOnly = false),
+                  ),
+                  const SizedBox(width: 8),
+                  _ReadFilterChip(
+                    label: '★ Favorites',
+                    selected: _readFavoritesOnly,
+                    onTap: () => setState(() => _readFavoritesOnly = true),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ArticleFeed(
+                articles: read,
+                sourceTitles: _sourceTitles,
+                emptyMessage: _readFavoritesOnly
+                    ? 'No favorites yet.\n\nUse the favorite button at '
+                        'the end of an article.'
+                    : 'Nothing finished yet.\n\nArticles land here when '
+                        'you reach the bottom — or swipe one right in the '
+                        'feed to mark it read.',
+                rowAction: _readFavoritesOnly
+                    ? FeedRowAction.unfavorite
+                    : FeedRowAction.readLater,
+                onChanged: _load,
+              ),
+            ),
+          ],
+        );
       case _HomeTab.highlights:
         return HighlightList(highlights: _highlights, onChanged: _load);
-      case _HomeTab.favorites:
-        return ArticleFeed(
-          articles: _articles.where((a) => a.favorite == 1).toList(),
-          sourceTitles: _sourceTitles,
-          emptyMessage:
-              'No favorites yet.\n\nUse the favorite button at '
-              'the end of an article.',
-          rowAction: FeedRowAction.unfavorite,
-          onChanged: _load,
-        );
+      case _HomeTab.shared:
+        return SharedList(shares: _shares, onChanged: _load);
       case _HomeTab.debug:
         return const _DebugLogView();
     }
@@ -948,5 +1001,35 @@ class _DebugLogViewState extends State<_DebugLogView> {
   String _time(DateTime time) {
     String two(int value) => value.toString().padLeft(2, '0');
     return '${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
+  }
+}
+
+/// Flat pill used by the Read tab's All / ★ Favorites filter.
+class _ReadFilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ReadFilterChip(
+      {required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? Colors.black : Colors.white,
+          border: Border.all(width: 1.5),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: selected ? Colors.white : Colors.black)),
+      ),
+    );
   }
 }

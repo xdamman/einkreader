@@ -358,6 +358,99 @@ class OutboxItem {
       );
 }
 
+/// Someone the user shares reads with. Stored locally only.
+class Contact {
+  final int? id;
+  final String name;
+
+  /// 'email' or 'nostr' — how this contact prefers to receive shares.
+  final String channel;
+
+  /// Email address or npub, depending on [channel].
+  final String address;
+  final int createdAt;
+
+  const Contact({
+    this.id,
+    required this.name,
+    this.channel = 'email',
+    required this.address,
+    required this.createdAt,
+  });
+
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'name': name,
+        'channel': channel,
+        'address': address,
+        'created_at': createdAt,
+      };
+
+  static Contact fromMap(Map<String, Object?> m) => Contact(
+        id: m['id'] as int?,
+        name: m['name'] as String,
+        channel: (m['channel'] as String?) ?? 'email',
+        address: m['address'] as String,
+        createdAt: m['created_at'] as int,
+      );
+}
+
+/// One outbound share of a highlight: where it went and to whom, feeding the
+/// Shared column. medium: 'profile' | 'twitter' | 'email' | 'link'.
+class Share {
+  final int? id;
+  final int highlightId;
+  final String medium;
+
+  /// Contact name for per-contact shares; null for broadcast mediums.
+  final String? recipient;
+
+  /// Extra reference: the published Nostr event id for profile/link shares.
+  final String? ref;
+  final int createdAt;
+
+  /// Populated by joins for the Shared column.
+  final String? highlightText;
+  final String? highlightComment;
+  final String? articleTitle;
+  final int? articleId;
+
+  const Share({
+    this.id,
+    required this.highlightId,
+    required this.medium,
+    this.recipient,
+    this.ref,
+    required this.createdAt,
+    this.highlightText,
+    this.highlightComment,
+    this.articleTitle,
+    this.articleId,
+  });
+
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'highlight_id': highlightId,
+        'medium': medium,
+        'recipient': recipient,
+        'ref': ref,
+        'created_at': createdAt,
+      };
+
+  static Share fromMap(Map<String, Object?> m) => Share(
+        id: m['id'] as int?,
+        highlightId: m['highlight_id'] as int,
+        medium: m['medium'] as String,
+        recipient: m['recipient'] as String?,
+        ref: m['ref'] as String?,
+        createdAt: m['created_at'] as int,
+        highlightText: m['highlight_text'] as String?,
+        highlightComment: m['highlight_comment'] as String?,
+        articleTitle: m['article_title'] as String?,
+        articleId: m['article_id'] as int?,
+      );
+}
+
 class Highlight {
   final int? id;
   final int articleId;

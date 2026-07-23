@@ -175,7 +175,7 @@ class _ArticleTile extends StatelessWidget {
       if (article.fetched == 0) 'not downloaded',
     ].join(' · ');
 
-    return ListTile(
+    final tile = ListTile(
       contentPadding: const EdgeInsets.only(left: 16, right: 4, top: 6,
           bottom: 6),
       title: Text(
@@ -204,6 +204,38 @@ class _ArticleTile extends StatelessWidget {
                 )));
         onChanged();
       },
+    );
+
+    // Every unread row that opens an article can be swiped right to mark it
+    // read — one gesture, consistent across the whole app (same as the
+    // Resume reading section). The row snaps back restyled, never dismissed.
+    if (article.read != 0) return tile;
+    return Dismissible(
+      key: ValueKey('mark-read-\${article.id}'),
+      direction: DismissDirection.startToEnd,
+      background: Container(
+        color: Colors.black,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        alignment: Alignment.centerLeft,
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check, color: Colors.white),
+            SizedBox(width: 8),
+            Text('Mark as read',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+      confirmDismiss: (_) async {
+        await AppDatabase.instance.markArticleRead(article.id!);
+        onChanged();
+        return false; // keep the row; it re-renders as read
+      },
+      child: tile,
     );
   }
 }
