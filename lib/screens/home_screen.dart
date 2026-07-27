@@ -49,6 +49,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Selected folder on the Feed tab: filters to all its sources.
   int? _feedFolderId;
+
+  /// Within a Twitter source (which behaves like a folder of accounts):
+  /// the selected author, or null for all.
+  String? _feedAuthor;
   List<Article> _articles = [];
   List<Highlight> _highlights = [];
   List<Share> _shares = [];
@@ -509,13 +513,46 @@ class _HomeScreenState extends State<HomeScreen> {
         total.containsKey(_feedSourceId) ? _feedSourceId : null;
     final selectedFolderId =
         folders.any((f) => f.id == _feedFolderId) ? _feedFolderId : null;
-    final articles = selectedFolderId != null
+    var articles = selectedFolderId != null
         ? _articles
             .where((a) => folderOf[a.sourceId] == selectedFolderId)
             .toList()
         : selectedId == null
             ? _articles
             : _articles.where((a) => a.sourceId == selectedId).toList();
+
+    // A Twitter source is a folder of accounts: selecting it reveals a
+    // second chip row with every bookmarked author, alphabetical.
+    List<_AuthorFilter>? authorRow;
+    final selectedSource = selectedId == null
+        ? null
+        : _sources.where((s) => s.id == selectedId).firstOrNull;
+    if (selectedSource != null &&
+        selectedSource.type == SourceType.twitterBookmarks) {
+      final byAuthor = <String, ({int unread, int total})>{};
+      for (final article in articles) {
+        final author = article.author;
+        if (author == null || author.isEmpty) continue;
+        final counts =
+            byAuthor[author] ?? (unread: 0, total: 0);
+        byAuthor[author] = (
+          unread: counts.unread + (article.read == 0 ? 1 : 0),
+          total: counts.total + 1,
+        );
+      }
+      authorRow = [
+        for (final entry in byAuthor.entries)
+          _AuthorFilter(
+              name: entry.key, unread: entry.value.unread)
+      ]..sort((a, b) =>
+          a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      final selectedAuthor = _feedAuthor;
+      if (selectedAuthor != null &&
+          authorRow.any((a) => a.name == selectedAuthor)) {
+        articles =
+            articles.where((a) => a.author == selectedAuthor).toList();
+      }
+    }
     final allUnread = unread.values.fold(0, (sum, value) => sum + value);
 
     final currentReads = ResumeReadingSection.currentReads(_articles);
@@ -536,13 +573,19 @@ class _HomeScreenState extends State<HomeScreen> {
           selectedFolderId: selectedFolderId,
           allUnread: allUnread,
           syncingSourceIds: _syncingSourceIds,
+          authors: authorRow,
+          selectedAuthor: _feedAuthor,
+          onAuthorSelected: (author) =>
+              setState(() => _feedAuthor = author),
           onSelected: (id) => setState(() {
             _feedSourceId = id;
             _feedFolderId = null;
+            _feedAuthor = null;
           }),
           onFolderTap: (folder) => setState(() {
             _feedFolderId = folder.id;
             _feedSourceId = null;
+            _feedAuthor = null;
           }),
         ),
         Expanded(
@@ -639,10 +682,18 @@ class _FolderFilter {
   });
 }
 
+/// One author inside a Twitter source's second-row strip.
+class _AuthorFilter {
+  final String name;
+  final int unread;
+  const _AuthorFilter({required this.name, required this.unread});
+}
+
 /// Horizontally swipable strip of filter chips shown above the feed: "All"
 /// first, then folders, then top-level sources (both supplied ordered).
 /// Tapping a folder selects it and reveals a second row below with the
-/// folder's sources as the same kind of scrollable chip strip.
+/// folder's sources; a Twitter source likewise reveals a row of the
+/// bookmarked accounts.
 class _SourceFilterBar extends StatelessWidget {
   final List<_FolderFilter> folders;
   final List<_SourceFilter> sources;
@@ -653,6 +704,11 @@ class _SourceFilterBar extends StatelessWidget {
   final ValueChanged<int?> onSelected;
   final ValueChanged<_FolderFilter> onFolderTap;
 
+  /// Author strip for a selected Twitter source (null = no second row).
+  final List<_AuthorFilter>? authors;
+  final String? selectedAuthor;
+  final ValueChanged<String?> onAuthorSelected;
+
   const _SourceFilterBar({
     required this.folders,
     required this.sources,
@@ -662,6 +718,9 @@ class _SourceFilterBar extends StatelessWidget {
     required this.syncingSourceIds,
     required this.onSelected,
     required this.onFolderTap,
+    this.authors,
+    this.selectedAuthor,
+    required this.onAuthorSelected,
   });
 
   /// The folder whose sources show in the second row: the selected one, or
@@ -739,6 +798,26 @@ class _SourceFilterBar extends StatelessWidget {
                   selected: selectedId == member.id,
                   syncing: syncingSourceIds.contains(member.id),
                   onTap: () => onSelected(member.id),
+                ),
+            ]),
+          ],
+          if (authors != null && authors!.isNotEmpty) ...[
+            const Divider(height: 1),
+            _chipRow([
+              _SourceChip(
+                label: 'All',
+                count: authors!.fold(0, (sum, a) => sum + a.unread),
+                selected: selectedAuthor == null,
+                syncing: false,
+                onTap: () => onAuthorSelected(null),
+              ),
+              for (final author in authors!)
+                _SourceChip(
+                  label: author.name,
+                  count: author.unread,
+                  selected: selectedAuthor == author.name,
+                  syncing: false,
+                  onTap: () => onAuthorSelected(author.name),
                 ),
             ]),
           ],

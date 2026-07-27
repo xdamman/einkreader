@@ -373,7 +373,11 @@ class SyncService {
       case SourceType.rss:
         return _syncRss(source);
       case SourceType.twitterBookmarks:
-        return _insertTweets(source, await twitter.fetchBookmarks());
+        return _insertTweets(
+          source,
+          await twitter.fetchBookmarks(
+              hasNewIds: (ids) => _db.anyGuidUnknown(source.id!, ids)),
+        );
       case SourceType.twitterLikes:
         // Likes are no longer synced; legacy sources are simply skipped.
         return 0;

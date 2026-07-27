@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:einkreader/services/twitter_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -78,8 +79,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    // The timeline endpoint reads the connected user id from secure storage.
+    // The timeline endpoint reads the connected user id from secure storage,
+    // and pagination keeps its resume cursor in preferences.
     FlutterSecureStorage.setMockInitialValues({'twitter_user_id': _userId});
+    SharedPreferences.setMockInitialValues({});
   });
 
   test('fetchBookmarks parses every new post in the timeline', () async {

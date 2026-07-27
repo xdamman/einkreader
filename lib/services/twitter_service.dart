@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_log.dart';
 import 'twitter_markdown.dart';
@@ -176,7 +177,77 @@ class TwitterService {
     return user['username'] as String;
   }
 
-  Future<List<TweetItem>> fetchBookmarks() => _fetchTimeline('bookmarks');
+  /// Preference holding the pagination cursor of an unfinished bookmark
+  /// backfill, so deeper (older) pages resume at the next sync even after a
+  /// rate limit cut the crawl short.
+  static const bookmarksCursorPrefKey = 'twitter_bookmarks_cursor';
+
+  /// At most this many bookmarks are backfilled in total (pages x 100).
+  static const _maxBookmarkPages = 10;
+
+  /// Fetches bookmarks with pagination. The API returns them newest-
+  /// BOOKMARKED-first (no date filter exists), so:
+  ///  - during the initial backfill (or a resumed one, via the stored
+  ///    cursor) every page is fetched up to [_maxBookmarkPages];
+  ///  - once caught up, fetching stops at the first page that brings
+  ///    nothing new ([hasNewIds]) — incremental from then on.
+  /// A rate limit mid-crawl keeps what was fetched and stores the cursor
+  /// for the next sync.
+  Future<List<TweetItem>> fetchBookmarks(
+      {Future<bool> Function(List<String> tweetIds)? hasNewIds}) async {
+    final userId = await _storage.read(key: _kUserId);
+    if (userId == null) throw Exception('Twitter is not connected');
+    final prefs = await SharedPreferences.getInstance();
+    var cursor = prefs.getString(bookmarksCursorPrefKey);
+    final backfilling = cursor != null;
+    final items = <TweetItem>[];
+    String? nextCursor = cursor;
+    var pages = 0;
+    try {
+      do {
+        final json = await _get('/users/$userId/bookmarks', query: {
+          'max_results': '100',
+          if (nextCursor != null) 'pagination_token': nextCursor,
+          ..._tweetQuery,
+        });
+        pages++;
+        final users = _usersFrom(json);
+        final media = _mediaFrom(json);
+        final page = <TweetItem>[];
+        for (final t in (json['data'] as List?) ?? const []) {
+          page.add(_parseTweet(t as Map<String, dynamic>, users, media));
+        }
+        items.addAll(page);
+        nextCursor =
+            (json['meta'] as Map<String, dynamic>?)?['next_token'] as String?;
+        // Once caught up, an all-known page means everything deeper is
+        // older and known too. During a backfill deeper pages are new by
+        // definition, so keep going.
+        if (!backfilling && hasNewIds != null && page.isNotEmpty) {
+          if (!await hasNewIds([for (final item in page) item.id])) break;
+        }
+      } while (nextCursor != null && pages < _maxBookmarkPages);
+      if (nextCursor == null) {
+        await prefs.remove(bookmarksCursorPrefKey);
+      } else {
+        // Page cap reached with more history behind it: resume next sync.
+        await prefs.setString(bookmarksCursorPrefKey, nextCursor);
+      }
+    } catch (e) {
+      // Rate limit (or any failure) mid-crawl: keep the pages we got and
+      // remember where to resume.
+      if (nextCursor != null) {
+        await prefs.setString(bookmarksCursorPrefKey, nextCursor);
+      }
+      await _log((log) => log.warn(
+          'Twitter: bookmarks pagination stopped after $pages page(s): $e'));
+      if (items.isEmpty) rethrow;
+    }
+    await _log((log) => log.info(
+        'Twitter: fetched ${items.length} bookmarks across $pages page(s)'));
+    // Inline any referenced native article below the tweet that links to it.
+    return Future.wait(items.map(_withLinkedArticle));
+  }
 
   /// Standard fields needed to render a tweet, including the long-form body.
   static const _tweetQuery = {
@@ -188,24 +259,6 @@ class TwitterService {
     'user.fields': 'name,username',
     'media.fields': 'url,preview_image_url,type',
   };
-
-  Future<List<TweetItem>> _fetchTimeline(String endpoint) async {
-    final userId = await _storage.read(key: _kUserId);
-    if (userId == null) throw Exception('Twitter is not connected');
-    final json = await _get('/users/$userId/$endpoint', query: {
-      'max_results': '50',
-      ..._tweetQuery,
-    });
-
-    final users = _usersFrom(json);
-    final media = _mediaFrom(json);
-    final items = <TweetItem>[];
-    for (final t in (json['data'] as List?) ?? const []) {
-      items.add(_parseTweet(t as Map<String, dynamic>, users, media));
-    }
-    // Inline any referenced native article below the tweet that links to it.
-    return Future.wait(items.map(_withLinkedArticle));
-  }
 
   /// Fetches a single tweet by id. A self-thread is returned whole (tweets
   /// separated by horizontal rules); otherwise, when the tweet links to
