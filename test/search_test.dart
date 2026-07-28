@@ -195,12 +195,23 @@ void main() {
     expect(tester.getTopLeft(find.text('Aardvark 1')).dx,
         lessThan(tester.getTopLeft(find.text('BX1 4')).dx));
 
-    // Status: Unread hides the read article.
+    // Status chips carry counts; zero-count statuses are hidden entirely
+    // (nothing here is favorited, so no ★ chip at all).
+    expect(find.textContaining('Unread '), findsOneWidget);
+    expect(find.textContaining('Read '), findsOneWidget);
+    expect(find.textContaining('Favorites'), findsNothing);
+
+    // Status: Unread hides the read article…
     expect(find.text('Old news'), findsOneWidget);
-    await tester.tap(find.text('Unread'));
+    await tester.tap(find.textContaining('Unread '));
     await tester.pumpAndSettle();
     expect(find.text('Old news'), findsNothing);
     expect(find.text('Crypto rally today'), findsOneWidget);
+
+    // …and the source row re-counts under the selected status: BX1 loses
+    // its read match, so its chip count drops.
+    expect(find.text('BX1 4'), findsNothing);
+    expect(find.text('BX1 3'), findsOneWidget);
 
     // Back to All, then filter by the BX1 source chip.
     await tester.tap(find.text('All').first);
@@ -209,6 +220,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Crypto in Belgium'), findsNothing); // Aardvark article
     expect(find.text('Crypto rally today'), findsOneWidget); // BX1 article
+
+    // With a source selected, status counts describe that source only.
+    expect(find.textContaining('Read '), findsOneWidget);
   });
 
   testWidgets('swiping an unread result row right marks it read, row stays',

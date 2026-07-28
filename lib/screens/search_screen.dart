@@ -144,55 +144,55 @@ class _SearchScreenState extends State<SearchScreen> {
       return _CenteredMessage('Nothing found for "$_query".');
     }
 
-    // Chip counts derive from the unfiltered results: matching articles per
-    // source, and the set of articles that carry a matching highlight.
-    final matchesBySource = <int, int>{};
-    for (final article in results.articles) {
-      matchesBySource[article.sourceId] =
-          (matchesBySource[article.sourceId] ?? 0) + 1;
-    }
+    // Faceted filtering: each chip row's counts are computed with the OTHER
+    // row's filter applied, so the rows always describe what a tap would
+    // actually show.
     final highlightedArticleIds = {
       for (final h in results.highlights) h.articleId
     };
+    bool matchesStatus(Article a, _StatusFilter status) => switch (status) {
+          _StatusFilter.all => true,
+          _StatusFilter.unread => a.read == 0,
+          _StatusFilter.read => a.read == 1,
+          _StatusFilter.favorites => a.favorite == 1,
+          _StatusFilter.highlighted => highlightedArticleIds.contains(a.id),
+        };
 
-    // Status filter over the article list.
-    var articles = results.articles.where((a) {
-      switch (_status) {
-        case _StatusFilter.all:
-          return true;
-        case _StatusFilter.unread:
-          return a.read == 0;
-        case _StatusFilter.read:
-          return a.read == 1;
-        case _StatusFilter.favorites:
-          return a.favorite == 1;
-        case _StatusFilter.highlighted:
-          return highlightedArticleIds.contains(a.id);
-      }
-    }).toList();
+    // Validate the selected source against matches under ANY status, so a
+    // status change can hide but not silently forget the selection.
+    final anyStatusSources = {
+      for (final a in results.articles) a.sourceId
+    };
+    final sourceValid =
+        anyStatusSources.contains(_sourceId) ? _sourceId : null;
 
-    // Source filter over the article list. Fall back to all when the selected
-    // source no longer has matches.
+    // Status counts respect the source selection; zero-count statuses are
+    // not shown. A selected status that drops to zero falls back to All.
+    final sourceFiltered = sourceValid == null
+        ? results.articles
+        : results.articles
+            .where((a) => a.sourceId == sourceValid)
+            .toList();
+    final statusCounts = {
+      for (final status in _StatusFilter.values)
+        status: sourceFiltered.where((a) => matchesStatus(a, status)).length,
+    };
+    final effectiveStatus =
+        statusCounts[_status]! > 0 ? _status : _StatusFilter.all;
+
+    // Source counts respect the status selection: only sources that still
+    // make sense under it, alphabetical (stable lists are alphabetical,
+    // never by count), each with its count.
+    final statusFiltered = results.articles
+        .where((a) => matchesStatus(a, effectiveStatus))
+        .toList();
+    final matchesBySource = <int, int>{};
+    for (final article in statusFiltered) {
+      matchesBySource[article.sourceId] =
+          (matchesBySource[article.sourceId] ?? 0) + 1;
+    }
     final selectedSourceId =
-        matchesBySource.containsKey(_sourceId) ? _sourceId : null;
-    if (selectedSourceId != null) {
-      articles =
-          articles.where((a) => a.sourceId == selectedSourceId).toList();
-    }
-
-    // Highlights stay visible except under Unread/Read, where they follow
-    // their article's read state (mapped from the matching articles).
-    final readById = {for (final a in results.articles) a.id: a.read};
-    var highlights = results.highlights;
-    if (_status == _StatusFilter.unread || _status == _StatusFilter.read) {
-      final wantRead = _status == _StatusFilter.read ? 1 : 0;
-      highlights = highlights
-          .where((h) => readById[h.articleId] == wantRead)
-          .toList();
-    }
-
-    // Source chip row: only sources with ≥1 matching article, alphabetical
-    // (stable lists are alphabetical, never by count), each with its count.
+        matchesBySource.containsKey(sourceValid) ? sourceValid : null;
     final sourceChips = matchesBySource.keys
         .map((id) => (
               id: id,
@@ -201,6 +201,24 @@ class _SearchScreenState extends State<SearchScreen> {
             ))
         .toList()
       ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+
+    final articles = selectedSourceId == null
+        ? statusFiltered
+        : statusFiltered
+            .where((a) => a.sourceId == selectedSourceId)
+            .toList();
+
+    // Highlights stay visible except under Unread/Read, where they follow
+    // their article's read state (mapped from the matching articles).
+    final readById = {for (final a in results.articles) a.id: a.read};
+    var highlights = results.highlights;
+    if (effectiveStatus == _StatusFilter.unread ||
+        effectiveStatus == _StatusFilter.read) {
+      final wantRead = effectiveStatus == _StatusFilter.read ? 1 : 0;
+      highlights = highlights
+          .where((h) => readById[h.articleId] == wantRead)
+          .toList();
+    }
 
     final terms = _query.toLowerCase().split(RegExp(r'\s+'))
         .where((t) => t.isNotEmpty)
@@ -217,11 +235,16 @@ class _SearchScreenState extends State<SearchScreen> {
             children: [
               _chipRow([
                 for (final status in _StatusFilter.values)
-                  _FilterChip(
-                    label: status.label,
-                    selected: _status == status,
-                    onTap: () => setState(() => _status = status),
-                  ),
+                  // "All" always shows; the rest only when they have results.
+                  if (status == _StatusFilter.all ||
+                      statusCounts[status]! > 0)
+                    _FilterChip(
+                      label: status == _StatusFilter.all
+                          ? status.label
+                          : '${status.label} ${statusCounts[status]}',
+                      selected: effectiveStatus == status,
+                      onTap: () => setState(() => _status = status),
+                    ),
               ]),
               // Only worth a source row when more than one source matched.
               if (sourceChips.length > 1) ...[
