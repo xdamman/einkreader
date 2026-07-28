@@ -53,6 +53,9 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Within a Twitter source (which behaves like a folder of accounts):
   /// the selected author, or null for all.
   String? _feedAuthor;
+
+  /// Sentinel for the collapsed "Others" author chip.
+  static const _othersAuthor = '__others__';
   List<Article> _articles = [];
   List<Highlight> _highlights = [];
   List<Share> _shares = [];
@@ -540,14 +543,39 @@ class _HomeScreenState extends State<HomeScreen> {
           total: counts.total + 1,
         );
       }
+      // With many one-off accounts the strip gets noisy: past 10 authors,
+      // only those with 2+ bookmarks keep a chip; the rest collapse into
+      // a trailing "Others".
+      var entries = byAuthor.entries.toList();
+      var othersSet = <String>{};
+      if (entries.length > 10) {
+        othersSet = {
+          for (final e in entries.where((e) => e.value.total < 2)) e.key
+        };
+        entries =
+            entries.where((e) => e.value.total >= 2).toList();
+      }
       authorRow = [
-        for (final entry in byAuthor.entries)
+        for (final entry in entries)
           _AuthorFilter(
-              name: entry.key, unread: entry.value.unread)
+              name: entry.key,
+              label: entry.key,
+              unread: entry.value.unread)
       ]..sort((a, b) =>
-          a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+          a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+      if (othersSet.isNotEmpty) {
+        authorRow.add(_AuthorFilter(
+          name: _othersAuthor,
+          label: 'Others',
+          unread: othersSet.fold(
+              0, (sum, name) => sum + (byAuthor[name]?.unread ?? 0)),
+        ));
+      }
       final selectedAuthor = _feedAuthor;
-      if (selectedAuthor != null &&
+      if (selectedAuthor == _othersAuthor && othersSet.isNotEmpty) {
+        articles =
+            articles.where((a) => othersSet.contains(a.author)).toList();
+      } else if (selectedAuthor != null &&
           authorRow.any((a) => a.name == selectedAuthor)) {
         articles =
             articles.where((a) => a.author == selectedAuthor).toList();
@@ -682,11 +710,14 @@ class _FolderFilter {
   });
 }
 
-/// One author inside a Twitter source's second-row strip.
+/// One author inside a Twitter source's second-row strip. [name] is the
+/// filter key (a sentinel for "Others"); [label] is what the chip shows.
 class _AuthorFilter {
   final String name;
+  final String label;
   final int unread;
-  const _AuthorFilter({required this.name, required this.unread});
+  const _AuthorFilter(
+      {required this.name, required this.label, required this.unread});
 }
 
 /// Horizontally swipable strip of filter chips shown above the feed: "All"
@@ -813,7 +844,7 @@ class _SourceFilterBar extends StatelessWidget {
               ),
               for (final author in authors!)
                 _SourceChip(
-                  label: author.name,
+                  label: author.label,
                   count: author.unread,
                   selected: selectedAuthor == author.name,
                   syncing: false,

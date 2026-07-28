@@ -1,14 +1,15 @@
-// Bookmarks pagination: the API returns newest-bookmarked-first with no
-// date filter, so backfill walks pages until done (resuming across syncs on
-// rate limits) and later syncs stop at the first page with nothing new.
-// Plus: the feed's author strip treats a Twitter source as a folder of
-// accounts.
+// Twitter bookmarks: one 100-item fetch, every insert/skip decision logged
+// with the author's username (so a "missing" bookmark is one debug-log
+// search away), and the feed's author strip — a Twitter source behaves like
+// a folder of accounts, collapsing one-off authors into "Others" past 10.
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/home_screen.dart';
+import 'package:einkreader/services/app_log.dart';
+import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/services/twitter_service.dart';
 import 'package:einkreader/theme.dart';
@@ -21,25 +22,6 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-Map<String, dynamic> _page(List<int> ids, {String? nextToken}) => {
-      'data': [
-        for (final id in ids)
-          {
-            'id': '$id',
-            'author_id': 'u${id % 2}',
-            'text': 'tweet $id',
-            'created_at': '2026-07-0${1 + id % 9}T10:00:00.000Z',
-          }
-      ],
-      'includes': {
-        'users': [
-          {'id': 'u0', 'name': 'Vitalik', 'username': 'vitalikbuterin'},
-          {'id': 'u1', 'name': 'Jack', 'username': 'jack'},
-        ],
-      },
-      'meta': {if (nextToken != null) 'next_token': nextToken},
-    };
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -48,84 +30,101 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({'twitter_user_id': 'me'});
   });
 
-  test('backfill walks all pages; caught-up sync stops at a known page',
+  test('bookmark sync logs every decision with the author username',
       () async {
-    final requestedCursors = <String?>[];
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfiNoIsolate;
+    final db = AppDatabase.instance;
+    await db.debugReset();
+    final tmp = Directory.systemTemp.createTempSync('einkreader_bmlog');
+    db.debugDatabasePath = p.join(tmp.path, 'test.db');
+    ArchiveStore.instance.debugConfigure(basePath: p.join(tmp.path, 'a'));
+
+    // An RSS article already holds the link owocki's bookmark points to —
+    // the classic silent-skip case, now visible in the log.
+    final rss = await db.insertSource(Source(
+        type: SourceType.rss, title: 'Feed', url: 'https://f', createdAt: 0));
+    await db.insertArticleIfNew(Article(
+      sourceId: rss.id!,
+      guid: 'r1',
+      title: 'Existing Story',
+      url: 'https://blog.example.com/post',
+      createdAt: 1,
+      fetched: 1,
+    ));
+
+    final timeline = {
+      'data': [
+        {
+          'id': '100',
+          'author_id': 'u1',
+          'text': 'fresh thought',
+          'created_at': '2026-07-20T10:00:00.000Z',
+        },
+        {
+          'id': '101',
+          'author_id': 'u2',
+          'text': 'read this https://t.co/x',
+          'created_at': '2026-07-20T11:00:00.000Z',
+          'entities': {
+            'urls': [
+              {
+                'url': 'https://t.co/x',
+                'expanded_url': 'https://blog.example.com/post',
+                'display_url': 'blog.example.com/post',
+              }
+            ]
+          },
+        },
+      ],
+      'includes': {
+        'users': [
+          {'id': 'u1', 'name': 'Jack', 'username': 'jack'},
+          {'id': 'u2', 'name': 'Kevin Owocki', 'username': 'owocki'},
+        ],
+      },
+    };
     final twitter = TwitterService(
       accessToken: () async => 'token',
       client: MockClient((request) async {
-        expect(request.url.queryParameters['max_results'], '100');
-        final cursor = request.url.queryParameters['pagination_token'];
-        requestedCursors.add(cursor);
-        final body = switch (cursor) {
-          null => _page([1, 2], nextToken: 'p2'),
-          'p2' => _page([3, 4], nextToken: 'p3'),
-          'p3' => _page([5, 6]),
-          _ => _page([]),
-        };
-        return http.Response(jsonEncode(body), 200,
-            headers: {'content-type': 'application/json'});
-      }),
-    );
-
-    // Initial backfill: everything is new → all three pages.
-    final known = <String>{};
-    final items = await twitter.fetchBookmarks(
-        hasNewIds: (ids) async => ids.any((id) => !known.contains(id)));
-    expect(items.map((t) => t.id),
-        containsAll(['1', '2', '3', '4', '5', '6']));
-    expect(requestedCursors, [null, 'p2', 'p3']);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString(TwitterService.bookmarksCursorPrefKey), isNull,
-        reason: 'backfill completed — no cursor left behind');
-
-    // Caught up: first page all known → exactly one request.
-    known.addAll(['1', '2', '3', '4', '5', '6']);
-    requestedCursors.clear();
-    await twitter.fetchBookmarks(
-        hasNewIds: (ids) async => ids.any((id) => !known.contains(id)));
-    expect(requestedCursors, [null],
-        reason: 'incremental mode stops at the first stale page');
-  });
-
-  test('a rate limit mid-backfill keeps the page and resumes next sync',
-      () async {
-    var calls = 0;
-    final twitter = TwitterService(
-      accessToken: () async => 'token',
-      client: MockClient((request) async {
-        calls++;
-        final cursor = request.url.queryParameters['pagination_token'];
-        if (cursor == null) {
-          return http.Response(
-              jsonEncode(_page([1], nextToken: 'p2')), 200,
+        if (request.url.path.endsWith('/users/me/bookmarks')) {
+          expect(request.url.queryParameters['max_results'], '100');
+          return http.Response(jsonEncode(timeline), 200,
               headers: {'content-type': 'application/json'});
         }
-        if (calls == 2) {
-          return http.Response('{"title": "Too Many Requests"}', 429);
-        }
-        return http.Response(jsonEncode(_page([2])), 200,
+        return http.Response('{}', 200,
             headers: {'content-type': 'application/json'});
       }),
     );
+    final sync = SyncService.forTest(
+      http: MockClient((request) async => http.Response('x', 404)),
+      twitter: twitter,
+    )..autoSyncOnLaunch = false;
 
-    // First sync: page 1 lands, page 2 hits the limit → cursor stored.
-    final first = await twitter.fetchBookmarks(
-        hasNewIds: (ids) async => true);
-    expect(first.map((t) => t.id), ['1']);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString(TwitterService.bookmarksCursorPrefKey), 'p2');
+    final bookmarks = await db.insertSource(Source(
+        type: SourceType.twitterBookmarks,
+        title: 'Twitter Bookmarks',
+        url: 'xdamman',
+        createdAt: 0));
+    await sync.syncSources([bookmarks]);
 
-    // Next sync resumes at the stored cursor and finishes the backfill.
-    final second = await twitter.fetchBookmarks(
-        hasNewIds: (ids) async => false); // stale rule ignored mid-backfill
-    expect(second.map((t) => t.id), ['2']);
-    expect(prefs.getString(TwitterService.bookmarksCursorPrefKey), isNull);
+    // Jack's bookmark landed; owocki's was skipped by URL dedup — and the
+    // log says so, searchable by username.
+    final titles = (await db.getArticles(sourceId: bookmarks.id))
+        .map((a) => a.title);
+    expect(titles, contains('fresh thought'));
+    final log =
+        (await AppLogService.instance.entries()).map((e) => e.message);
+    expect(log, anyElement(contains('@jack')));
+    expect(
+        log,
+        anyElement(allOf(contains('@owocki'),
+            contains('same link already saved as "Existing Story"'))));
   });
 
-  testWidgets('a Twitter source expands into an author strip like a folder',
+  testWidgets(
+      'author strip collapses one-off authors into Others past 10',
       (tester) async {
-    // Database work needs real async — a widget test's zone is fake-async.
     await tester.runAsync(() async {
       SyncService.instance.autoSyncOnLaunch = false;
       sqfliteFfiInit();
@@ -140,21 +139,25 @@ void main() {
           title: 'Twitter Bookmarks',
           url: 'xdamman',
           createdAt: 0));
-      for (final spec in [
-        ('t1', 'Vitalik', 'thread about proofs'),
-        ('t2', 'Jack', 'note on payments'),
-        ('t3', 'Vitalik', 'more on rollups'),
-      ]) {
-        await db.insertArticleIfNew(Article(
-          sourceId: source.id!,
-          guid: spec.$1,
-          title: spec.$3,
-          author: spec.$2,
-          contentMarkdown: spec.$3,
-          publishedAt: 100,
-          createdAt: 100,
-          fetched: 1,
-        ));
+      // 2 recurring authors (2 bookmarks each) + 10 one-offs = 12 authors.
+      var guid = 0;
+      Future<void> add(String author, String title) =>
+          db.insertArticleIfNew(Article(
+            sourceId: source.id!,
+            guid: 't${guid++}',
+            title: title,
+            author: author,
+            contentMarkdown: title,
+            publishedAt: 100,
+            createdAt: 100,
+            fetched: 1,
+          ));
+      await add('Vitalik', 'thread about proofs');
+      await add('Vitalik', 'more on rollups');
+      await add('Jack', 'note on payments');
+      await add('Jack', 'note on nodes');
+      for (var i = 0; i < 10; i++) {
+        await add('OneOff$i', 'single bookmark $i');
       }
     });
 
@@ -164,22 +167,25 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pumpAndSettle();
 
-    // Select the Twitter source → the author row appears, alphabetical.
     await tester.tap(find.text('Twitter Bookmarks'));
     await tester.pumpAndSettle();
-    expect(find.text('Jack'), findsWidgets);
-    expect(find.text('Vitalik'), findsWidgets);
 
-    // Narrow to one author: only their bookmarks remain.
-    await tester.tap(find.text('Vitalik').first);
+    // Recurring authors get chips; one-offs collapse into Others.
+    expect(find.text('Jack'), findsOneWidget);
+    expect(find.text('Vitalik'), findsOneWidget);
+    expect(find.text('Others'), findsOneWidget);
+    expect(find.text('OneOff3'), findsNothing);
+
+    // Others shows exactly the collapsed authors' bookmarks.
+    await tester.tap(find.text('Others'));
+    await tester.pumpAndSettle();
+    expect(find.text('single bookmark 0'), findsOneWidget);
+    expect(find.text('thread about proofs'), findsNothing);
+
+    // A named author still narrows normally.
+    await tester.tap(find.text('Vitalik'));
     await tester.pumpAndSettle();
     expect(find.text('thread about proofs'), findsOneWidget);
-    expect(find.text('more on rollups'), findsOneWidget);
-    expect(find.text('note on payments'), findsNothing);
-
-    // Back to All within the source.
-    await tester.tap(find.text('All').last);
-    await tester.pumpAndSettle();
-    expect(find.text('note on payments'), findsOneWidget);
+    expect(find.text('single bookmark 0'), findsNothing);
   });
 }

@@ -504,20 +504,6 @@ class AppDatabase {
     return rows.isNotEmpty;
   }
 
-  /// True when at least one of [guids] has no article yet under [sourceId]
-  /// (guid-only, so cross-source URL dedup can't mask new bookmarks).
-  Future<bool> anyGuidUnknown(int sourceId, List<String> guids) async {
-    if (guids.isEmpty) return false;
-    final db = await database;
-    final placeholders = List.filled(guids.length, '?').join(',');
-    final rows = await db.rawQuery(
-      'SELECT guid FROM articles WHERE source_id = ? '
-      'AND guid IN ($placeholders)',
-      [sourceId, ...guids],
-    );
-    return rows.length < guids.toSet().length;
-  }
-
   Future<List<Article>> getArticles({
     int? sourceId,
     bool readLaterOnly = false,

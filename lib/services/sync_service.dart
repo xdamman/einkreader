@@ -373,11 +373,7 @@ class SyncService {
       case SourceType.rss:
         return _syncRss(source);
       case SourceType.twitterBookmarks:
-        return _insertTweets(
-          source,
-          await twitter.fetchBookmarks(
-              hasNewIds: (ids) => _db.anyGuidUnknown(source.id!, ids)),
-        );
+        return _insertTweets(source, await twitter.fetchBookmarks());
       case SourceType.twitterLikes:
         // Likes are no longer synced; legacy sources are simply skipped.
         return 0;
@@ -509,14 +505,25 @@ class SyncService {
           tweet.authorName ??
           (tweet.authorUsername != null ? '@${tweet.authorUsername}' : null);
       // Bookmarks return the same tweets every sync; skip known ones before
-      // any further lookups or image downloads. The existence check uses the
-      // pre-thread URL shape on purpose, matching what was stored.
-      if (await _db.articleExists(
-          sourceId: source.id!,
-          guid: tweet.id,
-          url: tweet.isLongForm
-              ? tweet.tweetUrl
-              : (tweet.articleUrl ?? tweet.tweetUrl))) {
+      // any further lookups or image downloads. Every decision logs the
+      // author, so a "missing" bookmark is one debug-log search away.
+      final userLabel = tweet.authorUsername != null
+          ? '@${tweet.authorUsername}'
+          : (tweet.authorName ?? 'unknown author');
+      final knownByGuid = await _db.articleExists(
+          sourceId: source.id!, guid: tweet.id);
+      Article? sameUrl;
+      if (!knownByGuid) {
+        final checkUrl = tweet.isLongForm
+            ? tweet.tweetUrl
+            : (tweet.articleUrl ?? tweet.tweetUrl);
+        sameUrl = await _db.findArticleByUrl(checkUrl);
+      }
+      if (knownByGuid || sameUrl != null) {
+        await AppLogService.instance.debug(
+          'Twitter: bookmark by $userLabel (${tweet.id}) skipped — '
+          '${knownByGuid ? 'already in library' : 'same link already saved as "${sameUrl!.title}"'}',
+        );
         continue;
       }
       // A new tweet may head a self-thread: keep the whole thread as the
@@ -554,6 +561,10 @@ class SyncService {
         createdAt: now,
       );
       final isNew = await _db.insertArticleIfNew(article);
+      await AppLogService.instance.debug(
+        'Twitter: bookmark by $userLabel (${tweet.id}) '
+        '${isNew ? 'added: "${article.displayTitle}"' : 'skipped — duplicate url'}',
+      );
       if (isNew) {
         inserted++;
         if (content != null) {
