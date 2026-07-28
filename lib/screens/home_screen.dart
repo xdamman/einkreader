@@ -16,6 +16,7 @@ import '../widgets/resume_reading.dart';
 import '../widgets/shared_list.dart';
 import 'add_source_screen.dart';
 import 'profile_screen.dart';
+import 'search_screen.dart';
 import 'settings_screen.dart';
 
 enum _HomeTab {
@@ -249,6 +250,17 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('eInk Reader'),
         actions: [
+          // Universal search across sources, authors, titles, content and
+          // highlights — first in the row so it is always at hand.
+          IconButton(
+            tooltip: 'Search',
+            icon: const Icon(Icons.search),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SearchScreen()));
+              _load();
+            },
+          ),
           // Visible only while something couldn't be sent (e.g. a tweet
           // posted offline): a clear signal that work is waiting, with retry.
           ValueListenableBuilder<int>(

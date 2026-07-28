@@ -27,6 +27,25 @@ class SourceStats {
       );
 }
 
+/// Grouped results of a universal [AppDatabase.search] over everything the
+/// reader stores. Highlights always render above articles, which render above
+/// sources (the reader's explicit rule); within each list the order is the
+/// ranking computed in Dart by [AppDatabase.search].
+class SearchResults {
+  final List<Highlight> highlights;
+  final List<Article> articles;
+  final List<Source> sources;
+
+  const SearchResults({
+    this.highlights = const [],
+    this.articles = const [],
+    this.sources = const [],
+  });
+
+  bool get isEmpty =>
+      highlights.isEmpty && articles.isEmpty && sources.isEmpty;
+}
+
 /// Single SQLite database holding sources, offline article content and
 /// highlights.
 class AppDatabase {
@@ -982,5 +1001,132 @@ class AppDatabase {
       ORDER BY h.created_at DESC
     ''', articleId != null ? [articleId] : null);
     return rows.map(Highlight.fromMap).toList();
+  }
+
+  // ---------------------------------------------------------------- search
+
+  /// Wraps [term] as a LIKE pattern that matches it as a literal substring:
+  /// the SQL wildcards `%` and `_`, and the escape character itself, are
+  /// escaped so a query like `100%` searches for the text "100%" rather than
+  /// matching every row. Pair with `LIKE ? ESCAPE '\'`.
+  static String _likeArg(String term) {
+    final escaped = term
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_');
+    return '%$escaped%';
+  }
+
+  /// Builds a WHERE fragment (and its positional args) requiring every term to
+  /// match somewhere in [columns] — terms are ANDed, columns within a term are
+  /// ORed. [terms] are already lowercased; columns are wrapped in LOWER() so
+  /// matching is case-insensitive.
+  static (String, List<String>) _matchClause(
+      List<String> columns, List<String> terms) {
+    final clauses = <String>[];
+    final args = <String>[];
+    for (final term in terms) {
+      final arg = _likeArg(term);
+      final ors =
+          columns.map((c) => "LOWER($c) LIKE ? ESCAPE '\\'").join(' OR ');
+      clauses.add('($ors)');
+      for (var i = 0; i < columns.length; i++) {
+        args.add(arg);
+      }
+    }
+    return (clauses.join(' AND '), args);
+  }
+
+  static bool _anyTermIn(String? value, List<String> terms) {
+    if (value == null || value.isEmpty) return false;
+    final lower = value.toLowerCase();
+    return terms.any(lower.contains);
+  }
+
+  /// Weighted relevance of an article for [terms]: a title hit dominates an
+  /// author hit, which dominates a summary/content hit; weights sum when
+  /// several fields match. Ties are broken by recency in [search].
+  static int _articleScore(Article a, List<String> terms) {
+    var score = 0;
+    if (_anyTermIn(a.title, terms)) score += 100;
+    if (_anyTermIn(a.author, terms)) score += 80;
+    if (_anyTermIn(a.summary, terms) || _anyTermIn(a.contentMarkdown, terms)) {
+      score += 10;
+    }
+    return score;
+  }
+
+  /// Universal search over sources, authors, article titles/content and
+  /// highlights (their text and comments). Whitespace splits the query into
+  /// terms that are ANDed — every term must match somewhere in a row. Matching
+  /// uses SQL LIKE on existing columns (no FTS, no schema change): the corpus
+  /// is small and this repo has been burned by migrations. Each result list is
+  /// ordered by its ranking, computed here in Dart.
+  Future<SearchResults> search(String query) async {
+    final terms = query
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (terms.isEmpty) return const SearchResults();
+    final db = await database;
+
+    // Highlights: match the highlight text or its comment; join the article
+    // title for display, exactly like getHighlights.
+    final (hWhere, hArgs) =
+        _matchClause(['h.text', "COALESCE(h.comment, '')"], terms);
+    final highlightRows = await db.rawQuery('''
+      SELECT h.*, a.title AS article_title
+      FROM highlights h JOIN articles a ON a.id = h.article_id
+      WHERE $hWhere
+    ''', hArgs);
+    final highlights = highlightRows.map(Highlight.fromMap).toList();
+
+    // Articles: title, author, summary and full content.
+    final (aWhere, aArgs) = _matchClause(
+      ['title', "COALESCE(author, '')", "COALESCE(summary, '')",
+        "COALESCE(content_markdown, '')"],
+      terms,
+    );
+    final articleRows =
+        await db.query('articles', where: aWhere, whereArgs: aArgs);
+    final articles = articleRows.map(Article.fromMap).toList();
+
+    // Sources: title or url (a twitter username lives in the url).
+    final (sWhere, sArgs) = _matchClause(['title', 'url'], terms);
+    final sourceRows =
+        await db.query('sources', where: sWhere, whereArgs: sArgs);
+    final sources = sourceRows.map(Source.fromMap).toList();
+
+    // Highlights: text match before comment-only match, then newest first.
+    highlights.sort((a, b) {
+      final ta = _anyTermIn(a.text, terms) ? 1 : 0;
+      final tb = _anyTermIn(b.text, terms) ? 1 : 0;
+      if (ta != tb) return tb - ta;
+      return b.createdAt.compareTo(a.createdAt);
+    });
+
+    // Articles: score desc, then most recent.
+    articles.sort((a, b) {
+      final byScore = _articleScore(b, terms).compareTo(_articleScore(a, terms));
+      if (byScore != 0) return byScore;
+      return (b.publishedAt ?? b.createdAt)
+          .compareTo(a.publishedAt ?? a.createdAt);
+    });
+
+    // Sources: title match before url-only match, then alphabetical (this
+    // user's rule: stable lists are alphabetical, never by relevance count).
+    sources.sort((a, b) {
+      final ta = _anyTermIn(a.title, terms) ? 1 : 0;
+      final tb = _anyTermIn(b.title, terms) ? 1 : 0;
+      if (ta != tb) return tb - ta;
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+
+    return SearchResults(
+      highlights: highlights,
+      articles: articles,
+      sources: sources,
+    );
   }
 }

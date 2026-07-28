@@ -208,10 +208,41 @@ class _ArticleTile extends StatelessWidget {
 
     // Every unread row that opens an article can be swiped right to mark it
     // read — one gesture, consistent across the whole app (same as the
-    // Resume reading section). The row snaps back restyled, never dismissed.
-    if (article.read != 0) return tile;
+    // Resume reading section and universal search). The row snaps back
+    // restyled, never dismissed.
+    return MarkReadSwipe(
+      article: article,
+      onChanged: onChanged,
+      child: tile,
+    );
+  }
+}
+
+/// Wraps a row so that, while [article] is unread, swiping it right marks it
+/// read — a single gesture that stays identical wherever an article row
+/// appears (the feed and universal search). The row snaps back and re-renders
+/// as read; it is never dismissed. A row for an already-read article is
+/// returned unwrapped.
+class MarkReadSwipe extends StatelessWidget {
+  final Article article;
+
+  /// Called after the article is marked read so the host list can refresh in
+  /// place (the row restyles from bold to regular).
+  final VoidCallback onChanged;
+  final Widget child;
+
+  const MarkReadSwipe({
+    super.key,
+    required this.article,
+    required this.onChanged,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (article.read != 0) return child;
     return Dismissible(
-      key: ValueKey('mark-read-\${article.id}'),
+      key: ValueKey('mark-read-${article.id}'),
       direction: DismissDirection.startToEnd,
       background: Container(
         color: Colors.black,
@@ -235,7 +266,7 @@ class _ArticleTile extends StatelessWidget {
         onChanged();
         return false; // keep the row; it re-renders as read
       },
-      child: tile,
+      child: child,
     );
   }
 }
