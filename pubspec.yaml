@@ -1,7 +1,7 @@
 name: einkreader
 description: A minimal RSS / Twitter / Nostr reader optimized for e-ink tablets.
 publish_to: 'none'
-version: 0.3.2+22
+version: 0.3.3+23
 
 environment:
   sdk: ^3.7.0
