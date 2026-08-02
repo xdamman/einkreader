@@ -224,6 +224,31 @@ void main() {
     });
   });
 
+  testWidgets('tweet-style • bullets on single newlines become a list',
+      (tester) async {
+    // Long-form tweets separate bullet lines with single newlines and use
+    // the literal • marker; neither must glue into a wall of text.
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: 'I think it\u2019s a confluence of things:\n'
+              '\u2022 Many things today are ugly\n'
+              '\u2022 Modernism repudiated continuity',
+        ),
+      ),
+    ));
+    final spans = _spans(tester);
+    final text = spans.map((s) => s.$1).join('\n');
+    expect(text, contains('confluence of things:'));
+    // Each bullet is its own list row with a marker span, so the two
+    // bullet texts are separate spans — not glued into one paragraph.
+    expect(
+        spans.where((s) => s.$1 == '\u2022'), hasLength(2),
+        reason: 'two rendered list markers');
+    expect(text, isNot(contains('ugly \u2022 Modernism')),
+        reason: 'no mid-paragraph glued bullet');
+  });
+
   testWidgets('a real sentence mentioning subscribe is kept', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(

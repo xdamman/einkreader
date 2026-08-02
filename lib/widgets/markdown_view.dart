@@ -273,7 +273,8 @@ class _MarkdownViewState extends State<MarkdownView> {
 
   static final _imageOnly =
       RegExp(r'^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)$');
-  static final _listLine = RegExp(r'^(\s*)([-*+]|\d+[.)])\s+(.*)$');
+  // The literal bullet • is common in tweet-sourced text.
+  static final _listLine = RegExp(r'^(\s*)([-*+•]|\d+[.)])\s+(.*)$');
   static final _headingLine = RegExp(r'^(#{1,6})\s+(.*)$');
 
   static List<_Block> _parseBlocks(String markdown) {

@@ -5,6 +5,14 @@ import 'package:einkreader/services/twitter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('tweet newlines become paragraph breaks (nothing glues)', () {
+    final text = expandTweetUrls({
+      'text': 'Intro line\n\u2022 first point\n\u2022 second point',
+    });
+    expect(text,
+        'Intro line\n\n\u2022 first point\n\n\u2022 second point');
+  });
+
   group('expandTweetUrls', () {
     test('replaces t.co links with their expanded form', () {
       final body = {

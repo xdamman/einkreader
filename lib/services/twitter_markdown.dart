@@ -15,7 +15,11 @@ String expandTweetUrls(Map<String, dynamic> body) {
       text = text.replaceAll(shortUrl, expanded);
     }
   }
-  return text;
+  // In tweet text every newline is intentional (long-form notes separate
+  // paragraphs and bullet lines with single \n). Markdown treats a single
+  // newline as a soft wrap, so the renderer would glue those lines into one
+  // wall of text — promote every line break to a paragraph break.
+  return text.replaceAll(RegExp(r'\n+'), '\n\n');
 }
 
 /// First non-x.com / non-twitter.com URL in [body], used to fetch a linked
