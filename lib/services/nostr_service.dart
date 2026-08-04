@@ -155,13 +155,16 @@ class NostrService {
   }
 
   /// Decodes an npub1... string into a hex pubkey (bech32, NIP-19).
-  static String decodeNpub(String npub) {
-    final input = npub.trim().toLowerCase();
-    if (!input.startsWith('npub1')) {
-      throw const FormatException('Expected an npub1... key');
+  static String decodeNpub(String npub) => decodeBech32Key(npub, 'npub');
+
+  /// Decodes a bech32 key ('npub' or 'nsec') to 32 hex bytes.
+  static String decodeBech32Key(String key, String hrp) {
+    final input = key.trim().toLowerCase();
+    if (!input.startsWith('${hrp}1')) {
+      throw FormatException('Expected an ${hrp}1... key');
     }
     const charset = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
-    final dataPart = input.substring(5); // after "npub1"
+    final dataPart = input.substring(hrp.length + 1);
     final values = <int>[];
     for (final char in dataPart.split('')) {
       final v = charset.indexOf(char);

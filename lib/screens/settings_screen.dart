@@ -17,6 +17,8 @@ import '../services/build_config.dart';
 import '../services/sync_service.dart';
 import '../services/update_service.dart';
 import '../services/plugin_service.dart';
+import '../services/profile_service.dart';
+import '../widgets/profile_switcher.dart';
 import '../widgets/relay_settings.dart';
 import 'contacts_screen.dart';
 import 'plugin_pitch_screen.dart';
@@ -427,6 +429,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     MaterialPageRoute(
                         builder: (_) => const ContactsScreen())),
               ),
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 24),
+            const Text('Nostr profiles', style: sectionStyle),
+            const SizedBox(height: 8),
+            const Text(
+              'Reading and sharing happen as the active profile. Long-press '
+              'the profile icon on the home screen to switch quickly.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 8),
+            FutureBuilder(
+              future: ProfileService.instance.profileSummaries(),
+              builder: (context, snapshot) {
+                final summaries = snapshot.data ?? const <ProfileSummary>[];
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final summary in summaries)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(summary.active
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked),
+                        title: Text(summary.name.isNotEmpty
+                            ? summary.name
+                            : (summary.hasIdentity
+                                ? 'Unnamed profile'
+                                : 'Empty profile')),
+                        onTap: summary.active
+                            ? null
+                            : () async {
+                                await ProfileService.instance
+                                    .switchTo(summary.id);
+                                _load();
+                                setState(() {});
+                              },
+                      ),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.person_add_outlined),
+                      label: const Text('Add profile'),
+                      onPressed: () async {
+                        await showAddProfileDialog(context);
+                        setState(() {});
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
             const SizedBox(height: 32),
             const Divider(),
             const SizedBox(height: 24),

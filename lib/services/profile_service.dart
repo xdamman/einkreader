@@ -21,6 +21,21 @@ class UsernameTakenException implements Exception {
   String toString() => '"$name" is already taken';
 }
 
+/// One profile slot in the switcher.
+class ProfileSummary {
+  final String id;
+  final String name;
+  final bool hasIdentity;
+  final bool active;
+
+  const ProfileSummary({
+    required this.id,
+    required this.name,
+    required this.hasIdentity,
+    required this.active,
+  });
+}
+
 /// The user's fields as edited in the profile modal.
 class Profile {
   final String name;
@@ -56,6 +71,106 @@ class ProfileService {
   static const _kUsernamePending = 'profile_username_pending';
   static const _kAllowedSender = 'profile_allowed_sender';
 
+  // ---- multiple profiles ----
+  // Each profile is a slot of the keys above. The first slot ('default')
+  // keeps the bare key names, so existing single-profile installs need no
+  // data migration; extra slots suffix their keys with '#<id>'. The active
+  // slot is remembered — the last used profile survives restarts.
+  static const _kProfileIds = 'profile_ids';
+  static const _kActiveProfile = 'active_profile_id';
+
+  String? _cachedActiveId;
+
+  /// Test seam: forget the cached active slot (tests swap mock prefs).
+  @visibleForTesting
+  void debugResetActiveCache() => _cachedActiveId = null;
+
+  Future<String> _activeId() async {
+    final cached = _cachedActiveId;
+    if (cached != null) return cached;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getStringList(_kProfileIds) == null) {
+      await prefs.setStringList(_kProfileIds, ['default']);
+    }
+    final id = prefs.getString(_kActiveProfile) ?? 'default';
+    return _cachedActiveId = id;
+  }
+
+  String _suffixed(String base, String id) =>
+      id == 'default' ? base : '$base#$id';
+
+  Future<String> _k(String base) async =>
+      _suffixed(base, await _activeId());
+
+  /// All profile slots for the switcher, in creation order.
+  Future<List<ProfileSummary>> profileSummaries() async {
+    final prefs = await SharedPreferences.getInstance();
+    final active = await _activeId();
+    final ids = prefs.getStringList(_kProfileIds) ?? ['default'];
+    return [
+      for (final id in ids)
+        ProfileSummary(
+          id: id,
+          name: prefs.getString(_suffixed(_kName, id)) ?? '',
+          hasIdentity: prefs.getString(_suffixed(_kSecret, id)) != null,
+          active: id == active,
+        ),
+    ];
+  }
+
+  /// Switches the active profile; everything (identity, address, sharing)
+  /// follows it.
+  Future<void> switchTo(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kActiveProfile, id);
+    _cachedActiveId = id;
+    await AppLogService.instance.info('Profile: switched to slot $id');
+  }
+
+  /// Creates an empty slot and switches to it (the opt-in screen then runs
+  /// the normal create flow inside it). Returns the new slot id.
+  Future<String> addProfileSlot() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList(_kProfileIds) ?? ['default'];
+    final id = 'p${DateTime.now().millisecondsSinceEpoch}';
+    await prefs.setStringList(_kProfileIds, [...ids, id]);
+    await switchTo(id);
+    return id;
+  }
+
+  /// Test seam for the metadata fetch after an import.
+  @visibleForTesting
+  Future<NostrProfile?> Function(String npub)? debugFetchProfile;
+
+  /// Advanced: imports an existing identity from its nsec into a fresh
+  /// slot and switches to it. Metadata (name, bio, avatar) is pulled from
+  /// the relays best-effort.
+  Future<void> importNsec(String nsec) async {
+    final secret = NostrService.decodeBech32Key(nsec, 'nsec');
+    await addProfileSlot();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(await _k(_kSecret), secret);
+    await AppLogService.instance
+        .info('Profile: imported identity ${await npub}');
+    try {
+      final fetched = await (debugFetchProfile ??
+          NostrService().fetchProfile)(await npub);
+      if (fetched != null) {
+        if (fetched.name.isNotEmpty) {
+          await prefs.setString(await _k(_kName), fetched.name);
+        }
+        if (fetched.about.isNotEmpty) {
+          await prefs.setString(await _k(_kAbout), fetched.about);
+        }
+        if (fetched.picture.isNotEmpty) {
+          await prefs.setString(await _k(_kPicture), fetched.picture);
+        }
+      }
+    } catch (_) {
+      // Offline import is fine; metadata can arrive later.
+    }
+  }
+
   /// Every reader can claim a free name@einkreader.app address (NIP-05).
   static const nip05Domain = 'einkreader.app';
 
@@ -90,25 +205,27 @@ class ProfileService {
     return 0;
   }
 
-  /// Whether the user opted in and has an identity.
+  /// Whether the user opted in and has an identity (in the active slot).
   Future<bool> get enabled async =>
-      (await SharedPreferences.getInstance()).getString(_kSecret) != null;
+      (await SharedPreferences.getInstance())
+          .getString(await _k(_kSecret)) !=
+      null;
 
   /// Creates the identity (idempotent): 32 random bytes from a secure RNG.
   Future<void> createIdentity() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getString(_kSecret) != null) return;
+    if (prefs.getString(await _k(_kSecret)) != null) return;
     final rng = Random.secure();
     final secret = [for (var i = 0; i < 32; i++) rng.nextInt(256)]
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join();
-    await prefs.setString(_kSecret, secret);
+    await prefs.setString(await _k(_kSecret), secret);
     await AppLogService.instance
         .info('Profile: created identity ${await npub}');
   }
 
   Future<String?> get _secret async =>
-      (await SharedPreferences.getInstance()).getString(_kSecret);
+      (await SharedPreferences.getInstance()).getString(await _k(_kSecret));
 
   Future<String> get publicKeyHex async =>
       bip340.getPublicKey((await _secret)!);
@@ -124,10 +241,10 @@ class ProfileService {
   Future<Profile> profile() async {
     final prefs = await SharedPreferences.getInstance();
     return Profile(
-      name: prefs.getString(_kName) ?? '',
-      about: prefs.getString(_kAbout) ?? '',
-      picture: prefs.getString(_kPicture) ?? '',
-      links: prefs.getString(_kLinks) ?? '',
+      name: prefs.getString(await _k(_kName)) ?? '',
+      about: prefs.getString(await _k(_kAbout)) ?? '',
+      picture: prefs.getString(await _k(_kPicture)) ?? '',
+      links: prefs.getString(await _k(_kLinks)) ?? '',
     );
   }
 
@@ -137,10 +254,10 @@ class ProfileService {
   /// (0 = saved locally only).
   Future<int> saveProfile(Profile profile) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kName, profile.name);
-    await prefs.setString(_kAbout, profile.about);
-    await prefs.setString(_kPicture, profile.picture);
-    await prefs.setString(_kLinks, profile.links);
+    await prefs.setString(await _k(_kName), profile.name);
+    await prefs.setString(await _k(_kAbout), profile.about);
+    await prefs.setString(await _k(_kPicture), profile.picture);
+    await prefs.setString(await _k(_kLinks), profile.links);
     await retryPendingUsername();
     final registered = await username;
     final links = profile.links
@@ -180,12 +297,13 @@ class ProfileService {
 
   /// The claimed username (without the domain), when one is registered.
   Future<String?> get username async =>
-      (await SharedPreferences.getInstance()).getString(_kUsername);
+      (await SharedPreferences.getInstance())
+          .getString(await _k(_kUsername));
 
   /// A username chosen while offline, still waiting for its registration.
   Future<String?> get pendingUsername async =>
       (await SharedPreferences.getInstance())
-          .getString(_kUsernamePending);
+          .getString(await _k(_kUsernamePending));
 
   /// The full address to show the user, from either state.
   Future<String?> get nip05Address async {
@@ -196,7 +314,8 @@ class ProfileService {
   /// The one email address allowed to send content to name@einkreader.app
   /// (empty = the email-to-feed feature is off).
   Future<String> get allowedSender async =>
-      (await SharedPreferences.getInstance()).getString(_kAllowedSender) ??
+      (await SharedPreferences.getInstance())
+          .getString(await _k(_kAllowedSender)) ??
       '';
 
   /// Stores the allowed sender and pushes it to the registration server
@@ -206,7 +325,7 @@ class ProfileService {
     final prefs = await SharedPreferences.getInstance();
     final normalized = sender.trim().toLowerCase();
     if (normalized == (await allowedSender)) return;
-    await prefs.setString(_kAllowedSender, normalized);
+    await prefs.setString(await _k(_kAllowedSender), normalized);
     final name = await username ?? await pendingUsername;
     if (name != null) {
       try {
@@ -256,15 +375,15 @@ class ProfileService {
         throw Exception('Registration failed '
             '(HTTP ${response.statusCode}: ${response.body})');
       }
-      await prefs.setString(_kUsername, name);
-      await prefs.remove(_kUsernamePending);
+      await prefs.setString(await _k(_kUsername), name);
+      await prefs.remove(await _k(_kUsernamePending));
       await AppLogService.instance
           .info('Profile: registered $name@$nip05Domain');
       return true;
     } on UsernameTakenException {
       rethrow;
     } catch (e) {
-      await prefs.setString(_kUsernamePending, name);
+      await prefs.setString(await _k(_kUsernamePending), name);
       await AppLogService.instance
           .warn('Profile: username registration pending ($name): $e');
       return false;
@@ -280,7 +399,7 @@ class ProfileService {
       await registerUsername(pending);
     } on UsernameTakenException {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_kUsernamePending);
+      await prefs.remove(await _k(_kUsernamePending));
     }
   }
 

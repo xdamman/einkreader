@@ -13,6 +13,7 @@ import '../widgets/article_feed.dart';
 import '../widgets/clipboard_link_prompt.dart';
 import '../widgets/highlight_list.dart';
 import '../widgets/resume_reading.dart';
+import '../widgets/profile_switcher.dart';
 import '../widgets/shared_list.dart';
 import 'add_source_screen.dart';
 import 'profile_screen.dart';
@@ -288,14 +289,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 : const Icon(Icons.sync),
             onPressed: syncing ? null : _sync,
           ),
-          IconButton(
-            tooltip: 'Profile',
-            icon: const Icon(Icons.account_circle_outlined),
-            onPressed: () async {
-              await Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const ProfileScreen()));
-              _load();
-            },
+          // Tap opens the active profile; long-press switches between
+          // profiles or adds one (the last used profile is remembered).
+          Builder(
+            builder: (iconContext) => GestureDetector(
+              onLongPress: () async {
+                await showProfileSwitcherMenu(iconContext);
+                _load();
+              },
+              child: IconButton(
+                tooltip: 'Profile',
+                icon: const Icon(Icons.account_circle_outlined),
+                onPressed: () async {
+                  await Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => const ProfileScreen()));
+                  _load();
+                },
+              ),
+            ),
           ),
           IconButton(
             tooltip: 'Settings',
