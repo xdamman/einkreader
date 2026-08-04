@@ -16,6 +16,7 @@ import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/share_note_dialog.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -60,23 +61,23 @@ void main() {
   group('demo frames', () {
     testWidgets('title cards', (tester) async {
       await _card(tester, '01_card_intro',
-          title: 'einkreader',
-          lines: ['An RSS reader', 'made for your e-ink device']);
+          title: 'einkreader.app',
+          lines: ['The RSS reader', 'made for your e-ink device']);
       await _card(tester, '04_card_offline',
           title: 'Offline first',
           lines: ['Everything downloads on sync.', 'Read anywhere.']);
       await _card(tester, '08_card_highlights',
           title: 'Highlights',
           lines: ['Select any passage.', 'It stays yours, in Markdown.']);
-      await _card(tester, '10_card_annotate',
+      await _card(tester, '11_card_annotate',
           title: 'Annotate & share',
           lines: [
             'Add your thoughts.',
             'Share to your page — or keep it private.'
           ]);
-      await _card(tester, '13_card_outro',
+      await _card(tester, '14_card_outro',
           title: 'einkreader.app',
-          lines: ['Free & open source.', 'Your reading, your files.']);
+          lines: ['The RSS reader', 'made for your e-ink device']);
     });
 
     testWidgets('feed and filter', (tester) async {
@@ -88,37 +89,93 @@ void main() {
     });
 
     testWidgets('reader and scroll', (tester) async {
+      // Distinct keys force a fresh reader State per frame (same widget
+      // type would otherwise keep old scroll/highlights), and the saved
+      // reading position is pinned so each drag is absolute from the top.
+      Future<void> resetScroll() => tester.runAsync(
+          () => AppDatabase.instance.saveScrollPosition(_story.id!, 0));
+      await resetScroll();
       await _shoot(
-          tester, ArticleScreen(articleId: _story.id!), '05_reader');
+          tester,
+          ArticleScreen(key: const ValueKey('r0'), articleId: _story.id!),
+          '05_reader');
+      await resetScroll();
       await _shoot(
-          tester, ArticleScreen(articleId: _story.id!), '06_reader_scroll1',
-          setup: (t) async {
+          tester,
+          ArticleScreen(key: const ValueKey('r1'), articleId: _story.id!),
+          '06_reader_scroll1', setup: (t) async {
         await t.drag(
             find.byType(SingleChildScrollView), const Offset(0, -520));
       });
+      await resetScroll();
       await _shoot(
-          tester, ArticleScreen(articleId: _story.id!), '07_reader_scroll2',
-          setup: (t) async {
+          tester,
+          ArticleScreen(key: const ValueKey('r2'), articleId: _story.id!),
+          '07_reader_scroll2', setup: (t) async {
         await t.drag(
             find.byType(SingleChildScrollView), const Offset(0, -1040));
       });
     });
 
-    testWidgets('highlight painted', (tester) async {
-      // The highlight exists in the db; the reader paints it inline.
-      await tester.runAsync(() => AppDatabase.instance.insertHighlight(
-          Highlight(
+    testWidgets('highlighting grows word by word, then its menu',
+        (tester) async {
+      const sentence =
+          'The internet enables zero marginal cost distribution, '
+          'which pushes value to the ends of the network.';
+      final words = sentence.split(' ');
+      // Five growing selections read as the act of highlighting.
+      final steps = [4, 8, 12, 16, words.length];
+      for (var i = 0; i < steps.length; i++) {
+        final partial = words.take(steps[i]).join(' ');
+        await tester.runAsync(() async {
+          final db = AppDatabase.instance;
+          // The reader restores the saved position — pin it to the top so
+          // the highlighted sentence is in view.
+          await db.saveScrollPosition(_story.id!, 0);
+          for (final h in await db.getHighlights(articleId: _story.id!)) {
+            await db.deleteHighlight(h.id!);
+          }
+          await db.insertHighlight(Highlight(
               articleId: _story.id!,
-              text: 'The internet enables zero marginal cost distribution, '
-                  'which pushes value to the ends of the network.',
-              createdAt: DateTime.now().millisecondsSinceEpoch)));
+              text: partial,
+              createdAt: DateTime.now().millisecondsSinceEpoch));
+        });
+        await _shoot(
+            tester,
+            ArticleScreen(
+                key: ValueKey('hl$i'), articleId: _story.id!),
+            '09_hl_${i + 1}');
+      }
       _highlight = (await tester.runAsync(() =>
           AppDatabase.instance.getHighlights(articleId: _story.id!)))!
           .first;
-      await _shoot(tester, ArticleScreen(articleId: _story.id!),
-          '09_reader_highlight', setup: (t) async {
-        await t.drag(
-            find.byType(SingleChildScrollView), const Offset(0, -520));
+
+      // Tapping the painted highlight opens the anchored menu:
+      // Add note / Share… / Remove highlight.
+      await tester.runAsync(
+          () => AppDatabase.instance.saveScrollPosition(_story.id!, 0));
+      await _shoot(
+          tester,
+          ArticleScreen(
+              key: const ValueKey('menu'), articleId: _story.id!),
+          '10_hl_menu', setup: (t) async {
+        TapGestureRecognizer? tap;
+        void walk(InlineSpan span) {
+          if (span is TextSpan) {
+            if (span.style?.backgroundColor != null &&
+                span.recognizer is TapGestureRecognizer) {
+              tap = span.recognizer as TapGestureRecognizer;
+            }
+            (span.children ?? const <InlineSpan>[]).forEach(walk);
+          }
+        }
+
+        for (final rich in t.widgetList<RichText>(find.byType(RichText))) {
+          walk(rich.text);
+        }
+        tap!.onTapUp!(TapUpDetails(
+            kind: PointerDeviceKind.touch,
+            globalPosition: const Offset(320, 420)));
       });
     });
 
@@ -130,7 +187,7 @@ void main() {
           ShareNoteDialog(
               article: _story, highlight: _highlight, shareByDefault: true),
         ]),
-        '11_share_dialog',
+        '12_share_dialog',
         setup: (t) async {
           await t.enterText(
               find.widgetWithText(TextField, 'Your note (optional)'),
@@ -142,7 +199,7 @@ void main() {
     testWidgets('resume reading back home', (tester) async {
       await tester.runAsync(() =>
           AppDatabase.instance.saveScrollPosition(_story.id!, 900));
-      await _shoot(tester, const HomeScreen(), '12_resume');
+      await _shoot(tester, const HomeScreen(), '13_resume');
     });
   }, skip: _enabled ? false : 'Run with --dart-define=screenshots=true');
 }
