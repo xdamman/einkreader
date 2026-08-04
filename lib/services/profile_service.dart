@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../db/app_database.dart';
 import '../models.dart';
 import 'app_log.dart';
 import 'nostr_service.dart';
@@ -93,6 +94,8 @@ class ProfileService {
       await prefs.setStringList(_kProfileIds, ['default']);
     }
     final id = prefs.getString(_kActiveProfile) ?? 'default';
+    // Storage follows the profile: scoped db queries read this.
+    AppDatabase.instance.activeProfile = id;
     return _cachedActiveId = id;
   }
 
@@ -124,6 +127,7 @@ class ProfileService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kActiveProfile, id);
     _cachedActiveId = id;
+    AppDatabase.instance.activeProfile = id;
     await AppLogService.instance.info('Profile: switched to slot $id');
   }
 
@@ -134,9 +138,18 @@ class ProfileService {
     final ids = prefs.getStringList(_kProfileIds) ?? ['default'];
     final id = 'p${DateTime.now().millisecondsSinceEpoch}';
     await prefs.setStringList(_kProfileIds, [...ids, id]);
+    // Remember where we came from so the create flow can offer to bring
+    // that profile's feeds and highlights along.
+    await prefs.setString('previous_profile_id', await _activeId());
     await switchTo(id);
     return id;
   }
+
+  /// The profile that was active when the current slot was created — the
+  /// source of a "bring my feeds & highlights" import.
+  Future<String?> get previousProfileId async =>
+      (await SharedPreferences.getInstance())
+          .getString('previous_profile_id');
 
   /// Test seam for the metadata fetch after an import.
   @visibleForTesting
@@ -461,6 +474,8 @@ class ProfileService {
         ['title', article.displayTitle],
         if ((highlight.comment ?? '').isNotEmpty)
           ['comment', highlight.comment!],
+        // NIP-89 client tag: the standard way to mark the publishing app.
+        ['client', 'einkreader'],
       ],
     );
     final preview = highlight.text.length > 60

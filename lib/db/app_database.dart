@@ -54,6 +54,15 @@ class AppDatabase {
 
   Database? _db;
 
+  /// The profile whose data all scoped queries return. Set by
+  /// ProfileService whenever the active profile resolves or switches; the
+  /// legacy single profile is 'default'.
+  String activeProfile = 'default';
+
+  /// Subquery fragment limiting article rows to the active profile.
+  String get _profileSources =>
+      'source_id IN (SELECT id FROM sources WHERE profile_id = ?)';
+
   /// Test seam: when set, the database is opened here instead of the default
   /// app location (use `inMemoryDatabasePath` or a temp file with the
   /// sqflite_common_ffi factory).
@@ -66,7 +75,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -189,6 +198,33 @@ class AppDatabase {
       await db.execute(_createContactsSql);
       await db.execute(_createSharesSql);
     }
+    if (oldVersion < 12) {
+      // Profiles namespace their sources (articles/highlights follow via
+      // source_id). The original table's UNIQUE(type, url) must widen to
+      // include profile_id, which SQLite only allows via a rebuild —
+      // guarded and id-preserving (articles reference source ids).
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS sources_v12 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          url TEXT NOT NULL,
+          description TEXT,
+          folder_id INTEGER,
+          profile_id TEXT NOT NULL DEFAULT 'default',
+          created_at INTEGER NOT NULL,
+          UNIQUE(type, url, profile_id)
+        )
+      ''');
+      await db.execute(
+        'INSERT OR IGNORE INTO sources_v12 '
+        '(id, type, title, url, description, folder_id, created_at) '
+        'SELECT id, type, title, url, description, folder_id, created_at '
+        'FROM sources',
+      );
+      await db.execute('DROP TABLE sources');
+      await db.execute('ALTER TABLE sources_v12 RENAME TO sources');
+    }
   }
 
   static const _createContactsSql = '''
@@ -242,8 +278,9 @@ class AppDatabase {
         url TEXT NOT NULL,
         description TEXT,
         folder_id INTEGER,
+        profile_id TEXT NOT NULL DEFAULT 'default',
         created_at INTEGER NOT NULL,
-        UNIQUE(type, url)
+        UNIQUE(type, url, profile_id)
       )
     ''');
     await db.execute(_createFoldersSql);
@@ -295,7 +332,10 @@ class AppDatabase {
 
   Future<List<Source>> getSources() async {
     final db = await database;
-    final rows = await db.query('sources', orderBy: 'created_at ASC');
+    final rows = await db.query('sources',
+        where: 'profile_id = ?',
+        whereArgs: [activeProfile],
+        orderBy: 'created_at ASC');
     await AppLogService.instance.debug(
       'Loaded ${rows.length} source${rows.length == 1 ? '' : 's'}',
     );
@@ -313,8 +353,8 @@ class AppDatabase {
     final db = await database;
     final rows = await db.query(
       'sources',
-      where: 'type = ? AND url = ?',
-      whereArgs: [type.name, url],
+      where: 'type = ? AND url = ? AND profile_id = ?',
+      whereArgs: [type.name, url, activeProfile],
       limit: 1,
     );
     return rows.isEmpty ? null : Source.fromMap(rows.first);
@@ -324,7 +364,9 @@ class AppDatabase {
     final db = await database;
     final id = await db.insert(
       'sources',
-      source.toMap()..remove('id'),
+      source.toMap()
+        ..remove('id')
+        ..['profile_id'] = activeProfile,
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
     if (id == 0) {
@@ -485,8 +527,8 @@ class AppDatabase {
       final existing = await db.query(
         'articles',
         columns: ['id'],
-        where: 'url_key = ?',
-        whereArgs: [urlKey],
+        where: 'url_key = ? AND $_profileSources',
+        whereArgs: [urlKey, activeProfile],
         limit: 1,
       );
       if (existing.isNotEmpty) return false;
@@ -514,10 +556,11 @@ class AppDatabase {
       columns: ['id'],
       where: urlKey == null
           ? 'source_id = ? AND guid = ?'
-          : '(source_id = ? AND guid = ?) OR url_key = ?',
+          : '(source_id = ? AND guid = ?) '
+              'OR (url_key = ? AND $_profileSources)',
       whereArgs: urlKey == null
           ? [sourceId, guid]
-          : [sourceId, guid, urlKey],
+          : [sourceId, guid, urlKey, activeProfile],
       limit: 1,
     );
     return rows.isNotEmpty;
@@ -531,14 +574,15 @@ class AppDatabase {
   }) async {
     final db = await database;
     final where = <String>[
+      _profileSources,
       if (sourceId != null) 'source_id = ?',
       if (readLaterOnly) 'read_later = 1',
       if (favoritesOnly) 'favorite = 1',
     ];
     final rows = await db.query(
       'articles',
-      where: where.isEmpty ? null : where.join(' AND '),
-      whereArgs: sourceId != null ? [sourceId] : null,
+      where: where.join(' AND '),
+      whereArgs: [activeProfile, if (sourceId != null) sourceId],
       orderBy: 'COALESCE(published_at, created_at) DESC',
       limit: limit,
     );
@@ -580,7 +624,8 @@ class AppDatabase {
     final db = await database;
     final rows = await db.query(
       'articles',
-      where: 'fetched = 0',
+      where: 'fetched = 0 AND $_profileSources',
+      whereArgs: [activeProfile],
       orderBy: 'created_at DESC',
       limit: 200,
     );
@@ -661,8 +706,8 @@ class AppDatabase {
              SUM(CASE WHEN fetched = 1 THEN 1 ELSE 0 END) AS downloaded,
              SUM(CASE WHEN read = 1 THEN 1 ELSE 0 END) AS read,
              SUM(LENGTH(COALESCE(content_markdown, ''))) AS bytes
-      FROM articles GROUP BY source_id
-    ''');
+      FROM articles WHERE $_profileSources GROUP BY source_id
+    ''', [activeProfile]);
     for (final row in rows) {
       stats[row['source_id'] as int] = SourceStats(
         downloaded: (row['downloaded'] as int?) ?? 0,
@@ -673,8 +718,10 @@ class AppDatabase {
     final highlightRows = await db.rawQuery('''
       SELECT a.source_id AS source_id, COUNT(*) AS c
       FROM highlights h JOIN articles a ON a.id = h.article_id
+      JOIN sources s ON s.id = a.source_id
+      WHERE s.profile_id = ?
       GROUP BY a.source_id
-    ''');
+    ''', [activeProfile]);
     for (final row in highlightRows) {
       final id = row['source_id'] as int;
       stats[id] = (stats[id] ?? const SourceStats())
@@ -687,7 +734,8 @@ class AppDatabase {
     final db = await database;
     final rows = await db.rawQuery(
       'SELECT source_id, COUNT(*) AS c FROM articles WHERE read = 0 '
-      'GROUP BY source_id',
+      'AND $_profileSources GROUP BY source_id',
+      [activeProfile],
     );
     return {for (final row in rows) row['source_id'] as int: row['c'] as int};
   }
@@ -697,16 +745,22 @@ class AppDatabase {
   /// URL marker for the built-in Saved Links source (not a fetchable feed).
   static const savedLinksUrl = 'local:saved-links';
 
+  /// Local (non-fetchable) source urls carry the profile suffix so every
+  /// profile gets its own built-in Saved Links / Email source.
+  String _localUrl(String base) =>
+      activeProfile == 'default' ? base : '$base#$activeProfile';
+
   /// Returns the built-in source that saved links are filed under, creating
   /// it on first use.
   Future<Source> ensureSavedLinksSource() async {
+    final url = _localUrl(savedLinksUrl);
     final existing =
-        await getSourceByTypeAndUrl(SourceType.savedLinks, savedLinksUrl);
+        await getSourceByTypeAndUrl(SourceType.savedLinks, url);
     if (existing != null) return existing;
     return insertSource(Source(
       type: SourceType.savedLinks,
       title: 'Saved Links',
-      url: savedLinksUrl,
+      url: url,
       createdAt: DateTime.now().millisecondsSinceEpoch,
     ));
   }
@@ -714,7 +768,7 @@ class AppDatabase {
   /// The built-in source holding emails sent to name@einkreader.app,
   /// created on first use.
   Future<Source> ensureEmailSource() async {
-    const url = 'local:email';
+    final url = _localUrl('local:email');
     final existing = await getSourceByTypeAndUrl(SourceType.email, url);
     if (existing != null) return existing;
     return insertSource(Source(
@@ -737,8 +791,8 @@ class AppDatabase {
     final db = await database;
     final rows = await db.query(
       'articles',
-      where: 'url_key = ?',
-      whereArgs: [key],
+      where: 'url_key = ? AND $_profileSources',
+      whereArgs: [key, activeProfile],
       limit: 1,
     );
     return rows.isEmpty ? null : Article.fromMap(rows.first);
@@ -895,6 +949,68 @@ class AppDatabase {
     return changed;
   }
 
+  // ------------------------------------------------------- profile import
+
+  /// Sources of a specific profile (for the import chooser) — unscoped by
+  /// the active profile on purpose.
+  Future<List<Source>> getSourcesOf(String profileId) async {
+    final db = await database;
+    final rows = await db.query('sources',
+        where: 'profile_id = ?',
+        whereArgs: [profileId],
+        orderBy: 'created_at ASC');
+    return rows.map(Source.fromMap).toList();
+  }
+
+  /// Copies feeds — and their articles and highlights, read state included —
+  /// from [fromProfile] into the ACTIVE profile. [onlySourceIds] narrows the
+  /// copy (the "customize" flow); null copies everything. Share history is
+  /// not copied: it belongs to the original profile. Returns the number of
+  /// sources imported.
+  Future<int> importProfileData({
+    required String fromProfile,
+    Set<int>? onlySourceIds,
+  }) async {
+    final db = await database;
+    final sources = await getSourcesOf(fromProfile);
+    var imported = 0;
+    for (final source in sources) {
+      if (onlySourceIds != null && !onlySourceIds.contains(source.id)) {
+        continue;
+      }
+      final newSourceId = await db.insert(
+        'sources',
+        source.toMap()
+          ..remove('id')
+          ..['profile_id'] = activeProfile,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      if (newSourceId == 0) continue; // already imported earlier
+      imported++;
+      final articles = await db.query('articles',
+          where: 'source_id = ?', whereArgs: [source.id]);
+      for (final article in articles) {
+        final newArticleId = await db.insert(
+            'articles',
+            Map<String, Object?>.from(article)
+              ..remove('id')
+              ..['source_id'] = newSourceId);
+        final highlights = await db.query('highlights',
+            where: 'article_id = ?', whereArgs: [article['id']]);
+        for (final highlight in highlights) {
+          await db.insert(
+              'highlights',
+              Map<String, Object?>.from(highlight)
+                ..remove('id')
+                ..['article_id'] = newArticleId);
+        }
+      }
+    }
+    await AppLogService.instance.info(
+        'Profile: imported $imported source(s) from $fromProfile');
+    return imported;
+  }
+
   // --------------------------------------------------------------- contacts
 
   Future<List<Contact>> getContacts() async {
@@ -934,8 +1050,10 @@ class AppDatabase {
       FROM shares s
       JOIN highlights h ON h.id = s.highlight_id
       JOIN articles a ON a.id = h.article_id
+      JOIN sources src ON src.id = a.source_id
+      WHERE src.profile_id = ?
       ORDER BY s.created_at DESC
-    ''');
+    ''', [activeProfile]);
     return rows.map(Share.fromMap).toList();
   }
 
@@ -997,9 +1115,10 @@ class AppDatabase {
     final rows = await db.rawQuery('''
       SELECT h.*, a.title AS article_title
       FROM highlights h JOIN articles a ON a.id = h.article_id
-      ${articleId != null ? 'WHERE h.article_id = ?' : ''}
+      JOIN sources src ON src.id = a.source_id
+      WHERE ${articleId != null ? 'h.article_id = ?' : 'src.profile_id = ?'}
       ORDER BY h.created_at DESC
-    ''', articleId != null ? [articleId] : null);
+    ''', [articleId ?? activeProfile]);
     return rows.map(Highlight.fromMap).toList();
   }
 
@@ -1078,8 +1197,9 @@ class AppDatabase {
     final highlightRows = await db.rawQuery('''
       SELECT h.*, a.title AS article_title
       FROM highlights h JOIN articles a ON a.id = h.article_id
-      WHERE $hWhere
-    ''', hArgs);
+      JOIN sources src ON src.id = a.source_id
+      WHERE src.profile_id = ? AND ($hWhere)
+    ''', [activeProfile, ...hArgs]);
     final highlights = highlightRows.map(Highlight.fromMap).toList();
 
     // Articles: title, author, summary and full content.
@@ -1088,14 +1208,16 @@ class AppDatabase {
         "COALESCE(content_markdown, '')"],
       terms,
     );
-    final articleRows =
-        await db.query('articles', where: aWhere, whereArgs: aArgs);
+    final articleRows = await db.query('articles',
+        where: '$_profileSources AND ($aWhere)',
+        whereArgs: [activeProfile, ...aArgs]);
     final articles = articleRows.map(Article.fromMap).toList();
 
     // Sources: title or url (a twitter username lives in the url).
     final (sWhere, sArgs) = _matchClause(['title', 'url'], terms);
-    final sourceRows =
-        await db.query('sources', where: sWhere, whereArgs: sArgs);
+    final sourceRows = await db.query('sources',
+        where: 'profile_id = ? AND ($sWhere)',
+        whereArgs: [activeProfile, ...sArgs]);
     final sources = sourceRows.map(Source.fromMap).toList();
 
     // Highlights: text match before comment-only match, then newest first.

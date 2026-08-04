@@ -145,6 +145,22 @@ void main() {
       await app.insertShare(Share(
           highlightId: highlightId, medium: 'profile', createdAt: 2));
       expect((await app.getShares()).single.medium, 'profile');
+      // v12: sources were rebuilt with profile_id — legacy rows landed in
+      // the 'default' profile with their ids (and articles) intact, and
+      // another profile can now hold the same feed url.
+      expect(app.activeProfile, 'default');
+      final legacySources = await app.getSources();
+      expect(legacySources, isNotEmpty);
+      app.activeProfile = 'other';
+      expect(await app.getSources(), isEmpty);
+      final copy = await app.insertSource(Source(
+          type: legacySources.first.type,
+          title: 'copy',
+          url: legacySources.first.url,
+          createdAt: 99));
+      expect(copy.id, isNot(legacySources.first.id),
+          reason: 'same url allowed in a different profile');
+      app.activeProfile = 'default';
       await app.debugReset();
     });
   }

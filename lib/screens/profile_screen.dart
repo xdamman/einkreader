@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../db/app_database.dart';
+import '../models.dart';
 import '../services/profile_service.dart';
 
 /// The profile, full screen (never a modal: one clean e-ink repaint, back =
@@ -39,6 +41,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _dirty = false;
   String? _usernameError;
 
+  /// Import-on-create: offered when the previous profile has sources.
+  String? _importFrom;
+  List<Source> _importableSources = [];
+  bool _importChecked = true;
+
+  /// null = all sources; otherwise the customized subset.
+  Set<int>? _importSourceIds;
+
   @override
   void initState() {
     super.initState();
@@ -62,6 +72,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _load() async {
     final enabled = await _profileService.enabled;
+    if (!enabled) {
+      // A fresh slot can bring the previous profile's data along.
+      final from = await _profileService.previousProfileId;
+      final activeId = AppDatabase.instance.activeProfile;
+      if (from != null && from != activeId) {
+        _importFrom = from;
+        _importableSources =
+            await AppDatabase.instance.getSourcesOf(from);
+      }
+    }
     if (enabled) {
       final profile = await _profileService.profile();
       _name.text = profile.name;
@@ -99,12 +119,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     await _profileService.saveProfile(Profile(name: _name.text.trim()));
+    if (_importChecked && _importFrom != null &&
+        _importableSources.isNotEmpty) {
+      final imported = await AppDatabase.instance.importProfileData(
+          fromProfile: _importFrom!, onlySourceIds: _importSourceIds);
+      if (mounted && imported > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Imported $imported feed'
+                '${imported == 1 ? '' : 's'} with their highlights')));
+      }
+    }
     if (!mounted) return;
     setState(() {
       _creating = false;
       _editing = true;
     });
     await _load();
+  }
+
+  /// Per-source selection for the import: unchecked sources bring neither
+  /// their feed nor their highlights.
+  Future<void> _customizeImport() async {
+    final selected = Set<int>.from(
+        _importSourceIds ?? _importableSources.map((s) => s.id!));
+    final result = await showDialog<Set<int>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape:
+              const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+          title: const Text('Import from'),
+          content: SizedBox(
+            width: 380,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final source in _importableSources)
+                  CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: selected.contains(source.id),
+                    title: Text(source.title),
+                    onChanged: (checked) => setDialogState(() {
+                      if (checked == true) {
+                        selected.add(source.id!);
+                      } else {
+                        selected.remove(source.id);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext, selected),
+                child: const Text('Done')),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    setState(() => _importSourceIds =
+        result.length == _importableSources.length ? null : result);
   }
 
   /// Test hook for the auto-save path (pop callbacks don't run in tests).
@@ -285,6 +366,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 onSubmitted: (_) => _create(),
               ),
+              if (_importFrom != null &&
+                  _importableSources.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                InkWell(
+                  onTap: () =>
+                      setState(() => _importChecked = !_importChecked),
+                  child: Row(
+                    children: [
+                      Icon(
+                          _importChecked
+                              ? Icons.check_box_outlined
+                              : Icons.check_box_outline_blank,
+                          size: 22),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            'Bring my feeds & highlights '
+                            '(${_importSourceIds?.length ?? _importableSources.length} '
+                            'of ${_importableSources.length} sources)',
+                            style: const TextStyle(fontSize: 14)),
+                      ),
+                      if (_importChecked)
+                        TextButton(
+                          onPressed: _customizeImport,
+                          child: const Text('Customize…',
+                              style: TextStyle(fontSize: 13)),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 28),
               OutlinedButton(
                 onPressed: _creating ? null : _create,
