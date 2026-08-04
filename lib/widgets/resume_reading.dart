@@ -29,10 +29,12 @@ class ResumeReadingSection extends StatelessWidget {
   });
 
   /// The current reads out of [articles], in Resume reading order.
+  // A scroll position > 0 already means reading started, so read-later
+  // articles (saved links live in that state) belong here too — excluding
+  // them hid a half-read saved link from Resume reading.
   static List<Article> currentReads(List<Article> articles) =>
       articles
-          .where((a) =>
-              a.read == 0 && a.readLater == 0 && a.scrollPosition > 0)
+          .where((a) => a.read == 0 && a.scrollPosition > 0)
           .toList()
         ..sort((a, b) => (b.scrolledAt ?? 0).compareTo(a.scrolledAt ?? 0));
 
@@ -170,7 +172,11 @@ class _ResumeTile extends StatelessWidget {
           iconSize: 26,
           icon: const Icon(Icons.bookmark_add_outlined),
           onPressed: () async {
+            // Parking an article is a dismiss-from-here: it moves to To
+            // Read and its progress resets, so it leaves this section
+            // (being read-later alone no longer excludes it).
             await AppDatabase.instance.setReadLater(article.id!, true);
+            await AppDatabase.instance.saveScrollPosition(article.id!, 0);
             onChanged();
           },
         ),

@@ -48,7 +48,6 @@ class _ShareScreenState extends State<ShareScreen> {
 
   bool _toProfile = false;
   bool _toTwitter = false;
-  bool _toComposeEmail = false;
   final Set<int> _toContacts = {};
   bool _sharing = false;
 
@@ -122,6 +121,19 @@ class _ShareScreenState extends State<ShareScreen> {
     return result.eventId;
   }
 
+  /// Opens the mail app pre-filled — an immediate action, not a channel:
+  /// it hands off to another app rather than sending through einkreader.
+  Future<void> _composeEmail() async {
+    final highlight = await _withComment();
+    if (!mounted) return;
+    await ShareActions.byEmail(
+      context,
+      subject: ShareActions.highlightsSubject(widget.article, 1),
+      body: ShareActions.highlightsBody(widget.article, [highlight]),
+    );
+    await _record('email');
+  }
+
   /// Copy link is immediate — publishes to the profile if needed so the
   /// link resolves, then copies. Without a profile the article URL is
   /// copied instead (quote links require a profile).
@@ -184,29 +196,29 @@ class _ShareScreenState extends State<ShareScreen> {
 
     for (final contact
         in _contacts.where((c) => _toContacts.contains(c.id))) {
+      final subject = ShareActions.highlightsSubject(article, 1);
       final body = ShareActions.highlightsBody(article, [highlight]);
       try {
         await ProfileService.instance.sendShareEmail(
           to: contact.address,
-          subject: ShareActions.highlightsSubject(article, 1),
+          subject: subject,
           text: body,
         );
         await _record('email', recipient: contact.name);
         done.add(contact.name);
       } catch (e) {
-        failed.add('${contact.name}: $e');
+        // Offline never blocks a share: it waits in the outbox and goes
+        // out at the next sync.
+        await OutboxService.instance.enqueueEmailShare(
+          to: contact.address,
+          subject: subject,
+          text: body,
+          description: 'Email to ${contact.name}: $subject',
+          error: '$e',
+        );
+        await _record('email', recipient: contact.name);
+        done.add('${contact.name} (queued)');
       }
-    }
-
-    // The mail app opens last so it doesn't interrupt the other sends.
-    if (_toComposeEmail && mounted) {
-      await ShareActions.byEmail(
-        context,
-        subject: ShareActions.highlightsSubject(article, 1),
-        body: ShareActions.highlightsBody(article, [highlight]),
-      );
-      await _record('email');
-      done.add('email');
     }
 
     if (!mounted) return;
@@ -223,6 +235,29 @@ class _ShareScreenState extends State<ShareScreen> {
     await Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const PluginPitchScreen()));
     _load();
+  }
+
+  Widget _actionRow({
+    required IconData icon,
+    required String label,
+    required IconData trailing,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text(label, style: const TextStyle(fontSize: 15))),
+            Icon(trailing, size: 16, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _checkRow({
@@ -351,32 +386,6 @@ class _ShareScreenState extends State<ShareScreen> {
                     ),
                   ),
                 _checkRow(
-                  value: _toComposeEmail,
-                  onChanged: (v) => setState(() => _toComposeEmail = v),
-                  label: 'Compose an email…',
-                  trailing: 'your mail app',
-                ),
-                InkWell(
-                  onTap: _copyLink,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.link, size: 22),
-                        const SizedBox(width: 10),
-                        Expanded(
-                            child: Text(
-                                _hasProfile
-                                    ? 'Copy link to this quote'
-                                    : 'Copy article link',
-                                style: const TextStyle(fontSize: 15))),
-                        const Icon(Icons.copy, size: 16, color: Colors.grey),
-                      ],
-                    ),
-                  ),
-                ),
-                const Divider(height: 28),
-                _checkRow(
                   value: _toTwitter,
                   onChanged: (v) => setState(() => _toTwitter = v),
                   label: 'Tweet it',
@@ -427,6 +436,23 @@ class _ShareScreenState extends State<ShareScreen> {
                   child: Text(_sharing ? 'Sharing…' : 'Share',
                       style: const TextStyle(
                           fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+                // Not channels — immediate hand-offs, so they live below
+                // the Share button as plain actions.
+                const Divider(height: 32),
+                _actionRow(
+                  icon: Icons.link,
+                  label: _hasProfile
+                      ? 'Copy link to this quote'
+                      : 'Copy article link',
+                  trailing: Icons.copy,
+                  onTap: _copyLink,
+                ),
+                _actionRow(
+                  icon: Icons.email_outlined,
+                  label: 'Compose an email…',
+                  trailing: Icons.open_in_new,
+                  onTap: _composeEmail,
                 ),
               ],
             ),

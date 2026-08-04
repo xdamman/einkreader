@@ -11,6 +11,7 @@ import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/share_screen.dart';
 import 'package:einkreader/services/archive_store.dart';
+import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/plugin_service.dart';
 import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/services/sync_service.dart';
@@ -169,7 +170,95 @@ void main() {
         'https://einkreader.app/xavier/q/${'a' * 12}');
   });
 
+  testWidgets('immediate actions live below the Share button', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: ShareScreen(article: article, highlight: highlight),
+    ));
+    await settle(tester);
+    await settle(tester);
+    final shareY = tester.getTopLeft(find.text('Share')).dy;
+    expect(tester.getTopLeft(find.text('Copy link to this quote')).dy,
+        greaterThan(shareY),
+        reason: 'copy link is a hand-off, not a channel');
+    expect(tester.getTopLeft(find.text('Compose an email…')).dy,
+        greaterThan(shareY));
+    // And neither carries a checkbox.
+    expect(
+        find.ancestor(
+            of: find.text('Compose an email…'),
+            matching: find.byIcon(Icons.check_box_outline_blank)),
+        findsNothing);
+  });
+
+  testWidgets('offline one-tap email share queues in the outbox',
+      (tester) async {
+    await PluginService.instance.activateEarlyAccess();
+    await PluginService.instance.setEmailOn(true);
+    await tester.runAsync(() => db.insertContact(const Contact(
+        name: 'Marc', address: 'marc@example.com', createdAt: 1)));
+    // The send endpoint is unreachable (offline).
+    ProfileService.instance.debugHttpClient =
+        MockClient((request) async => throw Exception('offline'));
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: ShareScreen(article: article, highlight: highlight),
+    ));
+    await settle(tester);
+    await settle(tester);
+    await tester.tap(find.text('Marc — one tap'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('Share'));
+    await tester.tap(find.text('Share'), warnIfMissed: false);
+    await settle(tester);
+    await settle(tester);
+
+    final queued = await tester.runAsync(() => db.outboxItems());
+    final emailItem = queued!.singleWhere((i) => i.kind == 'email');
+    expect(emailItem.text, contains('Marc'));
+    // The share is recorded — offline never blocks sharing.
+    final shares = await tester.runAsync(() => db.getShares());
+    expect(shares!.where((s) => s.recipient == 'Marc'), isNotEmpty);
+
+    // Back online: the outbox flush delivers it.
+    var sentTo = '';
+    OutboxService.instance.debugEmailSend =
+        ({required to, required subject, required text}) async {
+      sentTo = to;
+    };
+    await tester.runAsync(() => OutboxService.instance.flush());
+    expect(sentTo, 'marc@example.com');
+    expect(
+        (await tester.runAsync(() => db.outboxItems()))!
+            .where((i) => i.kind == 'email'),
+        isEmpty);
+    OutboxService.instance.debugEmailSend = null;
+    ProfileService.instance.debugHttpClient = null;
+  });
+
+  test('offline profile update waits in the outbox', () async {
+    ProfileService.instance.debugPublish =
+        (event) async => throw Exception('offline');
+    await ProfileService.instance
+        .saveProfile(const Profile(name: 'Xavier', about: 'offline edit'));
+    final queued = await db.outboxItems();
+    expect(
+        queued.where(
+            (i) => i.kind == 'nostr' && i.text.contains('Profile update')),
+        isNotEmpty,
+        reason: 'editing the profile offline queues the kind-0 event');
+    ProfileService.instance.debugPublish = (event) async => 1;
+  });
+
   test('supporter early access unlocks plugin gates', () async {
+    // Earlier tests activate early access; start this one from scratch.
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in [
+      'supporter_early_access', 'plugin_twitter_on', 'plugin_email_on',
+    ]) {
+      await prefs.remove(key);
+    }
     expect(await PluginService.instance.isSupporter, isFalse);
     await PluginService.instance.activateEarlyAccess();
     await PluginService.instance.setEmailOn(true);

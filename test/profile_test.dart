@@ -163,6 +163,35 @@ void main() {
     expect((await ProfileService.instance.profile()).about, 'Reads on e-ink');
   });
 
+  testWidgets('existing profile opens read-only; editing is behind Edit',
+      (tester) async {
+    ProfileService.instance.debugPublish = (event) async => 1;
+    await ProfileService.instance.createIdentity();
+    await ProfileService.instance.saveProfile(const Profile(
+        name: 'Xavier', about: 'Reads on e-ink'));
+
+    await tester.pumpWidget(const MaterialApp(home: ProfileScreen()));
+    await tester.pumpAndSettle();
+
+    // View mode: content rendered, nothing editable.
+    expect(find.text('Xavier'), findsOneWidget);
+    expect(find.text('Reads on e-ink'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Edit profile'), findsOneWidget);
+
+    // Edit → fields appear; Done → back to the view with changes shown.
+    await tester.tap(find.text('Edit profile'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Short bio'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Short bio'), 'New bio line');
+    await tester.tap(find.byTooltip('Done'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('New bio line'), findsOneWidget);
+    expect((await ProfileService.instance.profile()).about, 'New bio line');
+  });
+
   test('suggestUsername: valid, padded, capped', () {
     expect(ProfileService.suggestUsername('Xavier Damman'), 'xavierdamman');
     expect(ProfileService.suggestUsername('Bob'), 'bobreader');

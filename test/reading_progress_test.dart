@@ -48,6 +48,8 @@ void main() {
       ('Resume 1', long),
       ('Resume 2', long),
       ('Resume 3', long),
+      ('Saved Link', long),
+      ('Pending Link', null),
     ]) {
       await db.insertArticleIfNew(Article(
         sourceId: source.id!,
@@ -56,7 +58,8 @@ void main() {
         contentMarkdown: spec.$2,
         publishedAt: 100,
         createdAt: 100,
-        fetched: 1,
+        fetched: spec.$2 == null ? 0 : 1,
+        readLater: spec.$1.endsWith('Link') ? 1 : 0,
       ));
     }
     for (final a in await db.getArticles()) {
@@ -134,6 +137,31 @@ void main() {
       (tester) async {
     await openArticle(tester, 'Short');
     expect((await article(tester, 'Short')).read, 1);
+  });
+
+  testWidgets('a half-read saved link shows up under Resume reading',
+      (tester) async {
+    // Saved links carry readLater = 1; starting to read one must land it in
+    // the resume section like any other article (regression: the filter
+    // used to exclude read-later articles entirely).
+    await openArticle(tester, 'Saved Link');
+    await tester.drag(
+        find.byType(SingleChildScrollView), const Offset(0, -600));
+    await settle(tester);
+    final a = await article(tester, 'Saved Link');
+    expect(a.read, 0);
+    expect(a.scrollPosition, greaterThan(100));
+    expect(ResumeReadingSection.currentReads([a]), [a]);
+    // Reset so the resume-section test below keeps its expected rows.
+    await tester.runAsync(() => db.saveScrollPosition(a.id!, 0));
+  });
+
+  testWidgets('a not-yet-downloaded article is never auto-marked read',
+      (tester) async {
+    // Its placeholder fits on one screen, but that is not final content —
+    // marking it read would silence reading progress forever.
+    await openArticle(tester, 'Pending Link');
+    expect((await article(tester, 'Pending Link')).read, 0);
   });
 
   testWidgets('resume section: swipe right reads, swipe left unreads, '

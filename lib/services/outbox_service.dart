@@ -6,6 +6,7 @@ import '../db/app_database.dart';
 import '../models.dart';
 import 'app_log.dart';
 import 'nostr_service.dart';
+import 'profile_service.dart';
 import 'sync_service.dart';
 import 'twitter_service.dart';
 
@@ -25,12 +26,24 @@ class OutboxService {
   TwitterService? debugTwitter;
   @visibleForTesting
   Future<int> Function(Map<String, dynamic> event)? debugNostrPublish;
+  @visibleForTesting
+  Future<void> Function(
+      {required String to,
+      required String subject,
+      required String text})? debugEmailSend;
 
   TwitterService get _twitter =>
       debugTwitter ?? SyncService.instance.twitter;
 
   Future<int> _publishNostr(Map<String, dynamic> event) =>
       (debugNostrPublish ?? NostrService().publish)(event);
+
+  Future<void> _sendEmail(
+          {required String to,
+          required String subject,
+          required String text}) =>
+      (debugEmailSend ?? ProfileService.instance.sendShareEmail)(
+          to: to, subject: subject, text: text);
 
   /// Number of queued items, for the home screen's outbox badge.
   final ValueNotifier<int> pending = ValueNotifier(0);
@@ -77,6 +90,28 @@ class OutboxService {
     await refreshCount();
   }
 
+  /// Queues a one-tap email share (Email plugin) that couldn't be sent —
+  /// being offline never blocks sharing; it just waits here.
+  Future<void> enqueueEmailShare({
+    required String to,
+    required String subject,
+    required String text,
+    required String description,
+    required String error,
+  }) async {
+    await _db.insertOutboxItem(OutboxItem(
+      kind: 'email',
+      text: description,
+      payload: jsonEncode({'to': to, 'subject': subject, 'text': text}),
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      attempts: 1,
+      lastError: error,
+    ));
+    await AppLogService.instance
+        .info('Email: share saved to outbox after failure: $error');
+    await refreshCount();
+  }
+
   Future<void> delete(int id) async {
     await _db.deleteOutboxItem(id);
     await refreshCount();
@@ -95,6 +130,13 @@ class OutboxService {
           if (accepted == 0) {
             throw Exception('no relay accepted the event');
           }
+        } else if (item.kind == 'email') {
+          final mail = jsonDecode(item.payload!) as Map<String, dynamic>;
+          await _sendEmail(
+            to: mail['to'] as String,
+            subject: mail['subject'] as String,
+            text: mail['text'] as String,
+          );
         } else {
           await _twitter.postTweet(item.text,
               quoteTweetId: item.quoteTweetId);

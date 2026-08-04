@@ -31,6 +31,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _addressPending = false;
   bool _uploading = false;
   bool _creating = false;
+
+  /// The screen opens read-only; editing is behind the Edit button. A
+  /// freshly created profile starts in edit mode (everything is empty).
+  bool _editing = false;
   bool _usernameEdited = false;
   bool _dirty = false;
   String? _usernameError;
@@ -96,7 +100,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     await _profileService.saveProfile(Profile(name: _name.text.trim()));
     if (!mounted) return;
-    setState(() => _creating = false);
+    setState(() {
+      _creating = false;
+      _editing = true;
+    });
     await _load();
   }
 
@@ -105,16 +112,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> debugPersistForTest() => _persist();
 
   /// Auto-save: fields persist (and publish, debounced by the pop) without a
-  /// Save button.
-  Future<void> _persist() async {
-    if (_enabled != true || !_dirty) return;
+  /// Save button. Offline the kind-0 update waits in the outbox — editing
+  /// never needs a connection.
+  Future<int?> _persist() async {
+    if (_enabled != true || !_dirty) return null;
     _dirty = false;
-    await _profileService.saveProfile(Profile(
+    return _profileService.saveProfile(Profile(
       name: _name.text.trim(),
       about: _about.text.trim(),
       picture: _picture,
       links: _links.text.trim(),
     ));
+  }
+
+  /// Done editing: save, report where the update went, back to the view.
+  Future<void> _finishEditing() async {
+    final accepted = await _persist();
+    if (!mounted) return;
+    setState(() => _editing = false);
+    if (accepted != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(accepted > 0
+              ? 'Profile published'
+              : 'Profile saved — publishing when back online')));
+    }
   }
 
   Future<void> _pickAvatar() async {
@@ -160,15 +181,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: true,
+      // Back from edit mode returns to the view (saving); back from the
+      // view leaves the screen.
+      canPop: !_editing,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) _persist();
+        if (didPop) {
+          _persist();
+        } else if (_editing) {
+          _finishEditing();
+        }
       },
       child: Scaffold(
         appBar: AppBar(
           title:
               Text(_enabled == true ? 'Your profile' : 'Create a profile'),
           actions: [
+            if (_enabled == true && !_editing)
+              IconButton(
+                tooltip: 'Edit profile',
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: () => setState(() => _editing = true),
+              ),
+            if (_enabled == true && _editing)
+              IconButton(
+                tooltip: 'Done',
+                icon: const Icon(Icons.check),
+                onPressed: _finishEditing,
+              ),
             if (_enabled == true && _address != null)
               IconButton(
                 tooltip: 'Open your public page',
@@ -183,7 +222,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         body: switch (_enabled) {
           null => const SizedBox.shrink(),
           false => _optIn(),
-          true => _editor(),
+          true => _editing ? _editor() : _viewer(),
         },
       ),
     );
@@ -262,6 +301,122 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 'Not now? Just go back — nothing is created.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Read-only profile view — the screen's default face. Everything renders
+  /// from local preferences, so it works fully offline (a missing avatar
+  /// image quietly falls back to the initial).
+  Widget _viewer() {
+    final name = _name.text.trim();
+    final about = _about.text.trim();
+    final links = _links.text
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    final initial = name.isEmpty ? '?' : name[0].toUpperCase();
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: CircleAvatar(
+                  radius: 44,
+                  backgroundColor: Colors.black,
+                  foregroundImage:
+                      _picture.isEmpty ? null : NetworkImage(_picture),
+                  onForegroundImageError:
+                      _picture.isEmpty ? null : (_, __) {},
+                  child: Text(initial,
+                      style: const TextStyle(
+                          fontSize: 34, color: Colors.white)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Center(
+                child: Text(name.isEmpty ? 'Unnamed reader' : name,
+                    style: const TextStyle(
+                        fontSize: 24, fontWeight: FontWeight.w700)),
+              ),
+              if (_address != null) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    border: Border.all(width: 1.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(_address!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              fontFamily: 'monospace')),
+                      const SizedBox(height: 4),
+                      Text(
+                        _addressPending
+                            ? 'Registering when back online — this will be '
+                                'your address to be tagged and followed'
+                            : 'Share this address so people can tag you and '
+                                'subscribe to your highlights',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              if (about.isNotEmpty)
+                Text(about,
+                    style: const TextStyle(fontSize: 15, height: 1.45))
+              else
+                const Text('No bio yet — tap Edit to add one.',
+                    style: TextStyle(
+                        fontSize: 13.5, fontStyle: FontStyle.italic)),
+              if (links.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                for (final link in links)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: InkWell(
+                      onTap: () => launchUrl(Uri.parse(link),
+                          mode: LaunchMode.externalApplication),
+                      child: Text(link,
+                          style: const TextStyle(
+                              fontSize: 13.5,
+                              decoration: TextDecoration.underline)),
+                    ),
+                  ),
+              ],
+              const SizedBox(height: 22),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit profile'),
+                onPressed: () => setState(() => _editing = true),
+              ),
+              const SizedBox(height: 18),
+              const Divider(),
+              const SizedBox(height: 8),
+              const Text(
+                'While reading, tap any highlight and choose "Share…" — it '
+                'appears on your public page and in the Shared tab.',
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontStyle: FontStyle.italic,
+                    height: 1.4),
               ),
             ],
           ),

@@ -141,8 +141,13 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (!mounted || !_scroll.hasClients || _currentId != article.id) return;
     final maxExtent = _scroll.position.maxScrollExtent;
     if (maxExtent <= 0) {
-      _reachedBottom = true;
-      if (article.read == 0) _markRead();
+      // Only FINAL content that fits on screen counts as read: a pending
+      // saved link renders a short placeholder, and marking that read
+      // would silence reading progress forever.
+      if (article.fetched == 1) {
+        _reachedBottom = true;
+        if (article.read == 0) _markRead();
+      }
       return;
     }
     if (article.read == 0 && article.scrollPosition > 0) {
