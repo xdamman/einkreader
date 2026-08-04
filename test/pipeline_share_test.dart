@@ -9,7 +9,7 @@ import 'dart:io';
 
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
-import 'package:einkreader/screens/share_screen.dart';
+import 'package:einkreader/widgets/share_note_dialog.dart';
 import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/plugin_service.dart';
@@ -106,7 +106,11 @@ void main() {
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
-      home: ShareScreen(article: article, highlight: highlight),
+      home: Scaffold(
+          body: ShareNoteDialog(
+              article: article,
+              highlight: highlight,
+              shareByDefault: true)),
     ));
     await settle(tester);
     await settle(tester);
@@ -128,15 +132,18 @@ void main() {
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
-      home: ShareScreen(article: article, highlight: highlight),
+      home: Scaffold(
+          body: ShareNoteDialog(
+              article: article,
+              highlight: highlight,
+              shareByDefault: true)),
     ));
     await settle(tester);
     await settle(tester);
 
-    // Add a comment, keep the default profile check, share.
+    // Add a note, keep the default profile check, share.
     await tester.enterText(
-        find.widgetWithText(TextField, 'Add a comment (optional)'),
-        'my take');
+        find.widgetWithText(TextField, 'Your note (optional)'), 'my take');
     await tester.ensureVisible(find.text('Share'));
     await tester.tap(find.text('Share'), warnIfMissed: false);
     await settle(tester);
@@ -173,7 +180,11 @@ void main() {
   testWidgets('immediate actions live below the Share button', (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
-      home: ShareScreen(article: article, highlight: highlight),
+      home: Scaffold(
+          body: ShareNoteDialog(
+              article: article,
+              highlight: highlight,
+              shareByDefault: true)),
     ));
     await settle(tester);
     await settle(tester);
@@ -195,6 +206,8 @@ void main() {
       (tester) async {
     await PluginService.instance.activateEarlyAccess();
     await PluginService.instance.setEmailOn(true);
+    // Per-contact sharing is parked behind a feature flag for now.
+    await PluginService.instance.setContactsEnabled(true);
     await tester.runAsync(() => db.insertContact(const Contact(
         name: 'Marc', address: 'marc@example.com', createdAt: 1)));
     // The send endpoint is unreachable (offline).
@@ -203,7 +216,11 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
-      home: ShareScreen(article: article, highlight: highlight),
+      home: Scaffold(
+          body: ShareNoteDialog(
+              article: article,
+              highlight: highlight,
+              shareByDefault: false)),
     ));
     await settle(tester);
     await settle(tester);

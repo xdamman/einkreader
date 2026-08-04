@@ -96,9 +96,10 @@ void main() {
 
     await tester.tap(find.byTooltip('Share highlight').first);
     await settle(tester);
-    await settle(tester); // the composer's own async load
-    // The full composer opens as a screen, free rows first.
-    expect(find.text('Share highlight'), findsOneWidget);
+    await settle(tester); // the dialog's own async load
+    await settle(tester);
+    // The merged note/share overlay opens with the quote and note field.
+    expect(find.text('Your note (optional)'), findsOneWidget);
     expect(find.text('Compose an email…'), findsOneWidget);
     expect(find.text('Tweet it'), findsOneWidget); // visible but locked
   });
@@ -141,6 +142,7 @@ void main() {
     // Attach a note, reopen: the entry now reads "Edit note".
     await tester.tap(find.text('Add note'));
     await settle(tester);
+    await settle(tester); // the dialog's own async load
     await tester.enterText(find.byType(TextField), 'a thought');
     await tester.tap(find.text('Save'));
     await settle(tester);

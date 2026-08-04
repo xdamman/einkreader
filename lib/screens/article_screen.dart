@@ -11,7 +11,7 @@ import '../services/share_actions.dart';
 import '../services/sync_service.dart';
 import '../theme.dart';
 import '../widgets/markdown_view.dart';
-import 'share_screen.dart';
+import '../widgets/share_note_dialog.dart';
 
 /// Reader screen. Select any text and choose "Highlight" from the selection
 /// menu to save it; saved highlights are painted inline with a grey wash and
@@ -526,12 +526,13 @@ class _ArticleScreenState extends State<ArticleScreen> {
     );
     if (!mounted || action == null) return;
     final article = _article;
-    if (action == 'note') {
-      await _editNote(highlight);
-    } else if (action == 'share' && article != null) {
-      // The full composer: comment + every destination in one place.
-      await ShareScreen.open(context,
-          article: article, highlight: highlight);
+    if ((action == 'note' || action == 'share') && article != null) {
+      // One merged overlay for both: a note stays private unless a channel
+      // is checked — "Share…" just pre-checks the profile.
+      await ShareNoteDialog.open(context,
+          article: article,
+          highlight: highlight,
+          shareByDefault: action == 'share');
       final highlights = await _db.getHighlights(articleId: _currentId);
       if (!mounted) return;
       setState(() => _highlights = highlights);
@@ -544,41 +545,6 @@ class _ArticleScreenState extends State<ArticleScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Highlight removed')));
     }
-  }
-
-  /// Small dialog to attach (or edit) a private note on a highlight.
-  Future<void> _editNote(Highlight highlight) async {
-    final controller = TextEditingController(text: highlight.comment ?? '');
-    final note = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-        title: const Text('Note'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 4,
-          minLines: 2,
-          decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: 'Your private note on this passage'),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, controller.text.trim()),
-              child: const Text('Save')),
-        ],
-      ),
-    );
-    if (note == null || !mounted) return;
-    await _db.updateHighlightComment(highlight.id!, note);
-    final highlights = await _db.getHighlights(articleId: _currentId);
-    if (!mounted) return;
-    setState(() => _highlights = highlights);
   }
 
   /// Origin shown before the title in the top bar: the feed's name, or — for

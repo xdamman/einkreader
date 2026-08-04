@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../screens/article_screen.dart';
-import '../screens/share_screen.dart';
+import 'share_note_dialog.dart';
 import '../services/archive_store.dart';
 
 /// All saved highlights, newest first. Tapping one opens its article, the
@@ -110,7 +110,8 @@ class HighlightList extends StatelessWidget {
     final article =
         await AppDatabase.instance.getArticle(highlight.articleId);
     if (article == null || !context.mounted) return;
-    await ShareScreen.open(context, article: article, highlight: highlight);
+    await ShareNoteDialog.open(context,
+        article: article, highlight: highlight, shareByDefault: true);
     onChanged();
   }
 

@@ -3,38 +3,53 @@ import 'package:flutter/services.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
+import '../screens/contacts_screen.dart';
+import '../screens/plugin_pitch_screen.dart';
+import '../screens/profile_screen.dart';
 import '../services/outbox_service.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import '../services/share_actions.dart';
 import '../services/sync_service.dart';
 import '../services/twitter_service.dart';
-import 'contacts_screen.dart';
-import 'plugin_pitch_screen.dart';
-import 'profile_screen.dart';
 
-/// The share composer: one full-screen push with the quote, an optional
-/// comment and every destination in one place. Free rows always work
-/// (profile, compose-email, copy link); plugin rows are visible but locked
-/// until the supporter subscription, tapping through to the pitch.
-class ShareScreen extends StatefulWidget {
+/// Note-taking and sharing merged into one overlay: the quote, a roomy note
+/// field, the share channels, and the immediate hand-offs — the only
+/// difference between "Add note" and "Share…" is what's checked by default
+/// (a note stays private unless a channel is picked). An overlay rather
+/// than a full screen on purpose: the article stays visible behind it.
+class ShareNoteDialog extends StatefulWidget {
   final Article article;
   final Highlight highlight;
 
-  const ShareScreen(
-      {super.key, required this.article, required this.highlight});
+  /// True when entered via "Share…": the profile channel starts checked.
+  /// Via "Add note" nothing is checked — saving keeps the note private.
+  final bool shareByDefault;
+
+  const ShareNoteDialog({
+    super.key,
+    required this.article,
+    required this.highlight,
+    required this.shareByDefault,
+  });
 
   static Future<void> open(BuildContext context,
-      {required Article article, required Highlight highlight}) =>
-      Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) =>
-              ShareScreen(article: article, highlight: highlight)));
+      {required Article article,
+      required Highlight highlight,
+      required bool shareByDefault}) =>
+      showDialog(
+        context: context,
+        builder: (_) => ShareNoteDialog(
+            article: article,
+            highlight: highlight,
+            shareByDefault: shareByDefault),
+      );
 
   @override
-  State<ShareScreen> createState() => _ShareScreenState();
+  State<ShareNoteDialog> createState() => _ShareNoteDialogState();
 }
 
-class _ShareScreenState extends State<ShareScreen> {
+class _ShareNoteDialogState extends State<ShareNoteDialog> {
   final _db = AppDatabase.instance;
   late final TextEditingController _comment =
       TextEditingController(text: widget.highlight.comment ?? '');
@@ -44,6 +59,7 @@ class _ShareScreenState extends State<ShareScreen> {
   bool _twitterConnected = false;
   bool _supporter = false;
   bool _emailPluginOn = false;
+  bool _contactsEnabled = false;
   List<Contact> _contacts = [];
 
   bool _toProfile = false;
@@ -68,22 +84,29 @@ class _ShareScreenState extends State<ShareScreen> {
     final twitterConnected = await ShareActions.twitterConnected();
     final supporter = await PluginService.instance.isSupporter;
     final emailOn = await PluginService.instance.emailActive;
-    final contacts = await _db.getContacts();
+    final contactsEnabled = await PluginService.instance.contactsEnabled;
+    final contacts = contactsEnabled ? await _db.getContacts() : <Contact>[];
     if (!mounted) return;
     setState(() {
       _hasProfile = hasProfile;
       _twitterConnected = twitterConnected;
       _supporter = supporter;
       _emailPluginOn = emailOn;
+      _contactsEnabled = contactsEnabled;
       _contacts = contacts;
-      _toProfile = hasProfile;
+      _toProfile = widget.shareByDefault && hasProfile;
       _loaded = true;
     });
   }
 
   bool get _twitterUsable => _supporter && _twitterConnected;
 
-  /// The highlight with the composer's comment attached.
+  bool get _anyChannel =>
+      (_toProfile && _hasProfile) ||
+      (_toTwitter && _twitterUsable) ||
+      _toContacts.isNotEmpty;
+
+  /// The highlight with the dialog's note attached.
   Future<Highlight> _withComment() async {
     final comment = _comment.text.trim();
     if (comment != (widget.highlight.comment ?? '')) {
@@ -95,7 +118,7 @@ class _ShareScreenState extends State<ShareScreen> {
       articleId: widget.highlight.articleId,
       text: widget.highlight.text,
       comment: comment.isEmpty ? null : comment,
-      shared: 1,
+      shared: _anyChannel ? 1 : widget.highlight.shared,
       createdAt: widget.highlight.createdAt,
     );
   }
@@ -119,19 +142,6 @@ class _ShareScreenState extends State<ShareScreen> {
     final result = await ProfileService.instance
         .publishHighlight(widget.article, highlight);
     return result.eventId;
-  }
-
-  /// Opens the mail app pre-filled — an immediate action, not a channel:
-  /// it hands off to another app rather than sending through einkreader.
-  Future<void> _composeEmail() async {
-    final highlight = await _withComment();
-    if (!mounted) return;
-    await ShareActions.byEmail(
-      context,
-      subject: ShareActions.highlightsSubject(widget.article, 1),
-      body: ShareActions.highlightsBody(widget.article, [highlight]),
-    );
-    await _record('email');
   }
 
   /// Copy link is immediate — publishes to the profile if needed so the
@@ -158,7 +168,21 @@ class _ShareScreenState extends State<ShareScreen> {
         .showSnackBar(SnackBar(content: Text('Link copied: $link')));
   }
 
-  Future<void> _share() async {
+  /// Opens the mail app pre-filled — an immediate hand-off, not a channel.
+  Future<void> _composeEmail() async {
+    final highlight = await _withComment();
+    if (!mounted) return;
+    await ShareActions.byEmail(
+      context,
+      subject: ShareActions.highlightsSubject(widget.article, 1),
+      body: ShareActions.highlightsBody(widget.article, [highlight]),
+    );
+    await _record('email');
+  }
+
+  /// Save (private note only) or Share (checked channels). Offline never
+  /// blocks: everything unsendable waits in the outbox.
+  Future<void> _save() async {
     if (_sharing) return;
     setState(() => _sharing = true);
     final article = widget.article;
@@ -225,7 +249,7 @@ class _ShareScreenState extends State<ShareScreen> {
     setState(() => _sharing = false);
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
     final message = failed.isEmpty
-        ? (done.isEmpty ? 'Nothing selected' : 'Shared: ${done.join(', ')}')
+        ? (done.isEmpty ? 'Note saved' : 'Shared: ${done.join(', ')}')
         : 'Shared: ${done.join(', ')} — failed: ${failed.join('; ')}';
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
@@ -299,105 +323,108 @@ class _ShareScreenState extends State<ShareScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_loaded) {
-      return Scaffold(appBar: AppBar(), body: const SizedBox.shrink());
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Share highlight')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+    if (!_loaded) return const SizedBox.shrink();
+    return Dialog(
+      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+      insetPadding:
+          const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // The quote this note/share is about, like the share screen.
+              Container(
+                padding: const EdgeInsets.only(left: 12),
+                decoration: const BoxDecoration(
+                  border: Border(left: BorderSide(width: 3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.highlight.text,
+                        maxLines: 5,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 15, height: 1.4)),
+                    const SizedBox(height: 4),
+                    Text(widget.article.displayTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Roomy on purpose: notes are written here, not in a slit.
+              TextField(
+                controller: _comment,
+                autofocus: !widget.shareByDefault,
+                minLines: 6,
+                maxLines: 14,
+                style: const TextStyle(fontSize: 15, height: 1.4),
+                decoration: const InputDecoration(
+                  labelText: 'Your note (optional)',
+                  helperText: 'Stays private unless you share it',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (_hasProfile)
+                _checkRow(
+                  value: _toProfile,
+                  onChanged: (v) => setState(() => _toProfile = v),
+                  label: 'Your profile',
+                  trailing: 'einkreader.app',
+                )
+              else
                 Container(
-                  padding: const EdgeInsets.only(left: 12),
-                  decoration: const BoxDecoration(
-                    border: Border(left: BorderSide(width: 3)),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    border:
+                        Border.all(width: 1.5, style: BorderStyle.solid),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(widget.highlight.text,
-                          maxLines: 6,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              const TextStyle(fontSize: 15, height: 1.4)),
-                      const SizedBox(height: 4),
-                      Text(widget.article.displayTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.grey)),
+                      const Text('Create your public profile',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                          'A page people can follow — your highlights and '
+                          'comments at einkreader.app/you. Free.',
+                          style: TextStyle(fontSize: 12.5)),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: () async {
+                          await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => const ProfileScreen()));
+                          _load();
+                        },
+                        child: const Text('Create profile'),
+                      ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _comment,
-                  maxLines: 4,
-                  minLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Add a comment (optional)',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (_hasProfile)
-                  _checkRow(
-                    value: _toProfile,
-                    onChanged: (v) => setState(() => _toProfile = v),
-                    label: 'Your profile',
-                    trailing: 'einkreader.app',
-                  )
-                else
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                          width: 1.5, style: BorderStyle.solid),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Create your public profile',
-                            style:
-                                TextStyle(fontWeight: FontWeight.w700)),
-                        const Text(
-                            'A page people can follow — your highlights and '
-                            'comments at einkreader.app/you. Free.',
-                            style: TextStyle(fontSize: 12.5)),
-                        const SizedBox(height: 8),
-                        OutlinedButton(
-                          onPressed: () async {
-                            await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const ProfileScreen()));
-                            _load();
-                          },
-                          child: const Text('Create profile'),
-                        ),
-                      ],
-                    ),
-                  ),
-                _checkRow(
-                  value: _toTwitter,
-                  onChanged: (v) => setState(() => _toTwitter = v),
-                  label: 'Tweet it',
-                  enabled: _twitterUsable,
-                  trailing: _twitterUsable
-                      ? (TwitterService.tweetIdFromUrl(widget.article.url) !=
-                              null
-                          ? 'quote-tweet'
-                          : null)
-                      : (_supporter ? 'connect Twitter ›' : 'plugin ›'),
-                  onLockedTap: _supporter ? null : _openPitch,
-                ),
+              _checkRow(
+                value: _toTwitter,
+                onChanged: (v) => setState(() => _toTwitter = v),
+                label: 'Tweet it',
+                enabled: _twitterUsable,
+                trailing: _twitterUsable
+                    ? (TwitterService.tweetIdFromUrl(widget.article.url) !=
+                            null
+                        ? 'quote-tweet'
+                        : null)
+                    : (_supporter ? 'connect Twitter ›' : 'plugin ›'),
+                onLockedTap: _supporter ? null : _openPitch,
+              ),
+              if (_contactsEnabled) ...[
                 for (final contact in _contacts)
                   _checkRow(
                     value: _toContacts.contains(contact.id),
@@ -412,7 +439,9 @@ class _ShareScreenState extends State<ShareScreen> {
                     enabled: _emailPluginOn && contact.channel == 'email',
                     trailing: contact.channel == 'nostr'
                         ? 'nostr dm — soon'
-                        : (_emailPluginOn ? 'from your address' : 'plugin ›'),
+                        : (_emailPluginOn
+                            ? 'from your address'
+                            : 'plugin ›'),
                     onLockedTap: contact.channel == 'nostr'
                         ? null
                         : (_supporter ? null : _openPitch),
@@ -426,36 +455,38 @@ class _ShareScreenState extends State<ShareScreen> {
                   icon: const Icon(Icons.person_add_outlined, size: 18),
                   label: const Text('Add contact'),
                 ),
-                const SizedBox(height: 20),
-                OutlinedButton(
-                  onPressed: _sharing ? null : _share,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: const BorderSide(width: 2),
-                  ),
-                  child: Text(_sharing ? 'Sharing…' : 'Share',
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
-                // Not channels — immediate hand-offs, so they live below
-                // the Share button as plain actions.
-                const Divider(height: 32),
-                _actionRow(
-                  icon: Icons.link,
-                  label: _hasProfile
-                      ? 'Copy link to this quote'
-                      : 'Copy article link',
-                  trailing: Icons.copy,
-                  onTap: _copyLink,
-                ),
-                _actionRow(
-                  icon: Icons.email_outlined,
-                  label: 'Compose an email…',
-                  trailing: Icons.open_in_new,
-                  onTap: _composeEmail,
-                ),
               ],
-            ),
+              const SizedBox(height: 14),
+              OutlinedButton(
+                onPressed: _sharing ? null : _save,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  side: const BorderSide(width: 2),
+                ),
+                child: Text(
+                    _sharing
+                        ? 'Sharing…'
+                        : (_anyChannel ? 'Share' : 'Save'),
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w700)),
+              ),
+              // Not channels — immediate hand-offs, below the button.
+              const Divider(height: 28),
+              _actionRow(
+                icon: Icons.link,
+                label: _hasProfile
+                    ? 'Copy link to this quote'
+                    : 'Copy article link',
+                trailing: Icons.copy,
+                onTap: _copyLink,
+              ),
+              _actionRow(
+                icon: Icons.email_outlined,
+                label: 'Compose an email…',
+                trailing: Icons.open_in_new,
+                onTap: _composeEmail,
+              ),
+            ],
           ),
         ),
       ),

@@ -10,6 +10,7 @@ class PluginService {
   static final PluginService instance = PluginService._();
 
   static const _kEarlyAccess = 'supporter_early_access';
+  static const _kContacts = 'feature_contacts';
   static const _kTwitterOn = 'plugin_twitter_on';
   static const _kEmailOn = 'plugin_email_on';
 
@@ -33,6 +34,14 @@ class PluginService {
 
   Future<void> setEmailOn(bool on) async =>
       (await _prefs).setBool(_kEmailOn, on);
+
+  /// Feature flag: per-contact sharing is parked for now — hidden until
+  /// this is switched on (kept so the machinery stays exercised by tests).
+  Future<bool> get contactsEnabled async =>
+      (await _prefs).getBool(_kContacts) ?? false;
+
+  Future<void> setContactsEnabled(bool on) async =>
+      (await _prefs).setBool(_kContacts, on);
 
   /// A plugin is active when unlocked AND toggled on.
   Future<bool> get twitterActive async =>

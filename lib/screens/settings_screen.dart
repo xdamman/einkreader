@@ -40,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _supporter = false;
   bool _twitterPluginOn = false;
   bool _emailPluginOn = false;
+  bool _contactsEnabled = false;
 
   late final _updates = widget.updateService ?? UpdateService();
   UpdateInfo? _update;
@@ -77,6 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final supporter = await PluginService.instance.isSupporter;
     final twitterOn = await PluginService.instance.twitterOn;
     final emailOn = await PluginService.instance.emailOn;
+    final contactsEnabled = await PluginService.instance.contactsEnabled;
     if (!mounted) return;
     setState(() {
       _developerMode = developerMode;
@@ -85,6 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _supporter = supporter;
       _twitterPluginOn = twitterOn;
       _emailPluginOn = emailOn;
+      _contactsEnabled = contactsEnabled;
     });
     if (developerMode && _update == null) _checkForUpdate();
   }
@@ -416,12 +419,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: TextStyle(
                       fontSize: 12, fontStyle: FontStyle.italic)),
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.people_outline),
-              label: const Text('Contacts'),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const ContactsScreen())),
-            ),
+            if (_contactsEnabled)
+              OutlinedButton.icon(
+                icon: const Icon(Icons.people_outline),
+                label: const Text('Contacts'),
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => const ContactsScreen())),
+              ),
             const SizedBox(height: 32),
             const Divider(),
             const SizedBox(height: 24),
