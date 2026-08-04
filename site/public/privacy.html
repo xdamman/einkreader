@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy — einkreader</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Georgia, 'Times New Roman', serif; color: #111; background: #fff; line-height: 1.65; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 48px 24px 80px; }
+    h1 { font-size: 30px; margin-bottom: 6px; }
+    h2 { font-size: 20px; margin: 28px 0 8px; }
+    p, li { font-size: 16px; margin-bottom: 10px; }
+    ul { padding-left: 22px; }
+    a { color: #111; }
+    .updated { color: #666; font-size: 14px; margin-bottom: 24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Privacy policy</h1>
+    <p class="updated">einkreader · last updated August 2026</p>
+
+    <p>einkreader is local-first. Your feeds, articles, reading progress,
+    highlights and notes are stored on your device, as plain files and a
+    local database. There are no analytics, no trackers, and no accounts
+    required.</p>
+
+    <h2>What stays on your device</h2>
+    <ul>
+      <li>Your sources, downloaded articles and images, reading progress,
+      highlights, notes, and contacts.</li>
+      <li>Your profile's secret key, if you create a profile. It is
+      generated on the device and never sent to us.</li>
+    </ul>
+
+    <h2>What leaves your device — only when you choose</h2>
+    <ul>
+      <li><strong>Fetching content</strong>: the app contacts the feeds and
+      sites you add, and the services you connect (e.g. Twitter/X with your
+      own API key, Nostr relays you configure).</li>
+      <li><strong>Public profile</strong> (optional): if you create one,
+      your chosen username is registered at einkreader.app and the profile
+      details and highlights you explicitly share are published to Nostr
+      relays. Sharing is opt-in, per highlight, every time.</li>
+      <li><strong>Email features</strong> (optional): if you enable the
+      Email plugin, mail sent to your @einkreader.app address from senders
+      you whitelist is processed to deliver it to your reading feed, and
+      one-tap shares are sent from your address on your instruction.</li>
+    </ul>
+
+    <h2>What we store server-side</h2>
+    <p>Only what the optional services need: your username-to-key mapping
+    (for name@einkreader.app), your whitelisted sender addresses, and
+    pending email items until your device collects them. No reading
+    history, no highlights (other than those you publish), no device
+    identifiers.</p>
+
+    <h2>Payments</h2>
+    <p>Plugin subscriptions, when available, are billed by Google Play. We
+    receive a purchase token to verify the subscription; we never see your
+    payment details.</p>
+
+    <h2>Your data, your files</h2>
+    <p>Everything the app stores locally is readable Markdown you can copy,
+    back up or delete at any time. Deleting the app deletes its local data.
+    To remove server-side data (username, whitelist, pending email), use
+    the app or contact us.</p>
+
+    <h2>Contact</h2>
+    <p>Questions: <a href="mailto:xdamman@opencollective.com">xdamman@opencollective.com</a>
+    · <a href="https://github.com/xdamman/einkreader">github.com/xdamman/einkreader</a></p>
+  </div>
+</body>
+</html>

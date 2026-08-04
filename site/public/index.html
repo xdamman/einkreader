@@ -23,6 +23,9 @@
     .cta:hover { background: #111; color: #fff; }
     .cta-sub { display: block; margin-top: 10px; font-size: 13px; color: #666; }
     .hero { text-align: center; padding: 24px 0 8px; }
+    .hero .points { font-size: 15px; color: #444; margin-bottom: 18px; letter-spacing: 0.02em; }
+    .hero video { max-width: min(480px, 92vw); border: 2px solid #111; border-radius: 10px; }
+    .hero .video-sub { font-size: 13px; color: #666; margin-top: 10px; font-style: italic; }
     .hero img {
       max-width: 100%; height: auto; border: 1px solid #111;
     }
@@ -55,7 +58,13 @@
   </header>
 
   <div class="hero wrap">
-    <img src="/screenshots/home_tablet.png" alt="einkreader home screen on a tablet: a date-grouped feed of articles across sources" width="960">
+    <p class="points">An RSS reader · made for your e-ink device · offline first · highlights · annotate · share</p>
+    <video controls muted playsinline preload="metadata"
+        poster="/demo-poster.png" width="480"
+        aria-label="35-second demo: browse the feed, filter by source, read, highlight, annotate and share, then resume reading">
+      <source src="/demo.mp4" type="video/mp4">
+    </video>
+    <p class="video-sub">35 seconds: feed → filter → read → highlight → annotate &amp; share → resume.</p>
   </div>
 
   <section>
@@ -121,7 +130,7 @@
   <footer>
     <div class="wrap">
       <p>Open source on <a href="https://github.com/xdamman/einkreader">GitHub</a> · Readers get a free <code>name@einkreader.app</code> address to be tagged and followed.</p>
-      <p style="margin-top:8px">Local-first: nothing leaves your device unless you share it.</p>
+      <p style="margin-top:8px">Local-first: nothing leaves your device unless you share it. <a href="/privacy.html">Privacy</a></p>
     </div>
   </footer>
 </body>

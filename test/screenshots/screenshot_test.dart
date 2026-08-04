@@ -14,6 +14,7 @@ import 'package:einkreader/screens/article_screen.dart';
 import 'package:einkreader/screens/home_screen.dart';
 import 'package:einkreader/screens/settings_screen.dart';
 import 'package:einkreader/screens/sources_screen.dart';
+import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:flutter/material.dart';
@@ -40,6 +41,10 @@ void main() {
     });
     FlutterSecureStorage.setMockInitialValues({});
 
+    ArchiveStore.instance.debugConfigure(
+        basePath: Directory.systemTemp
+            .createTempSync('einkreader_shots_archive')
+            .path);
     sqfliteFfiInit();
     // No background isolate: queries complete inside the widget-test zone.
     databaseFactory = databaseFactoryFfiNoIsolate;
@@ -68,9 +73,9 @@ void main() {
           setup: (t) => tapTab(t, 'Highlights'));
     });
 
-    testWidgets('favorites tablet', (tester) async {
-      await _capture(tester, const HomeScreen(), 'favorites_tablet', _tablet,
-          setup: (t) => tapTab(t, 'Favorites'));
+    testWidgets('read tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'read_tablet', _tablet,
+          setup: (t) => tapTab(t, 'Read'));
     });
 
     testWidgets('reader with highlights tablet', (tester) async {
@@ -119,7 +124,13 @@ Future<void> _capture(WidgetTester tester, Widget screen, String name,
     // Let real async work (sqflite, prefs) complete, then rebuild.
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 400)));
-    await tester.pumpAndSettle();
+    try {
+      await tester.pumpAndSettle(const Duration(milliseconds: 100),
+          EnginePhase.sendSemanticsUpdate, const Duration(seconds: 3));
+    } on FlutterError {
+      // A perpetual animation (e.g. relay status spinners) never settles;
+      // capture the frame as it stands.
+    }
   }
 
   await tester.pumpWidget(MaterialApp(
@@ -134,6 +145,9 @@ Future<void> _capture(WidgetTester tester, Widget screen, String name,
   }
   await expectLater(
       find.byType(MaterialApp), matchesGoldenFile('goldens/$name.png'));
+  // Let any lingering timeouts (relay checks etc.) expire so the binding's
+  // no-pending-timers teardown invariant holds.
+  await tester.pump(const Duration(minutes: 2));
 }
 
 Future<void> _loadFonts() async {
