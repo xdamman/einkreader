@@ -68,7 +68,7 @@ pure black-and-white, generous type, discrete page refreshes, and
 gestures that don't fight the screen. Works on regular phones and
 tablets too.
 
-Free and open source: github.com/xdamman/einkreader
+einkreader.app — the RSS reader made for your e-ink device.
 ```
 
 ## Category & tags

@@ -184,6 +184,9 @@ void main() {
         tester,
         Stack(children: [
           ArticleScreen(articleId: _story.id!),
+          // The barrier scrim a real showDialog draws: the reader stays
+          // visible but dimmed behind the overlay.
+          Positioned.fill(child: ColoredBox(color: Colors.black54)),
           ShareNoteDialog(
               article: _story, highlight: _highlight, shareByDefault: true),
         ]),
