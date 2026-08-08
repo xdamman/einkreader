@@ -87,3 +87,31 @@ assert.equal(senderOf(registry.legacy), undefined);
 assert.equal(entryForPubkey(registry, 'a'.repeat(64)).name, 'xavier');
 
 console.log('inbound tests passed');
+
+// -- story grouping for the public page -------------------------------------
+const { groupStories, storyForQuote, storyId } =
+    await import('../lib/profile_render.js');
+const ev = (id, at, url, title, text, comment) => ({
+  kind: 9802, id, created_at: at, content: text,
+  tags: [
+    ...(url ? [['r', url]] : []),
+    ['title', title],
+    ...(comment ? [['comment', comment]] : []),
+  ],
+});
+const groups = groupStories([
+  ev('a'.repeat(64), 100, 'https://x.com/a', 'Story A', 'first quote', 'my take'),
+  ev('b'.repeat(64), 300, 'https://x.com/a', 'Story A', 'second quote', null),
+  ev('c'.repeat(64), 200, 'https://y.org/b', 'Story B', 'other quote', null),
+  { kind: 0, id: 'meta', content: '{}', tags: [] }, // ignored
+]);
+assert.equal(groups.length, 2, 'grouped by story, not per quote');
+assert.equal(groups[0].title, 'Story A', 'newest share leads');
+assert.equal(groups[0].quotes.length, 2);
+assert.equal(groups[0].quotes[0].text, 'second quote', 'newest quote first');
+assert.equal(groups[0].quotes[1].comment, 'my take');
+assert.equal(groups[0].domain, 'x.com');
+assert.equal(groups[0].id, storyId('https://x.com/a', 'Story A'));
+assert.equal(storyForQuote(groups, 'cccccccc').title, 'Story B');
+assert.equal(storyForQuote(groups, 'ffffffff'), null);
+console.log('profile grouping tests passed');

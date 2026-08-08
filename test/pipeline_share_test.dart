@@ -268,6 +268,31 @@ void main() {
     expect(find.text('Unread Story'), findsOneWidget); // the story group
     expect(find.text('the passage lives here'), findsOneWidget);
     expect(find.text('my take'), findsOneWidget); // the comment
+    // With a comment present there is no nudge…
+    expect(find.text('Add a comment about this quote'), findsNothing);
+
+    // …and a comment-less shared quote gets one (author-only view).
+    await tester.runAsync(() async {
+      await db.updateHighlightComment(highlight.id!, null);
+    });
+    // A distinct key forces a fresh screen State (same widget type would
+    // reuse the old one and keep the stale shares).
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(),
+        home: const ProfileScreen(key: ValueKey('recheck'))));
+    await settle(tester);
+    await settle(tester);
+    await tester.ensureVisible(find.text('Add a comment about this quote'));
+    expect(find.text('Add a comment about this quote'), findsOneWidget);
+    await tester.tap(find.text('Add a comment about this quote'),
+        warnIfMissed: false);
+    await settle(tester);
+    await settle(tester);
+    expect(find.text('Your note (optional)'), findsOneWidget,
+        reason: 'the nudge opens the note/share dialog');
+    // Restore the comment for any later assertions.
+    await tester.runAsync(
+        () => db.updateHighlightComment(highlight.id!, 'my take'));
   });
 
   testWidgets('opening the app never flashes the add-a-source screen',

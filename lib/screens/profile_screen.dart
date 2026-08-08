@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/profile_service.dart';
+import '../widgets/share_note_dialog.dart';
 
 /// The profile, full screen (never a modal: one clean e-ink repaint, back =
 /// "not now"). First visit is the opt-in with a single name field; once
@@ -604,12 +605,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         style: const TextStyle(
                             fontSize: 12.5,
                             fontStyle: FontStyle.italic)),
+                  )
+                else
+                  // The public page shows a bare quote; only its author
+                  // sees this nudge.
+                  InkWell(
+                    onTap: () => _commentOnShare(share),
+                    child: const Padding(
+                      padding: EdgeInsets.only(top: 2),
+                      child: Text('Add a comment about this quote',
+                          style: TextStyle(
+                              fontSize: 12.5,
+                              fontStyle: FontStyle.italic,
+                              decoration: TextDecoration.underline)),
+                    ),
                   ),
               ],
             ),
           ),
       ],
     ];
+  }
+
+  /// Opens the note/share dialog for a shared quote that has no comment
+  /// yet; the updated comment republishes with the next share action.
+  Future<void> _commentOnShare(Share share) async {
+    final db = AppDatabase.instance;
+    final article =
+        share.articleId == null ? null : await db.getArticle(share.articleId!);
+    if (article == null || !mounted) return;
+    final highlight = (await db.getHighlights(articleId: article.id))
+        .where((h) => h.id == share.highlightId)
+        .firstOrNull;
+    if (highlight == null || !mounted) return;
+    await ShareNoteDialog.open(context,
+        article: article, highlight: highlight, shareByDefault: true);
+    await _load();
+    if (mounted) setState(() {});
   }
 
   Widget _editor() {
