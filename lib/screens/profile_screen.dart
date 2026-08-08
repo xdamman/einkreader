@@ -95,6 +95,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _picture = profile.picture;
       _address = await _profileService.nip05Address;
       _addressPending = await _profileService.username == null;
+      _username.text = (await _profileService.username) ??
+          (await _profileService.pendingUsername) ??
+          '';
       // One entry per highlight, newest first (a highlight shared to both
       // the profile and as a link appears once). Best-effort: the profile
       // fields must render even if the database is unavailable.
@@ -226,11 +229,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   /// Done editing: save, report where the update went, back to the view.
+  /// A changed username (the page slug) re-registers first — the server
+  /// releases the old name for the same key.
   Future<void> _finishEditing() async {
+    final current = (await _profileService.username) ??
+        (await _profileService.pendingUsername) ??
+        '';
+    final wanted = _username.text.trim();
+    if (wanted != current && wanted.isNotEmpty) {
+      if (!ProfileService.usernameRule.hasMatch(wanted)) {
+        setState(() => _usernameError =
+            'At least 5 characters: a–z, 0–9 and _ only');
+        return; // stay in edit mode
+      }
+      try {
+        await _profileService.registerUsername(wanted);
+      } on UsernameTakenException {
+        if (!mounted) return;
+        setState(() =>
+            _usernameError = '"$wanted" is taken — pick another');
+        return; // stay in edit mode
+      }
+      _dirty = true; // republish kind-0 with the new nip05
+    }
+    if (mounted) setState(() => _usernameError = null);
     final accepted = await _persist();
     if (!mounted) return;
     setState(() => _editing = false);
-    if (accepted != null) {
+    await _load();
+    if (accepted != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(accepted > 0
               ? 'Profile published'
@@ -495,6 +522,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                               fontFamily: 'monospace')),
+                      const SizedBox(height: 6),
+                      InkWell(
+                        onTap: () => launchUrl(
+                            Uri.parse('https://einkreader.app/'
+                                '${_address!.split('@').first}'),
+                            mode: LaunchMode.externalApplication),
+                        child: Text(
+                          'einkreader.app/${_address!.split('@').first} ↗',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              decoration: TextDecoration.underline),
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         _addressPending
@@ -715,6 +757,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
                               fontFamily: 'monospace')),
+                      const SizedBox(height: 6),
+                      InkWell(
+                        onTap: () => launchUrl(
+                            Uri.parse('https://einkreader.app/'
+                                '${_address!.split('@').first}'),
+                            mode: LaunchMode.externalApplication),
+                        child: Text(
+                          'einkreader.app/${_address!.split('@').first} ↗',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              decoration: TextDecoration.underline),
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         _addressPending
@@ -734,6 +791,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 controller: _name,
                 onChanged: (_) => _dirty = true,
                 decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _username,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  labelText: 'Username',
+                  suffixText: '@einkreader.app',
+                  errorText: _usernameError,
+                  helperText: 'Also your page: '
+                      'einkreader.app/${_username.text.trim().isEmpty ? '…' : _username.text.trim()} '
+                      '— renaming frees the old address',
+                  helperMaxLines: 2,
+                ),
+                onChanged: (_) => setState(() {}),
               ),
               const SizedBox(height: 14),
               TextField(

@@ -166,18 +166,23 @@ void main() {
   testWidgets('existing profile opens read-only; editing is behind Edit',
       (tester) async {
     ProfileService.instance.debugPublish = (event) async => 1;
+    ProfileService.instance.debugHttpClient = MockClient(
+        (request) async => http.Response(jsonEncode({'ok': true}), 200));
     await ProfileService.instance.createIdentity();
+    await ProfileService.instance.registerUsername('xavier');
     await ProfileService.instance.saveProfile(const Profile(
         name: 'Xavier', about: 'Reads on e-ink'));
+    ProfileService.instance.debugHttpClient = null;
 
     await tester.pumpWidget(const MaterialApp(home: ProfileScreen()));
     await tester.pumpAndSettle();
 
-    // View mode: content rendered, nothing editable.
+    // View mode: content rendered, nothing editable, public URL clickable.
     expect(find.text('Xavier'), findsOneWidget);
     expect(find.text('Reads on e-ink'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Edit profile'), findsOneWidget);
+    expect(find.textContaining('einkreader.app/xavier'), findsOneWidget);
 
     // Edit → fields appear; Done → back to the view with changes shown.
     await tester.tap(find.text('Edit profile'));
@@ -190,6 +195,48 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     expect(find.text('New bio line'), findsOneWidget);
     expect((await ProfileService.instance.profile()).about, 'New bio line');
+  });
+
+  testWidgets('editing the username renames the page slug', (tester) async {
+    ProfileService.instance.debugPublish = (event) async => 1;
+    String? lastRegistered;
+    ProfileService.instance.debugHttpClient = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      lastRegistered = body['name'] as String;
+      if (lastRegistered == 'takenname') {
+        return http.Response(jsonEncode({'error': 'taken'}), 409);
+      }
+      return http.Response(jsonEncode({'ok': true}), 200);
+    });
+    await ProfileService.instance.createIdentity();
+    await ProfileService.instance.registerUsername('xavier');
+    await ProfileService.instance.saveProfile(const Profile(name: 'Xavier'));
+
+    await tester.pumpWidget(const MaterialApp(home: ProfileScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit profile'));
+    await tester.pumpAndSettle();
+
+    // The slug field is prefilled and editable.
+    final field = find.widgetWithText(TextField, 'Username');
+    expect(tester.widget<TextField>(field).controller!.text, 'xavier');
+
+    // A taken name keeps you editing with an inline error.
+    await tester.enterText(field, 'takenname');
+    await tester.tap(find.byTooltip('Done'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('is taken'), findsOneWidget);
+    expect(find.byTooltip('Done'), findsOneWidget, reason: 'still editing');
+
+    // A free name renames: server re-registered, view shows the new URL.
+    await tester.enterText(field, 'xavierdamman');
+    await tester.tap(find.byTooltip('Done'));
+    await tester.pumpAndSettle();
+    expect(lastRegistered, 'xavierdamman');
+    expect(await ProfileService.instance.username, 'xavierdamman');
+    expect(find.textContaining('einkreader.app/xavierdamman'),
+        findsOneWidget);
+    ProfileService.instance.debugHttpClient = null;
   });
 
   test('suggestUsername: valid, padded, capped', () {
