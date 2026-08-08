@@ -49,6 +49,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// null = all sources; otherwise the customized subset.
   Set<int>? _importSourceIds;
 
+  /// What this profile has shared (from the local Shared record — visible
+  /// immediately, even while a publish still waits in the outbox).
+  List<Share> _sharedHighlights = [];
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +94,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _picture = profile.picture;
       _address = await _profileService.nip05Address;
       _addressPending = await _profileService.username == null;
+      // One entry per highlight, newest first (a highlight shared to both
+      // the profile and as a link appears once). Best-effort: the profile
+      // fields must render even if the database is unavailable.
+      try {
+        final seen = <int>{};
+        _sharedHighlights = [
+          for (final share in await AppDatabase.instance.getShares())
+            if ((share.medium == 'profile' || share.medium == 'link') &&
+                seen.add(share.highlightId))
+              share,
+        ];
+      } catch (_) {
+        _sharedHighlights = [];
+      }
     }
     if (!mounted) return;
     setState(() => _enabled = enabled);
@@ -521,20 +539,77 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 18),
               const Divider(),
-              const SizedBox(height: 8),
-              const Text(
-                'While reading, tap any highlight and choose "Share…" — it '
-                'appears on your public page and in the Shared tab.',
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontStyle: FontStyle.italic,
-                    height: 1.4),
-              ),
+              const SizedBox(height: 10),
+              if (_sharedHighlights.isEmpty)
+                const Text(
+                  'Your public profile is where you can share your '
+                  'highlights, comments and stories that you recommend.\n\n'
+                  'Everything is local and private first, so tap on a '
+                  'highlight and select share to your profile to explicitly '
+                  'share something on your public profile.',
+                  style: TextStyle(fontSize: 13.5, height: 1.5),
+                )
+              else ...[
+                Text(
+                    'Shared highlights · ${_sharedHighlights.length}',
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                ..._sharedHighlightTiles(),
+              ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// Shared highlights grouped by the story they come from, like the
+  /// public page: the story title once, then its shared quotes.
+  List<Widget> _sharedHighlightTiles() {
+    final byArticle = <String, List<Share>>{};
+    for (final share in _sharedHighlights) {
+      byArticle
+          .putIfAbsent(share.articleTitle ?? 'Unknown story', () => [])
+          .add(share);
+    }
+    return [
+      for (final entry in byArticle.entries) ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 4),
+          child: Text(entry.key,
+              style: const TextStyle(
+                  fontSize: 13.5, fontWeight: FontWeight.w600)),
+        ),
+        for (final share in entry.value)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(left: 10),
+            decoration: const BoxDecoration(
+              border: Border(left: BorderSide(width: 2.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(share.highlightText ?? '',
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13.5, height: 1.4)),
+                if ((share.highlightComment ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(share.highlightComment!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12.5,
+                            fontStyle: FontStyle.italic)),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    ];
   }
 
   Widget _editor() {

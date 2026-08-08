@@ -178,6 +178,11 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Reloads all home data. Frequent mid-sync reloads are coalesced: a request
   /// arriving while a load is in flight schedules exactly one more load after
   /// it, so the final state is always up to date without overlapping queries.
+  /// False until the first load completes — the data is all local, so
+  /// this flips within a frame or two; until then the feed renders blank
+  /// rather than flashing the "add a source" call-to-action.
+  bool _everLoaded = false;
+
   Future<void> _load() async {
     if (_loading) {
       _loadAgain = true;
@@ -205,6 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _folders = folders;
         _sourceTitles = {for (final s in sources) s.id!: s.title};
         _developerMode = developerMode;
+        _everLoaded = true;
         if (!_developerMode && _tab == _HomeTab.debug) {
           _tab = _HomeTab.feed;
         }
@@ -486,6 +492,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// with the whole folder and its sources. With no sources configured yet, a
   /// centered call-to-action replaces the feed.
   Widget _buildFeed() {
+    if (!_everLoaded) return const SizedBox.shrink();
     if (_sourceTitles.isEmpty) {
       return _EmptySourcesView(onAdd: _openAddSource);
     }

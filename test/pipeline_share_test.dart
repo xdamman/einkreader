@@ -9,6 +9,8 @@ import 'dart:io';
 
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
+import 'package:einkreader/screens/home_screen.dart';
+import 'package:einkreader/screens/profile_screen.dart';
 import 'package:einkreader/widgets/share_note_dialog.dart';
 import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/outbox_service.dart';
@@ -252,6 +254,34 @@ void main() {
         isEmpty);
     OutboxService.instance.debugEmailSend = null;
     ProfileService.instance.debugHttpClient = null;
+  });
+
+  testWidgets('profile screen lists shared highlights, grouped by story',
+      (tester) async {
+    // The earlier test shared the highlight to the profile; the viewer
+    // must show it from the local record (even if publishing is queued).
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: const ProfileScreen()));
+    await settle(tester);
+    await settle(tester);
+    expect(find.textContaining('Shared highlights ·'), findsOneWidget);
+    expect(find.text('Unread Story'), findsOneWidget); // the story group
+    expect(find.text('the passage lives here'), findsOneWidget);
+    expect(find.text('my take'), findsOneWidget); // the comment
+  });
+
+  testWidgets('opening the app never flashes the add-a-source screen',
+      (tester) async {
+    // Sources exist in the db; before the first load lands the feed must
+    // render blank, not the empty-state call-to-action.
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: const HomeScreen()));
+    await tester.pump(); // first frame, load still in flight
+    expect(find.textContaining('No sources yet'), findsNothing);
+    await settle(tester);
+    await settle(tester);
+    expect(find.text('Unread Story'), findsOneWidget,
+        reason: 'the feed appears directly');
   });
 
   test('offline profile update waits in the outbox', () async {
