@@ -66,6 +66,24 @@ class SyncService {
 
   static http.Client _defaultClient() => http.Client();
 
+  /// Decodes a fetched page or feed. package:http falls back to LATIN-1
+  /// when the Content-Type carries no charset, but the modern web is UTF-8
+  /// declared in <meta> (Cloudflare's blog, for one) — which turns every
+  /// apostrophe into "â€™" mojibake. So: honor an explicit charset, and
+  /// otherwise try strict UTF-8 first, falling back to the header-based
+  /// decoding only when the bytes genuinely aren't UTF-8.
+  static String decodeBody(http.Response response) {
+    final contentType = response.headers['content-type'] ?? '';
+    if (contentType.toLowerCase().contains('charset=')) {
+      return response.body;
+    }
+    try {
+      return utf8.decode(response.bodyBytes);
+    } on FormatException {
+      return response.body;
+    }
+  }
+
   final AppDatabase _db = AppDatabase.instance;
   final http.Client _http;
   final TwitterService twitter;
@@ -417,7 +435,7 @@ class SyncService {
     }
     // Parsing and converting happen on background isolates: a large feed can
     // take long enough on an e-ink device's CPU to freeze the UI (ANR).
-    final xml = response.body;
+    final xml = decodeBody(response);
     final feed = await Isolate.run(() => FeedParser.parse(xml));
     await AppLogService.instance.info(
       'Parsed RSS feed #${source.id}: "${feed.title}", '
@@ -793,7 +811,7 @@ class SyncService {
       if (response.statusCode != 200) {
         throw Exception('HTTP ${response.statusCode}');
       }
-      body = response.body;
+      body = decodeBody(response);
     } catch (e) {
       // Network failure: keep fetched = 0 so the next sync retries.
       await AppLogService.instance.warn(

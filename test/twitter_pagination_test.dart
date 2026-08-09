@@ -30,6 +30,27 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({'twitter_user_id': 'me'});
   });
 
+  test('fetched pages decode as UTF-8 when no charset is declared', () {
+    // Cloudflare-style: UTF-8 bytes, Content-Type without charset. The
+    // http package would decode Latin-1 and turn ’ into "â€™" mojibake.
+    final curly = http.Response.bytes(
+        utf8.encode('Cloudflare’s community'), 200,
+        headers: {'content-type': 'text/html'});
+    expect(SyncService.decodeBody(curly), 'Cloudflare’s community');
+
+    // An explicit charset is honored as-is.
+    final declared = http.Response.bytes(
+        utf8.encode('déjà vu'), 200,
+        headers: {'content-type': 'text/html; charset=utf-8'});
+    expect(SyncService.decodeBody(declared), 'déjà vu');
+
+    // Genuinely non-UTF-8 bytes fall back to the header decoding.
+    final latin = http.Response.bytes(
+        [0x63, 0x61, 0x66, 0xE9], 200, // "café" in Latin-1
+        headers: {'content-type': 'text/html'});
+    expect(SyncService.decodeBody(latin), 'café');
+  });
+
   test('bookmark sync logs every decision with the author username',
       () async {
     sqfliteFfiInit();

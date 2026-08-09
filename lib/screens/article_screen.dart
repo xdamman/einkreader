@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -341,12 +342,18 @@ class _ArticleScreenState extends State<ArticleScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (article.url != null)
+            if (article.url != null) ...[
               ListTile(
                 leading: const Icon(Icons.open_in_browser),
                 title: const Text('Open in browser'),
                 onTap: () => Navigator.pop(sheetContext, 'browser'),
               ),
+              ListTile(
+                leading: const Icon(Icons.link),
+                title: const Text('Copy url'),
+                onTap: () => Navigator.pop(sheetContext, 'copy-url'),
+              ),
+            ],
             ListTile(
               leading: const Icon(Icons.email_outlined),
               title: const Text('Share article by email'),
@@ -383,6 +390,11 @@ class _ArticleScreenState extends State<ArticleScreen> {
       case 'browser':
         await launchUrl(Uri.parse(article.url!),
             mode: LaunchMode.externalApplication);
+      case 'copy-url':
+        await Clipboard.setData(ClipboardData(text: article.url!));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Url copied')));
       case 'email':
         await ShareActions.byEmail(
           context,

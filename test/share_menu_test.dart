@@ -73,6 +73,7 @@ void main() {
     await settle(tester);
 
     expect(find.text('Open in browser'), findsOneWidget);
+    expect(find.text('Copy url'), findsOneWidget);
     expect(find.text('Share article by email'), findsOneWidget);
     expect(find.text('Share highlights by email'), findsOneWidget);
     expect(find.textContaining('1 highlight'), findsOneWidget);
