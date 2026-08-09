@@ -30,6 +30,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _username = TextEditingController();
   final _about = TextEditingController();
   final _links = TextEditingController();
+  final _newLink = TextEditingController();
+  String? _newLinkError;
   String _picture = '';
   String? _address;
   bool _addressPending = false;
@@ -76,6 +78,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _username.dispose();
     _about.dispose();
     _links.dispose();
+    _newLink.dispose();
     super.dispose();
   }
 
@@ -225,6 +228,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (result == null) return;
     setState(() => _importSourceIds =
         result.length == _importableSources.length ? null : result);
+  }
+
+  List<String> get _linkList => _links.text
+      .split('\n')
+      .map((l) => l.trim())
+      .where((l) => l.isNotEmpty)
+      .toList();
+
+  /// One row per link: the bare domain+path, with a remove button.
+  List<Widget> _linkRows() => [
+        for (final link in _linkList)
+          Row(
+            children: [
+              const Icon(Icons.link, size: 16, color: Colors.grey),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    link.replaceFirst(RegExp(r'^https?://'), ''),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14)),
+              ),
+              IconButton(
+                tooltip: 'Remove link',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close, size: 16),
+                onPressed: () => setState(() {
+                  _links.text = (_linkList..remove(link)).join('\n');
+                  _dirty = true;
+                }),
+              ),
+            ],
+          ),
+      ];
+
+  void _addLink() {
+    var raw = _newLink.text.trim();
+    if (raw.isEmpty) return;
+    if (!raw.startsWith(RegExp(r'https?://'))) raw = 'https://$raw';
+    final uri = Uri.tryParse(raw);
+    if (uri == null || !uri.host.contains('.')) {
+      setState(() => _newLinkError = 'That doesn\'t look like a link');
+      return;
+    }
+    setState(() {
+      _links.text = [..._linkList, raw].join('\n');
+      _newLink.clear();
+      _newLinkError = null;
+      _dirty = true;
+    });
   }
 
   /// Test hook for the auto-save path (pop callbacks don't run in tests).
@@ -605,12 +658,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
               ],
               const SizedBox(height: 14),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                label: const Text('Edit profile'),
-                onPressed: () => setState(() => _editing = true),
-              ),
-              const SizedBox(height: 10),
+              // The pencil in the top bar always edits; the big button only
+              // appears while the profile is still empty and needs the nudge.
+              if (about.isEmpty && links.isEmpty) ...[
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Edit profile'),
+                  onPressed: () => setState(() => _editing = true),
+                ),
+                const SizedBox(height: 10),
+              ],
               if (_sharedHighlights.isEmpty)
                 Text(
                   'Your public profile is where you can share your '
@@ -897,32 +954,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     hintText: 'Add a short bio…',
                     alignLabelWithHint: true),
               ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _links,
-                maxLines: 3,
-                minLines: 2,
-                autocorrect: false,
-                onChanged: (_) => _dirty = true,
-                decoration: const InputDecoration(
-                    labelText: 'Social links (one per line)',
-                    hintText: 'Add your links…',
-                    alignLabelWithHint: true),
-              ),
-              const SizedBox(height: 22),
-              const Divider(),
-              const SizedBox(height: 8),
-              const Text('Shared highlights',
+              const SizedBox(height: 18),
+              const Text('Links',
                   style:
-                      TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              const Text(
-                'While reading, tap any highlight and choose "Share…" — it '
-                'appears on your public page and in the Shared tab.',
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontStyle: FontStyle.italic,
-                    height: 1.4),
+                      TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              ..._linkRows(),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _newLink,
+                      autocorrect: false,
+                      keyboardType: TextInputType.url,
+                      decoration: InputDecoration(
+                        hintText: 'yoursite.com or a full url',
+                        isDense: true,
+                        errorText: _newLinkError,
+                      ),
+                      onSubmitted: (_) => _addLink(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                      onPressed: _addLink, child: const Text('Add')),
+                ],
               ),
               const SizedBox(height: 24),
               const Text(

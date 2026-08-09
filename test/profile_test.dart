@@ -153,7 +153,7 @@ void main() {
     expect(find.text('xavier@einkreader.app'), findsOneWidget);
     expect(find.textContaining('tag you and'), findsOneWidget);
     expect(find.text('Short bio'), findsOneWidget);
-    expect(find.text('Social links (one per line)'), findsOneWidget);
+    expect(find.text('Links'), findsOneWidget);
     expect(find.textContaining('secret key'), findsNothing);
 
     // Auto-save: editing then leaving the screen persists and publishes.
@@ -183,11 +183,12 @@ void main() {
     expect(find.text('Xavier'), findsOneWidget);
     expect(find.text('Reads on e-ink'), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
-    expect(find.text('Edit profile'), findsOneWidget);
+    // A filled profile hides the big Edit button — the pencil suffices.
+    expect(find.text('Edit profile'), findsNothing);
     expect(find.textContaining('einkreader.app/xavier'), findsOneWidget);
 
     // Edit → fields appear; Done → back to the view with changes shown.
-    await tester.tap(find.text('Edit profile'));
+    await tester.tap(find.byTooltip('Edit profile'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextField, 'Short bio'), findsOneWidget);
     await tester.enterText(
@@ -239,6 +240,62 @@ void main() {
     expect(find.textContaining('einkreader.app/xavierdamman'),
         findsOneWidget);
     ProfileService.instance.debugHttpClient = null;
+  });
+
+  testWidgets('links are added and removed as rows, not raw text',
+      (tester) async {
+    ProfileService.instance.debugPublish = (event) async => 1;
+    await ProfileService.instance.createIdentity();
+    await ProfileService.instance.saveProfile(const Profile(name: 'Xavier'));
+
+    await tester.pumpWidget(const MaterialApp(home: ProfileScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit profile')); // empty profile: big button
+    await tester.pumpAndSettle();
+
+    // Bare domain is normalized to https and shown as a row.
+    await tester.ensureVisible(find.text('Add'));
+    await tester.enterText(
+        find.widgetWithText(TextField, 'yoursite.com or a full url'),
+        'xdamman.com');
+    await tester.tap(find.text('Add'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    // The input clears on success, so this match IS the row.
+    expect(find.text('xdamman.com'), findsOneWidget);
+    expect(
+        tester
+            .widget<TextField>(find.widgetWithText(
+                TextField, 'yoursite.com or a full url'))
+            .controller!
+            .text,
+        isEmpty);
+
+    // Garbage is rejected with an inline error.
+    await tester.ensureVisible(find.text('Add'));
+    await tester.enterText(
+        find.widgetWithText(TextField, 'yoursite.com or a full url'),
+        'not a link');
+    await tester.tap(find.text('Add'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.textContaining("doesn't look like a link"), findsOneWidget);
+
+    // Done → persisted with the https prefix.
+    await tester.tap(find.byIcon(Icons.check), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.check), findsNothing,
+        reason: 'left edit mode');
+    expect((await ProfileService.instance.profile()).links,
+        'https://xdamman.com');
+
+    // Remove the row; the profile drops it.
+    await tester.tap(find.byTooltip('Edit profile'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Remove link'));
+    await tester.tap(find.byTooltip('Remove link'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.check), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect((await ProfileService.instance.profile()).links, isEmpty);
   });
 
   test('suggestUsername: valid, padded, capped', () {
