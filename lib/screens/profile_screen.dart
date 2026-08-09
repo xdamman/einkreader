@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/profile_service.dart';
+import '../theme.dart';
 import '../widgets/share_note_dialog.dart';
 
 /// The profile, full screen (never a modal: one clean e-ink repaint, back =
@@ -53,6 +54,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// What this profile has shared (from the local Shared record — visible
   /// immediately, even while a publish still waits in the outbox).
   List<Share> _sharedHighlights = [];
+
+  /// The articles those shares quote, for the story meta line.
+  Map<int, Article> _sharedArticles = {};
 
   @override
   void initState() {
@@ -109,8 +113,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 seen.add(share.highlightId))
               share,
         ];
+        _sharedArticles = {};
+        for (final share in _sharedHighlights) {
+          final id = share.articleId;
+          if (id == null || _sharedArticles.containsKey(id)) continue;
+          final article = await AppDatabase.instance.getArticle(id);
+          if (article != null) _sharedArticles[id] = article;
+        }
       } catch (_) {
         _sharedHighlights = [];
+        _sharedArticles = {};
       }
     }
     if (!mounted) return;
@@ -487,117 +499,132 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Center(
-                child: CircleAvatar(
-                  radius: 44,
-                  backgroundColor: Colors.black,
-                  foregroundImage:
-                      _picture.isEmpty ? null : NetworkImage(_picture),
-                  onForegroundImageError:
-                      _picture.isEmpty ? null : (_, __) {},
-                  child: Text(initial,
-                      style: const TextStyle(
-                          fontSize: 34, color: Colors.white)),
+              // Masthead, mirroring the public page: centered serif name,
+              // bio and links over a heavy rule. The avatar stays (author's
+              // view) but small, above the name.
+              Container(
+                padding: const EdgeInsets.only(bottom: 16),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(width: 3)),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Center(
-                child: Text(name.isEmpty ? 'Unnamed reader' : name,
-                    style: const TextStyle(
-                        fontSize: 24, fontWeight: FontWeight.w700)),
-              ),
-              if (_address != null) ...[
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    border: Border.all(width: 1.5),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(_address!,
-                          textAlign: TextAlign.center,
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 30,
+                      backgroundColor: Colors.black,
+                      foregroundImage:
+                          _picture.isEmpty ? null : NetworkImage(_picture),
+                      onForegroundImageError:
+                          _picture.isEmpty ? null : (_, __) {},
+                      child: Text(initial,
                           style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              fontFamily: 'monospace')),
-                      const SizedBox(height: 6),
-                      InkWell(
-                        onTap: () => launchUrl(
-                            Uri.parse('https://einkreader.app/'
-                                '${_address!.split('@').first}'),
-                            mode: LaunchMode.externalApplication),
-                        child: Text(
-                          'einkreader.app/${_address!.split('@').first} ↗',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontFamily: 'monospace',
-                              decoration: TextDecoration.underline),
+                              fontSize: 24, color: Colors.white)),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(name.isEmpty ? 'Unnamed reader' : name,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontFamily: readingFontFamily,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w700)),
+                    if (about.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(about,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontFamily: readingFontFamily,
+                                fontSize: 14.5,
+                                color: Colors.black87)),
+                      ),
+                    if (links.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Wrap(
+                          spacing: 14,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            for (final link in links)
+                              InkWell(
+                                onTap: () => launchUrl(Uri.parse(link),
+                                    mode: LaunchMode.externalApplication),
+                                child: Text(
+                                    link.replaceFirst(
+                                        RegExp(r'^https?://'), ''),
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        decoration:
+                                            TextDecoration.underline)),
+                              ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _addressPending
-                            ? 'Registering when back online — this will be '
-                                'your address to be tagged and followed'
-                            : 'Share this address so people can tag you and '
-                                'subscribe to your highlights',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ],
+                  ],
+                ),
+              ),
+              if (_address != null) ...[
+                const SizedBox(height: 12),
+                // Author-only strip: address + public URL (not on the
+                // public masthead, but the author needs both at hand).
+                Text(_address!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'monospace')),
+                const SizedBox(height: 3),
+                Center(
+                  child: InkWell(
+                    onTap: () => launchUrl(
+                        Uri.parse('https://einkreader.app/'
+                            '${_address!.split('@').first}'),
+                        mode: LaunchMode.externalApplication),
+                    child: Text(
+                      'einkreader.app/${_address!.split('@').first} ↗',
+                      style: const TextStyle(
+                          fontSize: 12.5,
+                          fontFamily: 'monospace',
+                          decoration: TextDecoration.underline),
+                    ),
                   ),
                 ),
-              ],
-              const SizedBox(height: 18),
-              if (about.isNotEmpty)
-                Text(about,
-                    style: const TextStyle(fontSize: 15, height: 1.45))
-              else
-                const Text('No bio yet — tap Edit to add one.',
-                    style: TextStyle(
-                        fontSize: 13.5, fontStyle: FontStyle.italic)),
-              if (links.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                for (final link in links)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: InkWell(
-                      onTap: () => launchUrl(Uri.parse(link),
-                          mode: LaunchMode.externalApplication),
-                      child: Text(link,
-                          style: const TextStyle(
-                              fontSize: 13.5,
-                              decoration: TextDecoration.underline)),
+                if (_addressPending)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 3),
+                    child: Text(
+                      'Registering when back online',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 11.5, fontStyle: FontStyle.italic),
                     ),
                   ),
               ],
-              const SizedBox(height: 22),
+              const SizedBox(height: 14),
               OutlinedButton.icon(
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 label: const Text('Edit profile'),
                 onPressed: () => setState(() => _editing = true),
               ),
-              const SizedBox(height: 18),
-              const Divider(),
               const SizedBox(height: 10),
               if (_sharedHighlights.isEmpty)
-                const Text(
+                Text(
                   'Your public profile is where you can share your '
                   'highlights, comments and stories that you recommend.\n\n'
                   'Everything is local and private first, so tap on a '
                   'highlight and select share to your profile to explicitly '
                   'share something on your public profile.',
-                  style: TextStyle(fontSize: 13.5, height: 1.5),
+                  style: TextStyle(
+                      fontFamily: readingFontFamily,
+                      fontSize: 14.5,
+                      height: 1.55),
                 )
               else ...[
-                Text(
-                    'Shared highlights · ${_sharedHighlights.length}',
+                Text('Shared highlights · ${_sharedHighlights.length}',
+                    textAlign: TextAlign.center,
                     style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                        color: Colors.grey)),
                 ..._sharedHighlightTiles(),
               ],
             ],
@@ -607,66 +634,113 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// Shared highlights grouped by the story they come from, like the
-  /// public page: the story title once, then its shared quotes.
+  /// The shared stream, mirroring the public page: story title in the
+  /// reading serif, a small-caps DOMAIN · DATE meta line, italic quotes
+  /// with the left bar, commentary in roman after each, and dot
+  /// separators between stories.
   List<Widget> _sharedHighlightTiles() {
-    final byArticle = <String, List<Share>>{};
+    final byArticle = <int?, List<Share>>{};
     for (final share in _sharedHighlights) {
-      byArticle
-          .putIfAbsent(share.articleTitle ?? 'Unknown story', () => [])
-          .add(share);
+      byArticle.putIfAbsent(share.articleId, () => []).add(share);
     }
-    return [
-      for (final entry in byArticle.entries) ...[
-        Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 4),
-          child: Text(entry.key,
-              style: const TextStyle(
-                  fontSize: 13.5, fontWeight: FontWeight.w600)),
-        ),
-        for (final share in entry.value)
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.only(left: 10),
-            decoration: const BoxDecoration(
-              border: Border(left: BorderSide(width: 2.5)),
+    final groups = byArticle.entries.toList();
+    final tiles = <Widget>[];
+    for (var i = 0; i < groups.length; i++) {
+      final shares = groups[i].value;
+      final article = _sharedArticles[groups[i].key];
+      final title = article?.displayTitle ??
+          shares.first.articleTitle ??
+          'Unknown story';
+      String? domain;
+      final url = article?.url;
+      if (url != null) {
+        domain = Uri.tryParse(url)
+            ?.host
+            .replaceFirst(RegExp(r'^www\.'), '');
+      }
+      final date = DateTime.fromMillisecondsSinceEpoch(
+          shares.first.createdAt);
+      final meta = [
+        if (domain != null && domain.isNotEmpty) domain.toUpperCase(),
+        '${date.year}-${date.month.toString().padLeft(2, '0')}-'
+            '${date.day.toString().padLeft(2, '0')}',
+      ].join(' · ');
+
+      if (i > 0) {
+        tiles.add(const Padding(
+          padding: EdgeInsets.symmetric(vertical: 14),
+          child: Text('·  ·  ·',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 14)),
+        ));
+      }
+      tiles.add(Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InkWell(
+              onTap: url == null
+                  ? null
+                  : () => launchUrl(Uri.parse(url),
+                      mode: LaunchMode.externalApplication),
+              child: Text(title,
+                  style: TextStyle(
+                      fontFamily: readingFontFamily,
+                      fontSize: 19,
+                      height: 1.3,
+                      fontWeight: FontWeight.w700)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(share.highlightText ?? '',
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13.5, height: 1.4)),
-                if ((share.highlightComment ?? '').isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(share.highlightComment!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+            const SizedBox(height: 2),
+            Text(meta,
+                style: const TextStyle(
+                    fontSize: 10.5,
+                    letterSpacing: 1.1,
+                    color: Colors.grey)),
+            for (final share in shares) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.only(left: 12),
+                decoration: const BoxDecoration(
+                  border: Border(left: BorderSide(width: 3)),
+                ),
+                child: Text(share.highlightText ?? '',
+                    style: TextStyle(
+                        fontFamily: readingFontFamily,
+                        fontSize: 15.5,
+                        height: 1.45,
+                        fontStyle: FontStyle.italic,
+                        color: Colors.black87)),
+              ),
+              if ((share.highlightComment ?? '').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(share.highlightComment!,
+                      style: TextStyle(
+                          fontFamily: readingFontFamily,
+                          fontSize: 14.5,
+                          height: 1.45)),
+                )
+              else
+                // The public page shows a bare quote; only its author
+                // sees this nudge.
+                InkWell(
+                  onTap: () => _commentOnShare(share),
+                  child: const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text('Add a comment about this quote',
+                        style: TextStyle(
                             fontSize: 12.5,
-                            fontStyle: FontStyle.italic)),
-                  )
-                else
-                  // The public page shows a bare quote; only its author
-                  // sees this nudge.
-                  InkWell(
-                    onTap: () => _commentOnShare(share),
-                    child: const Padding(
-                      padding: EdgeInsets.only(top: 2),
-                      child: Text('Add a comment about this quote',
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              fontStyle: FontStyle.italic,
-                              decoration: TextDecoration.underline)),
-                    ),
+                            fontStyle: FontStyle.italic,
+                            decoration: TextDecoration.underline)),
                   ),
-              ],
-            ),
-          ),
-      ],
-    ];
+                ),
+            ],
+          ],
+        ),
+      ));
+    }
+    return tiles;
   }
 
   /// Opens the note/share dialog for a shared quote that has no comment
