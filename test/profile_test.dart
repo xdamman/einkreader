@@ -21,6 +21,8 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     ProfileService.instance.debugPublish = null;
+    ProfileService.instance.debugFetchHighlightEvents = (_) async => [];
+    ProfileService.instance.debugResetActiveCache();
   });
 
   test('bech32 encode round-trips with the existing decoder', () {

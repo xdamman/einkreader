@@ -303,6 +303,18 @@ class NostrService {
   }
 
   /// A followed profile's recent short notes (kind 1), replies excluded.
+  /// The raw kind-9802 highlight events a pubkey has published — what the
+  /// public profile page renders; used to reconcile the local Shared
+  /// record with the relays.
+  Future<List<Map<String, dynamic>>> fetchHighlightEvents(
+      String pubkeyHex) async {
+    return _query({
+      'kinds': [9802],
+      'authors': [pubkeyHex],
+      'limit': 100,
+    });
+  }
+
   Future<List<NostrItem>> fetchAuthorNotes(String npub) async {
     final pubkey = decodeNpub(npub);
     final events = await _query({

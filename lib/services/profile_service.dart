@@ -84,7 +84,10 @@ class ProfileService {
 
   /// Test seam: forget the cached active slot (tests swap mock prefs).
   @visibleForTesting
-  void debugResetActiveCache() => _cachedActiveId = null;
+  void debugResetActiveCache() {
+    _cachedActiveId = null;
+    _reconciledProfiles.clear();
+  }
 
   Future<String> _activeId() async {
     final cached = _cachedActiveId;
@@ -150,6 +153,67 @@ class ProfileService {
   Future<String?> get previousProfileId async =>
       (await SharedPreferences.getInstance())
           .getString('previous_profile_id');
+
+  /// Test seam for the relay fetch behind [reconcileShares].
+  @visibleForTesting
+  Future<List<Map<String, dynamic>>> Function(String pubkeyHex)?
+      debugFetchHighlightEvents;
+
+  /// Brings the local Shared record in line with the relays: every
+  /// published highlight event that matches a local highlight (by exact
+  /// text) gets a Share row — shares made before the Shared column existed
+  /// appear, with their event ids attached so quote permalinks work.
+  /// Best-effort and additive; returns how many rows were created.
+  /// Throttled to once per profile per app session — the relays don't
+  /// need to be asked on every screen open.
+  final Set<String> _reconciledProfiles = {};
+
+  Future<int> reconcileShares() async {
+    if (!await enabled) return 0;
+    final slot = await _activeId();
+    if (_reconciledProfiles.contains(slot)) return 0;
+    _reconciledProfiles.add(slot);
+    final pubkey = await publicKeyHex;
+    final events = await (debugFetchHighlightEvents ??
+        NostrService().fetchHighlightEvents)(pubkey);
+    if (events.isEmpty) return 0;
+    final db = AppDatabase.instance;
+    final byText = <String, Highlight>{
+      for (final h in await db.getHighlights()) h.text: h,
+    };
+    final recorded = <int, Share>{};
+    for (final share in await db.getShares()) {
+      if (share.medium == 'profile') recorded[share.highlightId] = share;
+    }
+    var added = 0;
+    for (final event in events) {
+      final text = (event['content'] as String?) ?? '';
+      final highlight = byText[text];
+      if (highlight == null) continue; // another device/profile's share
+      final eventId = event['id'] as String?;
+      final existing = recorded[highlight.id];
+      if (existing != null) {
+        if (existing.ref == null && eventId != null) {
+          await db.setProfileShareRef(highlight.id!, eventId);
+        }
+        continue;
+      }
+      final at = event['created_at'] as int?;
+      await db.insertShare(Share(
+        highlightId: highlight.id!,
+        medium: 'profile',
+        ref: eventId,
+        createdAt:
+            at != null ? at * 1000 : DateTime.now().millisecondsSinceEpoch,
+      ));
+      added++;
+    }
+    if (added > 0) {
+      await AppLogService.instance
+          .info('Profile: reconciled $added share(s) from the relays');
+    }
+    return added;
+  }
 
   /// Test seam for the metadata fetch after an import.
   @visibleForTesting

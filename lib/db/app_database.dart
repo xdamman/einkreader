@@ -1057,6 +1057,18 @@ class AppDatabase {
     return rows.map(Share.fromMap).toList();
   }
 
+  /// Fills in the published event id on a profile share recorded before
+  /// the id was known (or reconciled from the relays).
+  Future<void> setProfileShareRef(int highlightId, String ref) async {
+    final db = await database;
+    await db.update(
+      'shares',
+      {'ref': ref},
+      where: "highlight_id = ? AND medium = 'profile' AND ref IS NULL",
+      whereArgs: [highlightId],
+    );
+  }
+
   /// The published profile event id for this highlight, if it was ever
   /// shared to the profile (used to build the quote permalink).
   Future<String?> profileShareRef(int highlightId) async {

@@ -69,6 +69,7 @@ void main() {
     await ProfileService.instance.registerUsername('xavier');
     ProfileService.instance.debugHttpClient = null;
     ProfileService.instance.debugPublish = (event) async => 1;
+    ProfileService.instance.debugFetchHighlightEvents = (_) async => [];
   });
 
   Future<void> settle(WidgetTester tester) async {

@@ -106,6 +106,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // the profile and as a link appears once). Best-effort: the profile
       // fields must render even if the database is unavailable.
       try {
+        // Shares published before the Shared record existed live only on
+        // the relays (the public page shows them) — pull them back in.
+        try {
+          await _profileService.reconcileShares();
+        } catch (_) {}
         final seen = <int>{};
         _sharedHighlights = [
           for (final share in await AppDatabase.instance.getShares())

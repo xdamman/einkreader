@@ -121,6 +121,65 @@ void main() {
     expect((await db.getHighlights()).length, 1);
   });
 
+  test('reconcileShares pulls relay-only shares into the local record',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    ProfileService.instance.debugResetActiveCache();
+    db.activeProfile = 'default';
+    final service = ProfileService.instance;
+    await service.createIdentity();
+
+    // Two local highlights; one already recorded as shared (without an
+    // event id), one shared long ago — only on the relays.
+    final article = (await db.getArticles(sourceId: rssId)).first;
+    await db.insertHighlight(Highlight(
+        articleId: article.id!, text: 'old relay-only share', createdAt: 5));
+    final highlights = await db.getHighlights();
+    final oldShare = highlights
+        .firstWhere((h) => h.text == 'old relay-only share');
+    final recorded =
+        highlights.firstWhere((h) => h.text == 'kept passage');
+    await db.insertShare(Share(
+        highlightId: recorded.id!, medium: 'profile', createdAt: 10));
+
+    service.debugFetchHighlightEvents = (pubkey) async => [
+          {
+            'id': 'e1' * 32,
+            'content': 'old relay-only share',
+            'created_at': 1700000000,
+          },
+          {
+            'id': 'e2' * 32,
+            'content': 'kept passage',
+            'created_at': 1700000100,
+          },
+          {
+            'id': 'e3' * 32,
+            'content': 'someone elses highlight',
+            'created_at': 1700000200,
+          },
+        ];
+    final added = await service.reconcileShares();
+    expect(added, 1, reason: 'only the relay-only share is new');
+
+    final shares = await db.getShares();
+    final reconciled = shares
+        .firstWhere((s) => s.highlightId == oldShare.id);
+    expect(reconciled.medium, 'profile');
+    expect(reconciled.ref, 'e1' * 32, reason: 'event id attached');
+    expect(reconciled.createdAt, 1700000000 * 1000);
+    // The pre-existing share gained its missing event id.
+    expect(
+        shares
+            .firstWhere((s) => s.highlightId == recorded.id)
+            .ref,
+        'e2' * 32);
+
+    // Idempotent: a second pass adds nothing.
+    expect(await service.reconcileShares(), 0);
+    service.debugFetchHighlightEvents = null;
+  });
+
   test('published highlights carry the NIP-89 client tag', () async {
     SharedPreferences.setMockInitialValues({});
     ProfileService.instance.debugResetActiveCache();

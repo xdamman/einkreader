@@ -37,6 +37,7 @@ void main() {
     });
     FlutterSecureStorage.setMockInitialValues({});
     ProfileService.instance.debugResetActiveCache();
+    ProfileService.instance.debugFetchHighlightEvents = (_) async => [];
     ArchiveStore.instance.debugConfigure(
         basePath:
             Directory.systemTemp.createTempSync('einkreader_pshot').path);
