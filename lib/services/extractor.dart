@@ -57,6 +57,13 @@ class ArticleExtractor {
   /// that (a heading's self-link icon) are dropped too.
   static String _stripInvisible(String fragment) {
     final frag = html_parser.parseFragment(fragment);
+    // Feed fragments arrive here without the page-level tag strip; a
+    // <style> block in content:encoded would otherwise render as CSS text.
+    for (final tag in _strip) {
+      for (final el in frag.querySelectorAll(tag)) {
+        el.remove();
+      }
+    }
     for (final el in frag.querySelectorAll('*')) {
       final classes = el.attributes['class'] ?? '';
       final style = el.attributes['style'] ?? '';

@@ -246,12 +246,73 @@ class _MarkdownViewState extends State<MarkdownView> {
           padding: const EdgeInsets.only(bottom: 14),
           child: _image(block),
         );
+      case _BlockType.table:
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: _table(block),
+        );
       case _BlockType.rule:
         return const Padding(
           padding: EdgeInsets.symmetric(vertical: 16),
           child: Divider(),
         );
     }
+  }
+
+  /// Renders a pipe table: bordered, header row bold, cells sharing the
+  /// article's inline styling. Wide tables scroll horizontally inside
+  /// their own box rather than squeezing the columns to mush.
+  Widget _table(_Block block) {
+    final rows = <List<String>>[];
+    for (final line in block.text.split('\n')) {
+      final cells = line.split('|');
+      // Drop the empty edges produced by leading/trailing pipes.
+      final trimmedCells = [
+        for (var c = 0; c < cells.length; c++)
+          if (c != 0 && c != cells.length - 1) cells[c].trim()
+      ];
+      // Skip the ---|--- separator row.
+      if (trimmedCells.every(
+          (cell) => RegExp(r'^:?-+:?$').hasMatch(cell))) {
+        continue;
+      }
+      rows.add(trimmedCells);
+    }
+    if (rows.isEmpty) return const SizedBox.shrink();
+    final columns =
+        rows.fold(0, (max, row) => row.length > max ? row.length : max);
+    final cellStyle = _bodyStyle.copyWith(fontSize: widget.fontSize - 2);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Table(
+        defaultColumnWidth: const IntrinsicColumnWidth(),
+        border: TableBorder.all(width: 1),
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        children: [
+          for (var r = 0; r < rows.length; r++)
+            TableRow(
+              children: [
+                for (var c = 0; c < columns; c++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    child: Text.rich(
+                      TextSpan(
+                        children: _inlineSpans(
+                          c < rows[r].length ? rows[r][c] : '',
+                          r == 0
+                              ? cellStyle.copyWith(
+                                  fontWeight: FontWeight.w700)
+                              : cellStyle,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
   }
 
   /// Renders an image block, preferring the offline copy when one was stored.
@@ -303,6 +364,26 @@ class _MarkdownViewState extends State<MarkdownView> {
         }
         blocks.add(_Block(_BlockType.code, code.join('\n')));
         continue;
+      }
+
+      // A pipe table: consecutive |-rows whose second row is the --- rule.
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        final rows = <String>[trimmed];
+        var j = i + 1;
+        while (j < lines.length) {
+          final next = lines[j].trim();
+          if (!next.startsWith('|') || !next.endsWith('|')) break;
+          rows.add(next);
+          j++;
+        }
+        final isTable = rows.length >= 2 &&
+            RegExp(r'^\|(\s*:?-+:?\s*\|)+$').hasMatch(rows[1]);
+        if (isTable) {
+          flushParagraph();
+          blocks.add(_Block(_BlockType.table, rows.join('\n')));
+          i = j - 1;
+          continue;
+        }
       }
 
       if (trimmed.isEmpty) {
@@ -597,7 +678,7 @@ class _MarkdownViewState extends State<MarkdownView> {
 
 }
 
-enum _BlockType { heading, paragraph, quote, listItem, code, image, rule }
+enum _BlockType { heading, paragraph, quote, listItem, code, image, rule, table }
 
 class _Block {
   final _BlockType type;

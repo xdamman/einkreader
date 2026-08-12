@@ -42,6 +42,18 @@ void main() {
     expect(out, contains('Story text here.'));
   });
 
+  test('style/script blocks in feed fragments never leak as text', () {
+    final out = md('<style>.table-ABC td { text-align: left }</style>'
+        '<script>alert(1)</script>'
+        '<p>Real content.</p>'
+        '<table><tr><th>Revenue</th><th>Disney</th></tr>'
+        '<tr><td>Net</td><td>11.5%</td></tr></table>');
+    expect(out, isNot(contains('text-align')));
+    expect(out, isNot(contains('alert')));
+    expect(out, contains('Real content.'));
+    expect(out, contains('Revenue'));
+  });
+
   test('fragment links with real text survive', () {
     final out = md('<p>See the <a href="#notes">notes below</a>.</p>');
     expect(out, contains('[notes below](#notes)'));

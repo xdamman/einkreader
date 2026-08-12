@@ -421,8 +421,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: const TextStyle(fontSize: 13)),
               trailing: const Icon(Icons.chevron_right),
               onTap: () async {
+                // Sources IS its own manager screen — no in-between stop.
                 await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => SettingsScreen(section: section)));
+                    builder: (_) => section == SettingsSection.sources
+                        ? const SourcesScreen()
+                        : SettingsScreen(section: section)));
                 _load();
               },
             ),

@@ -281,6 +281,33 @@ void main() {
     expect(before.$2?.backgroundColor, isNull);
   });
 
+  testWidgets('pipe tables render as bordered tables, header bold',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: 'For the most recent 12 months:\n\n'
+              '| | Disney | Netflix |\n'
+              '| --- | --- | --- |\n'
+              '| Revenue | \$97 B | \$48 B |\n'
+              '| Net Margin | 11.5% | 28% |\n\n'
+              'Netflix is generating more profit.',
+        ),
+      ),
+    ));
+    expect(find.byType(Table), findsOneWidget);
+    expect(find.text('Revenue'), findsOneWidget);
+    expect(find.text('28%'), findsOneWidget);
+    // The --- separator row never renders.
+    expect(find.textContaining('---'), findsNothing);
+    // Header cells are bold.
+    final header = _spans(tester).firstWhere((s) => s.$1 == 'Disney');
+    expect(header.$2?.fontWeight, FontWeight.w700);
+    // Surrounding paragraphs unharmed.
+    expect(find.textContaining('For the most recent'), findsOneWidget);
+    expect(find.textContaining('more profit'), findsOneWidget);
+  });
+
   testWidgets('a real sentence mentioning subscribe is kept', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
