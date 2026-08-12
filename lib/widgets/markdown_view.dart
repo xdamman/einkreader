@@ -416,31 +416,37 @@ class _MarkdownViewState extends State<MarkdownView> {
     return out.toString();
   }
 
-  List<InlineSpan> _inlineSpans(String text, TextStyle style) {
+  /// Highlight painting happens ONCE over the fully assembled paragraph
+  /// (not per styled segment), so a highlight spanning a bold/italic/link
+  /// boundary still matches and washes as one piece.
+  List<InlineSpan> _inlineSpans(String text, TextStyle style) =>
+      _paintHighlights(_inlineSpansRaw(text, style));
+
+  List<InlineSpan> _inlineSpansRaw(String text, TextStyle style) {
     final spans = <InlineSpan>[];
     var index = 0;
     for (final match in _inlinePattern.allMatches(text)) {
       if (match.start > index) {
-        spans.addAll(
-            _highlighted(text.substring(index, match.start), style));
+        spans.add(TextSpan(
+            text: _unescape(text.substring(index, match.start)),
+            style: style));
       }
       if (match.group(1) != null || match.group(2) != null) {
         // Recurse so inline markup nested in the emphasis — most importantly
         // a [link](url) — still renders, inheriting the bold style.
-        spans.addAll(_inlineSpans(match.group(1) ?? match.group(2)!,
+        spans.addAll(_inlineSpansRaw(match.group(1) ?? match.group(2)!,
             style.copyWith(fontWeight: FontWeight.w700)));
       } else if (match.group(3) != null || match.group(4) != null) {
         // Likewise for italics: a link inside *…* must stay a link.
-        spans.addAll(_inlineSpans(match.group(3) ?? match.group(4)!,
+        spans.addAll(_inlineSpansRaw(match.group(3) ?? match.group(4)!,
             style.copyWith(fontStyle: FontStyle.italic)));
       } else if (match.group(5) != null) {
-        spans.addAll(_highlighted(
-            match.group(5)!,
-            style.copyWith(
+        spans.add(TextSpan(
+            text: match.group(5)!,
+            style: style.copyWith(
                 fontFamily: 'monospace',
                 fontFamilyFallback: const [],
-                backgroundColor: const Color(0xFFEEEEEE)),
-            unescape: false));
+                backgroundColor: const Color(0xFFEEEEEE))));
       } else if (match.group(6) != null || match.group(10) != null) {
         final url = (match.group(7) ?? match.group(11))!;
         final anchor = _unescape((match.group(6) ?? match.group(10))!);
@@ -457,22 +463,25 @@ class _MarkdownViewState extends State<MarkdownView> {
               }
             };
           _recognizers.add(recognizer);
-          spans.addAll(_highlighted(
-              anchor, style.copyWith(decoration: TextDecoration.underline),
+          spans.add(TextSpan(
+              text: anchor,
+              style: style.copyWith(decoration: TextDecoration.underline),
               recognizer: recognizer));
         }
       } else if (match.group(8) != null) {
         // Inline image: render as caption text only.
         final alt = match.group(8)!;
         if (alt.isNotEmpty) {
-          spans.addAll(_highlighted(
-              '[image: $alt]', style.copyWith(fontStyle: FontStyle.italic)));
+          spans.add(TextSpan(
+              text: '[image: $alt]',
+              style: style.copyWith(fontStyle: FontStyle.italic)));
         }
       }
       index = match.end;
     }
     if (index < text.length) {
-      spans.addAll(_highlighted(text.substring(index), style));
+      spans.add(TextSpan(
+          text: _unescape(text.substring(index)), style: style));
     }
     return spans;
   }
@@ -496,67 +505,96 @@ class _MarkdownViewState extends State<MarkdownView> {
   static String _unescape(String text) => text.replaceAllMapped(
       RegExp(r'\\([\\`*_{}\[\]()#+\-.!>~|])'), (m) => m.group(1)!);
 
-  /// Splits [text] so every saved highlight occurrence gets a grey wash, and
-  /// (unless the span is already a link) makes it tappable to manage it.
-  /// [unescape] is off for code spans, where backslashes are literal.
-  List<InlineSpan> _highlighted(String rawText, TextStyle style,
-      {TapGestureRecognizer? recognizer, bool unescape = true}) {
-    final text = unescape ? _unescape(rawText) : rawText;
+  /// Paints saved highlights over the assembled spans of one paragraph.
+  /// Works on the concatenated plain text of ALL leaves, so a highlight
+  /// that crosses bold/italic/link boundaries washes continuously; each
+  /// affected leaf is sliced, keeping its own style (and a link keeps its
+  /// own tap — otherwise the wash is tappable to manage the highlight).
+  List<InlineSpan> _paintHighlights(List<InlineSpan> spans) {
+    if (widget.highlights.isEmpty) return spans;
+    final leaves = spans.whereType<TextSpan>().toList();
+    final full = leaves.map((leaf) => leaf.text ?? '').join();
+    if (full.isEmpty) return spans;
+
     final ranges = <(int, int, String)>[];
-    for (final (needle, full) in _highlightNeedles) {
+    for (final (needle, highlight) in _highlightNeedles) {
       var from = 0;
       while (true) {
-        final at = text.indexOf(needle, from);
+        final at = full.indexOf(needle, from);
         if (at == -1) break;
-        ranges.add((at, at + needle.length, full));
+        ranges.add((at, at + needle.length, highlight));
         from = at + needle.length;
       }
     }
-    if (ranges.isEmpty) {
-      return [TextSpan(text: text, style: style, recognizer: recognizer)];
-    }
+    if (ranges.isEmpty) return spans;
     ranges.sort((a, b) => a.$1.compareTo(b.$1));
-    // Merge overlapping ranges, keeping the first range's highlight text.
     final merged = <(int, int, String)>[];
     for (final range in ranges) {
       if (merged.isNotEmpty && range.$1 <= merged.last.$2) {
         final last = merged.removeLast();
-        merged.add((last.$1, range.$2 > last.$2 ? range.$2 : last.$2, last.$3));
+        merged.add(
+            (last.$1, range.$2 > last.$2 ? range.$2 : last.$2, last.$3));
       } else {
         merged.add(range);
       }
     }
-    final spans = <InlineSpan>[];
-    var index = 0;
-    for (final range in merged) {
-      if (range.$1 > index) {
-        spans.add(TextSpan(
-            text: text.substring(index, range.$1),
-            style: style,
-            recognizer: recognizer));
-      }
-      // A link keeps its own tap; otherwise tapping manages the highlight.
-      var spanRecognizer = recognizer;
-      if (recognizer == null && widget.onHighlightTap != null) {
-        final full = range.$3;
-        final tap = TapGestureRecognizer()
-          ..onTapUp = (details) =>
-              widget.onHighlightTap!(full, details.globalPosition);
-        _recognizers.add(tap);
-        spanRecognizer = tap;
-      }
-      spans.add(TextSpan(
-          text: text.substring(range.$1, range.$2),
-          style: style.copyWith(backgroundColor: highlightBackground),
-          recognizer: spanRecognizer));
-      index = range.$2;
+
+    TapGestureRecognizer tapFor(String highlight) {
+      final tap = TapGestureRecognizer()
+        ..onTapUp = (details) =>
+            widget.onHighlightTap!(highlight, details.globalPosition);
+      _recognizers.add(tap);
+      return tap;
     }
-    if (index < text.length) {
-      spans.add(TextSpan(
-          text: text.substring(index), style: style, recognizer: recognizer));
+
+    final out = <InlineSpan>[];
+    var offset = 0;
+    var rangeIndex = 0;
+    for (final leaf in leaves) {
+      final text = leaf.text ?? '';
+      final leafStart = offset;
+      final leafEnd = offset + text.length;
+      var cursor = leafStart;
+      while (cursor < leafEnd) {
+        // Skip ranges entirely before the cursor.
+        while (rangeIndex < merged.length &&
+            merged[rangeIndex].$2 <= cursor) {
+          rangeIndex++;
+        }
+        final range =
+            rangeIndex < merged.length ? merged[rangeIndex] : null;
+        if (range == null || range.$1 >= leafEnd) {
+          out.add(TextSpan(
+              text: text.substring(cursor - leafStart),
+              style: leaf.style,
+              recognizer: leaf.recognizer));
+          cursor = leafEnd;
+        } else if (range.$1 > cursor) {
+          out.add(TextSpan(
+              text: text.substring(
+                  cursor - leafStart, range.$1 - leafStart),
+              style: leaf.style,
+              recognizer: leaf.recognizer));
+          cursor = range.$1;
+        } else {
+          final sliceEnd = range.$2 < leafEnd ? range.$2 : leafEnd;
+          out.add(TextSpan(
+              text: text.substring(
+                  cursor - leafStart, sliceEnd - leafStart),
+              style: (leaf.style ?? const TextStyle())
+                  .copyWith(backgroundColor: highlightBackground),
+              recognizer: leaf.recognizer ??
+                  (widget.onHighlightTap != null
+                      ? tapFor(range.$3)
+                      : null)));
+          cursor = sliceEnd;
+        }
+      }
+      offset = leafEnd;
     }
-    return spans;
+    return out;
   }
+
 }
 
 enum _BlockType { heading, paragraph, quote, listItem, code, image, rule }

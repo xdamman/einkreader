@@ -40,9 +40,65 @@ class ArticleExtractor {
   static final _linkedImage =
       RegExp(r'\[\s*(!\[[^\]]*\]\([^)]*\))\s*\]\([^)]*\)');
 
+  /// Class names that mark screen-reader-only content ("Copy link to
+  /// heading" and friends): visually hidden on the web, but html2md knows
+  /// nothing of CSS, so without this pass the labels leak into the text.
+  static final _hiddenClass = RegExp(
+      r'(^|\s)(sr-only|sr_only|visually-hidden|visuallyhidden|'
+      r'screen-reader-text|screen-reader-only|screenreader)(\s|$)',
+      caseSensitive: false);
+
+  static final _hiddenStyle = RegExp(
+      r'display\s*:\s*none|visibility\s*:\s*hidden',
+      caseSensitive: false);
+
+  /// Removes elements a browser would never paint: [hidden], hidden inline
+  /// styles, and screen-reader-only classes. Anchor links left empty by
+  /// that (a heading's self-link icon) are dropped too.
+  static String _stripInvisible(String fragment) {
+    final frag = html_parser.parseFragment(fragment);
+    for (final el in frag.querySelectorAll('*')) {
+      final classes = el.attributes['class'] ?? '';
+      final style = el.attributes['style'] ?? '';
+      if (el.attributes.containsKey('hidden') ||
+          _hiddenClass.hasMatch(classes) ||
+          _hiddenStyle.hasMatch(style)) {
+        el.remove();
+      }
+    }
+    for (final a in frag.querySelectorAll('a')) {
+      final href = a.attributes['href'] ?? '';
+      if (href.startsWith('#') && a.text.trim().isEmpty) a.remove();
+    }
+    // Avatars, icons and tracking pixels are byline chrome, not article
+    // content — and they render as awkward blocks on e-ink.
+    for (final img in frag.querySelectorAll('img')) {
+      final w = int.tryParse(img.attributes['width'] ?? '');
+      final h = int.tryParse(img.attributes['height'] ?? '');
+      final classes = img.attributes['class'] ?? '';
+      final alt = img.attributes['alt'] ?? '';
+      final src = img.attributes['src'] ?? '';
+      // CDN resize params like w_36,h_36 reveal the display size even when
+      // the attributes are missing (Substack, Cloudinary).
+      final cdn = RegExp(r'[/,]w_(\d+),h_(\d+)[/,]').firstMatch(src);
+      final cdnSide = cdn == null
+          ? null
+          : [int.parse(cdn.group(1)!), int.parse(cdn.group(2)!)]
+              .reduce((a, b) => a > b ? a : b);
+      final tiny = (w != null && w <= 64) ||
+          (h != null && h <= 64) ||
+          (cdnSide != null && cdnSide <= 64);
+      final avatarish = RegExp('avatar', caseSensitive: false)
+              .hasMatch('$classes $alt') ||
+          src.contains('avatar');
+      if (tiny || avatarish) img.remove();
+    }
+    return frag.outerHtml;
+  }
+
   /// Converts an HTML fragment (e.g. content:encoded from a feed) to Markdown.
   static String convertHtmlToMarkdown(String fragment) {
-    var markdown = html2md.convert(fragment, styleOptions: {
+    var markdown = html2md.convert(_stripInvisible(fragment), styleOptions: {
       'headingStyle': 'atx',
       'codeBlockStyle': 'fenced',
       'emDelimiter': '*',

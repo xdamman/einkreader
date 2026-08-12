@@ -249,6 +249,38 @@ void main() {
         reason: 'no mid-paragraph glued bullet');
   });
 
+  testWidgets('a highlight spanning bold and italic paints as one wash',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown:
+              'Reading on **emissive screens** competes with *every* '
+              'notification you allow.',
+          highlights: [
+            'on emissive screens competes with every notification'
+          ],
+        ),
+      ),
+    ));
+    final spans = _spans(tester);
+    // Every painted piece carries the wash; concatenated they equal the
+    // stored highlight even though it crosses ** and * boundaries.
+    final washed = spans
+        .where((s) => s.$2?.backgroundColor != null)
+        .map((s) => s.$1)
+        .join();
+    expect(washed, 'on emissive screens competes with every notification');
+    // The bold slice stays bold under the wash.
+    final boldWashed = spans.firstWhere((s) =>
+        s.$1.contains('emissive screens') &&
+        s.$2?.backgroundColor != null);
+    expect(boldWashed.$2?.fontWeight, FontWeight.w700);
+    // Text outside the highlight is unwashed.
+    final before = spans.firstWhere((s) => s.$1.contains('Reading'));
+    expect(before.$2?.backgroundColor, isNull);
+  });
+
   testWidgets('a real sentence mentioning subscribe is kept', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
