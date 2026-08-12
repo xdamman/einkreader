@@ -27,11 +27,32 @@ import 'sources_screen.dart';
 /// App settings: source management entry point, storage location, backup /
 /// restore and developer tools. Accounts (Twitter, Nostr) are connected from
 /// the Add source screen.
+/// The settings areas, each its own screen one level down (Android-style):
+/// the hub stays a calm list, and every section gets room to breathe.
+enum SettingsSection {
+  sources('Sources', 'Feeds and folders', Icons.rss_feed),
+  plugins('Plugins', 'Twitter & Email · supporter', Icons.extension_outlined),
+  profiles('Profiles', 'Nostr identities and switching',
+      Icons.person_outline),
+  relays('Nostr relays', 'Where shares are published', Icons.dns_outlined),
+  storage('Storage', 'Where your library lives', Icons.folder_open),
+  backup('Backup', 'Save and restore everything', Icons.backup_outlined),
+  developer('Developer', 'Debug tools and updates', Icons.code);
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  const SettingsSection(this.title, this.subtitle, this.icon);
+}
+
 class SettingsScreen extends StatefulWidget {
   /// Injectable for tests; defaults to the real GitHub-backed checker.
   final UpdateService? updateService;
 
-  const SettingsScreen({super.key, this.updateService});
+  /// Null shows the hub; a section shows that section's own screen.
+  final SettingsSection? section;
+
+  const SettingsScreen({super.key, this.updateService, this.section});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -356,270 +377,293 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const sectionStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
+    final section = widget.section;
+    if (section == null) return _hub(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(section.title)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Sources', style: sectionStyle),
-            const SizedBox(height: 8),
-            const Text(
-              'Manage your feeds and organize them into folders.',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.rss_feed),
-              label: const Text('Manage sources'),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const SourcesScreen())),
-            ),
-            const Text('Plugins', style: sectionStyle),
-            const SizedBox(height: 8),
-            const Text(
-              'einkreader is free forever. Plugins run on our servers and '
-              'need the supporter subscription.',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 12),
-            _PluginCard(
-              title: '@ Twitter',
-              description: 'Sync your bookmarks as a source · share '
-                  'highlights as tweets & quote-tweets',
-              enabled: _supporter,
-              on: _twitterPluginOn,
-              onChanged: (v) async {
-                await PluginService.instance.setTwitterOn(v);
-                _load();
-              },
-              onLockedTap: _openPitch,
-            ),
-            const SizedBox(height: 10),
-            _PluginCard(
-              title: '✉ Email',
-              description: 'Send anything to your @einkreader.app address '
-                  'to read it · one-tap shares from your address',
-              enabled: _supporter,
-              on: _emailPluginOn,
-              onChanged: (v) async {
-                await PluginService.instance.setEmailOn(v);
-                _load();
-              },
-              onLockedTap: _openPitch,
-            ),
-            const SizedBox(height: 12),
-            if (!_supporter)
-              OutlinedButton(
-                onPressed: _openPitch,
-                child: const Text('Subscribe to activate plugins'),
-              )
-            else
-              const Text('Supporter · early access',
-                  style: TextStyle(
-                      fontSize: 12, fontStyle: FontStyle.italic)),
-            const SizedBox(height: 12),
-            if (_contactsEnabled)
-              OutlinedButton.icon(
-                icon: const Icon(Icons.people_outline),
-                label: const Text('Contacts'),
-                onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const ContactsScreen())),
-              ),
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Nostr profiles', style: sectionStyle),
-            const SizedBox(height: 8),
-            const Text(
-              'Reading and sharing happen as the active profile. Long-press '
-              'the profile icon on the home screen to switch quickly.',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 8),
-            FutureBuilder(
-              future: ProfileService.instance.profileSummaries(),
-              builder: (context, snapshot) {
-                final summaries = snapshot.data ?? const <ProfileSummary>[];
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final summary in summaries)
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(summary.active
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_unchecked),
-                        title: Text(summary.name.isNotEmpty
-                            ? summary.name
-                            : (summary.hasIdentity
-                                ? 'Unnamed profile'
-                                : 'Empty profile')),
-                        onTap: summary.active
-                            ? null
-                            : () async {
-                                await ProfileService.instance
-                                    .switchTo(summary.id);
-                                _load();
-                                setState(() {});
-                              },
-                      ),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.person_add_outlined),
-                      label: const Text('Add profile'),
-                      onPressed: () async {
-                        await showAddProfileDialog(context);
-                        setState(() {});
-                      },
-                    ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Nostr relays', style: sectionStyle),
-            const SizedBox(height: 8),
-            const RelaySettings(),
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            if (kCustomStorageSupported) ...[
-              const SizedBox(height: 32),
-              const Divider(),
-              const SizedBox(height: 24),
-              const Text('Storage', style: sectionStyle),
-              const SizedBox(height: 8),
-              const Text(
-                'Where your offline library (article files and images) is '
-                'stored. Choose a folder outside the app — for example one '
-                'synced by Syncthing — to mirror it to your other devices. '
-                'The reading database itself stays in app storage.',
-                style: TextStyle(fontSize: 14),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Everything is stored as plain Markdown files in a clear '
-                'directory structure — a folder per year, then per source '
-                '(so archiving a year is moving one folder), a favorites '
-                'copy, and a single highlights.md — easy to back up, '
-                'restore and browse with any application. highlights.md '
-                'works both ways: highlights added to it with any editor '
-                'are imported into the app on the next sync.',
-                style: TextStyle(fontSize: 14),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      _archiveDir == null
-                          ? 'Current folder: …'
-                          : 'Current folder: $_archiveDir'
-                              '${_customArchiveDir ? '' : ' (app storage)'}',
-                      style: const TextStyle(
-                          fontSize: 13, fontFamily: 'monospace'),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Open folder',
-                    icon: const Icon(Icons.open_in_new),
-                    onPressed: _archiveDir == null
-                        ? null
-                        : () => OpenFilex.open(_archiveDir!),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.folder_open),
-                label: Text(_movingArchive ? 'Moving…' : 'Choose folder'),
-                onPressed: _movingArchive ? null : _chooseArchiveDir,
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.cleaning_services_outlined),
-                label: Text(_tidying ? 'Tidying…' : 'Tidy archive'),
-                onPressed: _tidying ? null : _tidyArchive,
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Folds older year/month folders into the year/source '
-                'layout and collects stray year folders left next to the '
-                'archive by earlier versions.',
-                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-              ),
-              if (_customArchiveDir) ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.undo),
-                  label: const Text('Move back to app storage'),
-                  onPressed: _movingArchive ? null : () => _moveArchive(null),
-                ),
-              ],
-            ],
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Backup', style: sectionStyle),
-            const SizedBox(height: 8),
-            const Text(
-              'Save your whole library (feeds, articles, highlights and '
-              'downloaded content) to a file you can keep in Google Drive, then '
-              'restore it after reinstalling.',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.backup_outlined),
-              label: Text(_backingUp ? 'Preparing…' : 'Back up now'),
-              onPressed: _backupBusy ? null : _backup,
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.restore),
-              label: Text(_restoring ? 'Restoring…' : 'Restore from backup'),
-              onPressed: _backupBusy ? null : _restore,
-            ),
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Developer', style: sectionStyle),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Developer mode'),
-              subtitle: const Text('Show the Debug tab on the reader screen.'),
-              value: _developerMode,
-              onChanged: (value) async {
-                setState(() => _developerMode = value);
-                await AppLogService.instance.setDeveloperModeEnabled(value);
-                if (value) _checkForUpdate();
-              },
-            ),
-            if (_developerMode) ...[
-              const SizedBox(height: 8),
-              _buildUpdateTile(),
-            ],
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 16),
-            const Text(
-              'einkreader — a minimal offline reader for e-ink devices.\n'
-              'All content is stored on this device.',
-              style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
-            ),
-          ],
+          children: switch (section) {
+            SettingsSection.sources => _sourcesSection(),
+            SettingsSection.plugins => _pluginsSection(),
+            SettingsSection.profiles => _profilesSection(),
+            SettingsSection.relays => _relaysSection(),
+            SettingsSection.storage => _storageSection(),
+            SettingsSection.backup => _backupSection(),
+            SettingsSection.developer => _developerSection(),
+          },
         ),
       ),
     );
   }
+
+  Widget _hub(BuildContext context) {
+    final sections = [
+      for (final section in SettingsSection.values)
+        if (section != SettingsSection.storage || kCustomStorageSupported)
+          section,
+    ];
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ListView(
+        children: [
+          for (final section in sections)
+            ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+              leading: Icon(section.icon, size: 26),
+              title: Text(section.title,
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w600)),
+              subtitle: Text(section.subtitle,
+                  style: const TextStyle(fontSize: 13)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => SettingsScreen(section: section)));
+                _load();
+              },
+            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 24, 20, 24),
+            child: Text(
+              'einkreader — a minimal offline reader for e-ink devices.\n'
+              'All content is stored on this device.',
+              style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _sourcesSection() => [
+        const Text(
+          'Manage your feeds and organize them into folders.',
+          style: TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.rss_feed),
+          label: const Text('Manage sources'),
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const SourcesScreen())),
+        ),
+      ];
+
+  List<Widget> _pluginsSection() => [
+        const Text(
+          'einkreader is free forever. Plugins run on our servers and '
+          'need the supporter subscription.',
+          style: TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 12),
+        _PluginCard(
+          title: '@ Twitter',
+          description: 'Sync your bookmarks as a source · share '
+              'highlights as tweets & quote-tweets',
+          enabled: _supporter,
+          on: _twitterPluginOn,
+          onChanged: (v) async {
+            await PluginService.instance.setTwitterOn(v);
+            _load();
+          },
+          onLockedTap: _openPitch,
+        ),
+        const SizedBox(height: 10),
+        _PluginCard(
+          title: '✉ Email',
+          description: 'Send anything to your @einkreader.app address '
+              'to read it · one-tap shares from your address',
+          enabled: _supporter,
+          on: _emailPluginOn,
+          onChanged: (v) async {
+            await PluginService.instance.setEmailOn(v);
+            _load();
+          },
+          onLockedTap: _openPitch,
+        ),
+        const SizedBox(height: 12),
+        if (!_supporter)
+          OutlinedButton(
+            onPressed: _openPitch,
+            child: const Text('Subscribe to activate plugins'),
+          )
+        else
+          const Text('Supporter · early access',
+              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+        const SizedBox(height: 12),
+        if (_contactsEnabled)
+          OutlinedButton.icon(
+            icon: const Icon(Icons.people_outline),
+            label: const Text('Contacts'),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const ContactsScreen())),
+          ),
+      ];
+
+  List<Widget> _profilesSection() => [
+        const Text(
+          'Reading and sharing happen as the active profile. Long-press '
+          'the profile icon on the home screen to switch quickly.',
+          style: TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        FutureBuilder(
+          future: ProfileService.instance.profileSummaries(),
+          builder: (context, snapshot) {
+            final summaries = snapshot.data ?? const <ProfileSummary>[];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final summary in summaries)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(summary.active
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked),
+                    title: Text(summary.name.isNotEmpty
+                        ? summary.name
+                        : (summary.hasIdentity
+                            ? 'Unnamed profile'
+                            : 'Empty profile')),
+                    onTap: summary.active
+                        ? null
+                        : () async {
+                            await ProfileService.instance
+                                .switchTo(summary.id);
+                            _load();
+                            setState(() {});
+                          },
+                  ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.person_add_outlined),
+                  label: const Text('Add profile'),
+                  onPressed: () async {
+                    await showAddProfileDialog(context);
+                    setState(() {});
+                  },
+                ),
+              ],
+            );
+          },
+        ),
+      ];
+
+  List<Widget> _relaysSection() => const [RelaySettings()];
+
+  List<Widget> _storageSection() => [
+        const Text(
+          'Where your offline library (article files and images) is '
+          'stored. Choose a folder outside the app — for example one '
+          'synced by Syncthing — to mirror it to your other devices. '
+          'The reading database itself stays in app storage.',
+          style: TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Everything is stored as plain Markdown files in a clear '
+          'directory structure — a folder per year, then per source '
+          '(so archiving a year is moving one folder), a favorites '
+          'copy, and a single highlights.md — easy to back up, '
+          'restore and browse with any application. highlights.md '
+          'works both ways: highlights added to it with any editor '
+          'are imported into the app on the next sync.',
+          style: TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                _archiveDir == null
+                    ? 'Current folder: …'
+                    : 'Current folder: $_archiveDir'
+                        '${_customArchiveDir ? '' : ' (app storage)'}',
+                style:
+                    const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Open folder',
+              icon: const Icon(Icons.open_in_new),
+              onPressed: _archiveDir == null
+                  ? null
+                  : () => OpenFilex.open(_archiveDir!),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.folder_open),
+          label: Text(_movingArchive ? 'Moving…' : 'Choose folder'),
+          onPressed: _movingArchive ? null : _chooseArchiveDir,
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.cleaning_services_outlined),
+          label: Text(_tidying ? 'Tidying…' : 'Tidy archive'),
+          onPressed: _tidying ? null : _tidyArchive,
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Folds older year/month folders into the year/source '
+          'layout and collects stray year folders left next to the '
+          'archive by earlier versions.',
+          style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+        ),
+        if (_customArchiveDir) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.undo),
+            label: const Text('Move back to app storage'),
+            onPressed: _movingArchive ? null : () => _moveArchive(null),
+          ),
+        ],
+      ];
+
+  List<Widget> _backupSection() => [
+        const Text(
+          'Save your whole library (feeds, articles, highlights and '
+          'downloaded content) to a file you can keep in Google Drive, then '
+          'restore it after reinstalling.',
+          style: TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.backup_outlined),
+          label: Text(_backingUp ? 'Preparing…' : 'Back up now'),
+          onPressed: _backupBusy ? null : _backup,
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.restore),
+          label: Text(_restoring ? 'Restoring…' : 'Restore from backup'),
+          onPressed: _backupBusy ? null : _restore,
+        ),
+      ];
+
+  List<Widget> _developerSection() => [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Developer mode'),
+          subtitle: const Text('Show the Debug tab on the reader screen.'),
+          value: _developerMode,
+          onChanged: (value) async {
+            setState(() => _developerMode = value);
+            await AppLogService.instance.setDeveloperModeEnabled(value);
+            if (value) _checkForUpdate();
+          },
+        ),
+        if (_developerMode) ...[
+          const SizedBox(height: 8),
+          _buildUpdateTile(),
+        ],
+      ];
 }
 
 /// A plugin card: capabilities in plain words, a toggle that is inert until

@@ -1,0 +1,23 @@
+# relay.einkreader.app — strfry behind Caddy (automatic TLS).
+# On the VPS:  cd infra/relay && docker compose up -d
+# DNS: point relay.einkreader.app (A record) at this machine first.
+services:
+  strfry:
+    image: ghcr.io/hoytech/strfry:latest
+    restart: unless-stopped
+    volumes:
+      - ./strfry.conf:/etc/strfry.conf:ro
+      - ./strfry-policy.py:/app/strfry-policy.py:ro
+      - strfry-db:/app/strfry-db
+    expose: ["7777"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  strfry-db:
+  caddy-data:
