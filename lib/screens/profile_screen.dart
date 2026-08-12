@@ -637,12 +637,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Uri.parse('https://einkreader.app/'
                             '${_address!.split('@').first}'),
                         mode: LaunchMode.externalApplication),
-                    child: Text(
-                      'einkreader.app/${_address!.split('@').first} ↗',
-                      style: const TextStyle(
-                          fontSize: 12.5,
-                          fontFamily: 'monospace',
-                          decoration: TextDecoration.underline),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'einkreader.app/${_address!.split('@').first}',
+                          style: const TextStyle(
+                              fontSize: 12.5,
+                              fontFamily: 'monospace',
+                              decoration: TextDecoration.underline),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.open_in_new, size: 13),
+                      ],
                     ),
                   ),
                 ),
@@ -659,8 +666,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
               const SizedBox(height: 14),
               // The pencil in the top bar always edits; the big button only
-              // appears while the profile is still empty and needs the nudge.
-              if (about.isEmpty && links.isEmpty) ...[
+              // appears while the profile is still empty (nothing written,
+              // nothing shared) and needs the nudge.
+              if (about.isEmpty &&
+                  links.isEmpty &&
+                  _sharedHighlights.isEmpty) ...[
                 OutlinedButton.icon(
                   icon: const Icon(Icons.edit_outlined, size: 18),
                   label: const Text('Edit profile'),
