@@ -6,6 +6,7 @@ import '../models.dart';
 import '../screens/contacts_screen.dart';
 import '../screens/plugin_pitch_screen.dart';
 import '../screens/profile_screen.dart';
+import '../services/errors.dart';
 import '../services/outbox_service.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
@@ -197,7 +198,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
         await _record('profile', ref: result.eventId);
         done.add(result.accepted > 0 ? 'profile' : 'profile (queued)');
       } catch (e) {
-        failed.add('profile: $e');
+        failed.add(friendlyError(e, doing: 'publishing to your profile'));
       }
     }
 

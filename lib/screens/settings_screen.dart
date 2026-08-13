@@ -16,6 +16,7 @@ import '../services/backup_service.dart';
 import '../services/build_config.dart';
 import '../services/sync_service.dart';
 import '../services/update_service.dart';
+import '../services/errors.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import '../widgets/profile_switcher.dart';
@@ -37,7 +38,8 @@ enum SettingsSection {
   relays('Nostr relays', 'Where shares are published', Icons.dns_outlined),
   storage('Storage', 'Where your library lives', Icons.folder_open),
   backup('Backup', 'Save and restore everything', Icons.backup_outlined),
-  developer('Developer', 'Debug tools and updates', Icons.code);
+  developer('Developer', 'Debug tools and updates', Icons.code),
+  advanced('Advanced', 'Relays, storage, developer', Icons.tune);
 
   final String title;
   final String subtitle;
@@ -123,7 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() => _update = update);
     } catch (e) {
-      if (mounted) _toast('Update check failed: $e');
+      if (mounted) _toast(friendlyError(e, doing: 'checking for updates'));
     } finally {
       if (mounted) setState(() => _checkingUpdate = false);
     }
@@ -156,7 +158,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _toast('Could not open installer: ${result.message}');
       }
     } catch (e) {
-      if (mounted) _toast('Update failed: $e');
+      if (mounted) _toast(friendlyError(e, doing: 'downloading the update'));
     } finally {
       if (mounted) setState(() => _downloadPct = null);
     }
@@ -171,7 +173,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await Share.shareXFiles([XFile(file.path)],
           subject: 'einkreader backup', text: 'einkreader library backup');
     } catch (e) {
-      if (mounted) _toast('Backup failed: $e');
+      if (mounted) _toast(friendlyError(e, doing: 'creating the backup'));
     } finally {
       if (mounted) setState(() => _backingUp = false);
     }
@@ -213,7 +215,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _load();
       _toast('Backup restored');
     } catch (e) {
-      if (mounted) _toast('Restore failed: $e');
+      if (mounted) _toast(friendlyError(e, doing: 'restoring the backup'));
     } finally {
       if (mounted) setState(() => _restoring = false);
     }
@@ -245,7 +247,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? 'Library moved back to app storage'
           : 'Library moved');
     } catch (e) {
-      _toast('Could not move the library: $e');
+      _toast(friendlyError(e, doing: 'moving the library'));
     } finally {
       if (mounted) setState(() => _movingArchive = false);
     }
@@ -266,7 +268,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : 'Tidied: moved $moved files'
               '${rewritten > 0 ? ', updated $rewritten articles' : ''}');
     } catch (e) {
-      _toast('Tidy failed: $e');
+      _toast(friendlyError(e, doing: 'tidying the archive'));
     } finally {
       if (mounted) setState(() => _tidying = false);
     }
@@ -393,23 +395,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SettingsSection.storage => _storageSection(),
             SettingsSection.backup => _backupSection(),
             SettingsSection.developer => _developerSection(),
+            SettingsSection.advanced => [
+                for (final sub in _advancedSections)
+                  ListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 4),
+                    leading: Icon(sub.icon, size: 24),
+                    title: Text(sub.title,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w600)),
+                    subtitle: Text(sub.subtitle,
+                        style: const TextStyle(fontSize: 13)),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () async {
+                      await Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => SettingsScreen(section: sub)));
+                      _load();
+                    },
+                  ),
+              ],
           },
         ),
       ),
     );
   }
 
+  /// Everyday sections up front; relays, storage and developer live one
+  /// level deeper under Advanced — most readers never need them.
+  static const _mainSections = [
+    SettingsSection.sources,
+    SettingsSection.plugins,
+    SettingsSection.profiles,
+    SettingsSection.backup,
+    SettingsSection.advanced,
+  ];
+
+  List<SettingsSection> get _advancedSections => [
+        SettingsSection.relays,
+        if (kCustomStorageSupported) SettingsSection.storage,
+        SettingsSection.developer,
+      ];
+
   Widget _hub(BuildContext context) {
-    final sections = [
-      for (final section in SettingsSection.values)
-        if (section != SettingsSection.storage || kCustomStorageSupported)
-          section,
-    ];
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
-          for (final section in sections)
+          for (final section in _mainSections)
             ListTile(
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
@@ -458,8 +490,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<Widget> _pluginsSection() => [
         const Text(
-          'einkreader is free forever. Plugins run on our servers and '
-          'need the supporter subscription.',
+          'Plugins let you add sources or channels to share content. '
+          'They run on our servers and need the supporter subscription.',
           style: TextStyle(fontSize: 14),
         ),
         const SizedBox(height: 12),

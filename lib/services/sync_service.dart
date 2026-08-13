@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import 'app_log.dart';
+import 'errors.dart';
 import 'extractor.dart';
 import 'feed_parser.dart';
 import 'archive_store.dart';
@@ -179,7 +180,17 @@ class SyncService {
           : 'Refresh finished with ${errors.length} error(s): $summary; '
               '${errors.join(' | ')}',
     );
-    return errors.isEmpty ? summary : '$summary · ${errors.first}';
+    if (errors.isEmpty) return summary;
+    // Raw exception text stays in the debug log (above); the status line
+    // only needs to tell the reader what to do about it.
+    if (errors.every(looksOffline)) {
+      return newArticles == 0
+          ? "You're offline — showing what's already downloaded"
+          : "$summary · you're offline, the rest will sync later";
+    }
+    final n = errors.length;
+    return '$summary · $n source${n == 1 ? '' : 's'} could not refresh '
+        '(details in the debug log)';
   }
 
   /// Syncs only the given sources (e.g. right after the user adds them), then

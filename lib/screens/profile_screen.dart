@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
+import '../services/errors.dart';
 import '../services/profile_service.dart';
 import '../theme.dart';
 import '../widgets/share_note_dialog.dart';
@@ -354,7 +355,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Avatar upload failed: $e')));
+          .showSnackBar(SnackBar(
+              content:
+                  Text(friendlyError(e, doing: 'uploading the avatar'))));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
