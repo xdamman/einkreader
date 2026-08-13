@@ -161,9 +161,29 @@ class _MarkdownViewState extends State<MarkdownView> {
     }
     final text = block.text.trim();
     if (_subscribeLink.hasMatch(text)) return true;
+    // Raw CSS that leaked into older conversions (a feed's <style> block,
+    // e.g. Daring Fireball's per-table styling) — pure noise to a reader.
+    if (_looksLikeCss(text)) return true;
     // Compare on the visible text, so "**Subscribe now**" matches too.
     final plain = Article.plainTitle(text).trim();
     return _ctaText.hasMatch(plain);
+  }
+
+  /// One or more `selector { property: value }` rules and nothing else.
+  static final _cssRules =
+      RegExp(r'^(?:[^{}]{1,200}\{[^{}]*\}\s*)+$');
+
+  static bool _looksLikeCss(String text) {
+    final t = text.trim();
+    if (!t.endsWith('}') || !t.contains('{')) return false;
+    // Declarations look like CSS (property: value inside the braces)…
+    if (!RegExp(r'\{[^}]*:[^}]*\}').hasMatch(t)) return false;
+    // …and the whole paragraph is rules: selector-like starts or several
+    // rule groups (prose with a lone {x} never matches both).
+    final selectorStart =
+        t.startsWith('.') || t.startsWith('#') || t.startsWith('@');
+    final ruleCount = '}'.allMatches(t).length;
+    return _cssRules.hasMatch(t) && (selectorStart || ruleCount >= 2);
   }
 
   // ------------------------------------------------------------ block model

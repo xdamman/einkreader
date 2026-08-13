@@ -54,6 +54,20 @@ void main() {
     expect(out, contains('Revenue'));
   });
 
+  test("Daring Fireball's style-inside-table strips cleanly", () {
+    // The feed nests <style> INSIDE <table> inside <p> — element removal
+    // must work wherever the parser fosters it.
+    final out = md('<p>For the most recent 12 months:</p>'
+        '<p><table class="table-F0A58456" width=300>'
+        '<style>.table-F0A58456 th:nth-child(1) { text-align: left }</style>'
+        '<tr><th></th><th>Disney</th><th>Netflix</th></tr>'
+        '<tr><td>Revenue</td><td>\$97 B</td><td>\$48 B</td></tr>'
+        '</table></p>');
+    expect(out, isNot(contains('text-align')));
+    expect(out, contains('Disney'));
+    expect(out, contains('Revenue'));
+  });
+
   test('fragment links with real text survive', () {
     final out = md('<p>See the <a href="#notes">notes below</a>.</p>');
     expect(out, contains('[notes below](#notes)'));

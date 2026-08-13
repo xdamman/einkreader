@@ -281,6 +281,33 @@ void main() {
     expect(before.$2?.backgroundColor, isNull);
   });
 
+  testWidgets('leaked CSS paragraphs are suppressed at render time',
+      (tester) async {
+    // Baked into articles stored before the <style>-strip existed.
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: 'For the most recent 12 months:\n\n'
+              '.table-F0A58456-C897 th:nth-child(1) { text-align: left } '
+              '.table-F0A58456-C897 td:nth-child(1) { text-align: left } '
+              '.table-F0A58456-C897 th:nth-child(2) { text-align: center }\n\n'
+              '| a | b |\n| --- | --- |\n| 1 | 2 |',
+        ),
+      ),
+    ));
+    expect(find.textContaining('text-align'), findsNothing);
+    expect(find.textContaining('most recent 12 months'), findsOneWidget);
+    expect(find.byType(Table), findsOneWidget);
+    // Prose with braces is never mistaken for CSS.
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+            markdown: 'Use the setting {dark mode} to switch.'),
+      ),
+    ));
+    expect(find.textContaining('dark mode'), findsOneWidget);
+  });
+
   testWidgets('pipe tables render as bordered tables, header bold',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(
