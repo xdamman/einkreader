@@ -60,8 +60,9 @@ class TweetItem {
       );
 
   /// Returns a copy carrying a whole self-thread as [text]. Marked long-form:
-  /// the thread IS the article — keep it rather than downloading any page the
-  /// first tweet links to.
+  /// a substantial thread IS the article — keep it rather than downloading a
+  /// page it links to (a short announcement thread still counts as a link
+  /// share; see SyncService._sharesLink).
   TweetItem asThread(String threadText) => TweetItem(
         id: id,
         text: threadText,

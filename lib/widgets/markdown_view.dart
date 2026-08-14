@@ -483,11 +483,16 @@ class _MarkdownViewState extends State<MarkdownView> {
   // arrived as literal text, but bracketed text followed by a parenthesized
   // URL is in practice always a real link — render it as one instead of
   // leaving mangled text.
+  // The final alternative turns a bare URL in running text into a tappable
+  // link (tweets and pasted notes carry them unadorned). A URL inside
+  // [text](url) or `code` is consumed by an earlier alternative first; the
+  // last character class keeps trailing sentence punctuation out of the link.
   static final _inlinePattern = RegExp(
       r'\*\*(.+?)\*\*|__(.+?)__|\*([^*\s][^*]*?)\*|_([^_\s][^_]*?)_|'
       r'`([^`]+)`|\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
       r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
-      r'\\\[([^\]]*?)\\\]\(([^)\s]+)(?:\s+"[^"]*")?\)');
+      r'\\\[([^\]]*?)\\\]\(([^)\s]+)(?:\s+"[^"]*")?\)|'
+      '''(https?://[^\\s<>()\\[\\]]+[^\\s<>()\\[\\].,;:!?'"])''');
 
   /// The plain text [_inlineSpans] renders for [text] — same branches, but
   /// producing a string. Keeps [MarkdownView.plainBlockTexts] in lockstep
@@ -510,6 +515,8 @@ class _MarkdownViewState extends State<MarkdownView> {
       } else if (match.group(8) != null) {
         final alt = match.group(8)!;
         if (alt.isNotEmpty) out.write('[image: $alt]');
+      } else if (match.group(12) != null) {
+        out.write(match.group(12));
       }
       index = match.end;
     }
@@ -577,6 +584,23 @@ class _MarkdownViewState extends State<MarkdownView> {
               text: '[image: $alt]',
               style: style.copyWith(fontStyle: FontStyle.italic)));
         }
+      } else if (match.group(12) != null) {
+        // Bare URL in running text: tappable, shown as-is.
+        final url = match.group(12)!;
+        final recognizer = TapGestureRecognizer()
+          ..onTap = () {
+            final onLinkTap = widget.onLinkTap;
+            if (onLinkTap != null) {
+              onLinkTap(url, url);
+            } else {
+              launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+            }
+          };
+        _recognizers.add(recognizer);
+        spans.add(TextSpan(
+            text: url,
+            style: style.copyWith(decoration: TextDecoration.underline),
+            recognizer: recognizer));
       }
       index = match.end;
     }

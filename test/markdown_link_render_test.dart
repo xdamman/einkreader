@@ -347,4 +347,40 @@ void main() {
     final text = _spans(tester).map((s) => s.$1).join();
     expect(text, contains('subscribe now to receive weekly updates'));
   });
+
+  testWidgets('a bare URL in running text becomes a tappable link',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: 'Read it at https://worksinprogress.co/issue/'
+              'future-of-medicine/ before the talk.',
+        ),
+      ),
+    ));
+
+    final spans = _spans(tester);
+    final url = spans.firstWhere((s) => s.$1.startsWith('https://'));
+    expect(url.$1, 'https://worksinprogress.co/issue/future-of-medicine/');
+    expect(url.$2?.decoration, TextDecoration.underline);
+    // Surrounding prose stays plain.
+    final tail = spans.firstWhere((s) => s.$1.contains('before the talk'));
+    expect(tail.$2?.decoration, isNot(TextDecoration.underline));
+  });
+
+  testWidgets('trailing sentence punctuation stays out of a bare link',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: MarkdownView(
+          markdown: 'More at https://example.com/post. Enjoy!',
+        ),
+      ),
+    ));
+
+    final spans = _spans(tester);
+    final url = spans.firstWhere((s) => s.$1.startsWith('https://'));
+    expect(url.$1, 'https://example.com/post');
+    expect(spans.map((s) => s.$1).join(), contains('. Enjoy!'));
+  });
 }

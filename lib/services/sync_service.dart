@@ -325,6 +325,29 @@ class SyncService {
       if (isTweet && source != null) {
         // Re-fetch the post (picks up edits / new media) and re-localize.
         final item = await twitter.fetchTweet(article.guid);
+        if (_sharesLink(item)) {
+          // The bookmark is really a link share (possibly saved before this
+          // rule existed): repoint at the linked page and download it, with
+          // the tweet kept above as a quoted intro.
+          await _db.updateArticleUrl(article.id!, item.articleUrl!);
+          final relinked = Article(
+            id: article.id,
+            sourceId: article.sourceId,
+            guid: article.guid,
+            title: article.title,
+            author: article.author,
+            url: item.articleUrl,
+            publishedAt: article.publishedAt,
+            summary: item.text,
+            fetched: 0,
+            createdAt: article.createdAt,
+          );
+          final changed = await _fetchArticleContent(relinked, overwrite: true);
+          if (!changed) {
+            throw Exception('Could not download — check your connection');
+          }
+          return;
+        }
         final content = await _archive.localizeMarkdown(
           item.text,
           relDir: _relDir(source, article),
@@ -522,6 +545,15 @@ class SyncService {
     return inserted;
   }
 
+  /// Whether a bookmark really shares an external link. A long-form note
+  /// counts too when it is short enough to be an announcement ("BIG NEW
+  /// piece by me … `<url>`") rather than an essay; the 600-char bound matches
+  /// the quoted-intro limit in _fetchAndStoreContent so the note survives
+  /// above the downloaded article.
+  static bool _sharesLink(TweetItem tweet) =>
+      tweet.articleUrl != null &&
+      (!tweet.isLongForm || tweet.text.length < 600);
+
   Future<int> _insertTweets(Source source, List<TweetItem> tweets) async {
     await AppLogService.instance.info(
       'Processing ${tweets.length} tweets for source #${source.id}: '
@@ -543,9 +575,8 @@ class SyncService {
           sourceId: source.id!, guid: tweet.id);
       Article? sameUrl;
       if (!knownByGuid) {
-        final checkUrl = tweet.isLongForm
-            ? tweet.tweetUrl
-            : (tweet.articleUrl ?? tweet.tweetUrl);
+        final checkUrl =
+            _sharesLink(tweet) ? tweet.articleUrl! : tweet.tweetUrl;
         sameUrl = await _db.findArticleByUrl(checkUrl);
       }
       if (knownByGuid || sameUrl != null) {
@@ -558,15 +589,12 @@ class SyncService {
       // A new tweet may head a self-thread: keep the whole thread as the
       // article when it does (one extra lookup, new tweets only).
       tweet = await twitter.threadOf(tweet) ?? tweet;
-      // A native long-form post (or a thread) is itself the article — keep
-      // its full text and don't download a linked page. A short tweet that
-      // links to a blog post gets the linked article downloaded (fetched=0).
-      final downloadsArticle = tweet.articleUrl != null && !tweet.isLongForm;
-      // Long-form posts keep the tweet permalink so the body stays;
-      // others point at the linked article when there is one.
-      final url = tweet.isLongForm
-          ? tweet.tweetUrl
-          : (tweet.articleUrl ?? tweet.tweetUrl);
+      // A link share — a short tweet with a link, or a long-form note that
+      // is just a brief intro to one — gets the linked article downloaded
+      // (fetched=0), with the tweet kept above it as a quoted intro. A
+      // genuinely long note (or thread) is itself the article.
+      final downloadsArticle = _sharesLink(tweet);
+      final url = downloadsArticle ? tweet.articleUrl! : tweet.tweetUrl;
       final published = tweet.createdAt?.millisecondsSinceEpoch;
       // Download any images embedded in the tweet/article so they read offline.
       var content = downloadsArticle ? null : tweet.text;
@@ -848,13 +876,14 @@ class SyncService {
           overwrite: overwrite,
         );
         var content = localized;
-        // Keep the original note/tweet above the extracted article.
+        // Keep the original note/tweet above the extracted article, with
+        // its own paragraph breaks (not collapsed into one wall of text).
         if (article.summary != null &&
             article.contentMarkdown == null &&
             article.summary != article.title) {
           final intro = _plainSummary(article.summary)!;
           if (!_looksLikeHtml(article.summary!) && intro.length < 600) {
-            content = '> $intro\n\n---\n\n$localized';
+            content = '${quoteIntro(article.summary!)}\n\n---\n\n$localized';
           }
         }
         await _db.updateArticleContent(article.id!, content, fetched: true);
@@ -900,6 +929,14 @@ class SyncService {
     }
     return true;
   }
+
+  /// Quotes a tweet/note intro as a Markdown blockquote, keeping its
+  /// paragraph breaks.
+  static String quoteIntro(String text) => text
+      .trim()
+      .split('\n')
+      .map((line) => line.trim().isEmpty ? '>' : '> ${line.trim()}')
+      .join('\n');
 
   static bool _looksLikeHtml(String text) => text.contains(RegExp(r'<[a-z]+'));
 

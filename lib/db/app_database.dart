@@ -656,6 +656,18 @@ class AppDatabase {
     );
   }
 
+  /// Repoints an article at a different page (a tweet bookmark that turns
+  /// out to be a link share gets the linked article's URL).
+  Future<void> updateArticleUrl(int id, String url) async {
+    final db = await database;
+    await db.update(
+      'articles',
+      {'url': url},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<void> markArticleFetched(int id) async {
     final db = await database;
     await db.update(

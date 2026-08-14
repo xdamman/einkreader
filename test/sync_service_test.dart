@@ -239,6 +239,203 @@ void main() {
     await expectLater(
         sync.reprocessArticle(article.id!), throwsA(isA<Exception>()));
   });
+
+  test(
+      'a long-form tweet that announces a link fetches the linked story, '
+      'keeping the note as a quoted intro', () async {
+    useArchive(_no);
+    await db.insertSource(Source(
+      type: SourceType.twitterBookmarks,
+      title: 'Bookmarks',
+      url: 'ada',
+      createdAt: DateTime(2026, 8, 1).millisecondsSinceEpoch,
+    ));
+
+    const noteText = 'BIG NEW piece by me.\n'
+        'A few years ago I would have said it was too broad. '
+        'But this year, I decided to do it.\n'
+        'https://t.co/wip\n'
+        'The central drama of the modern world is innovation '
+        'against suffering.';
+    final tweet = {
+      'id': 'N1',
+      'author_id': _author['id'],
+      'created_at': '2026-08-11T10:00:00.000Z',
+      'text': 'BIG NEW piece by me…',
+      'note_tweet': {
+        'text': noteText,
+        'entities': {
+          'urls': [
+            {
+              'url': 'https://t.co/wip',
+              'expanded_url':
+                  'https://worksinprogress.example/future-of-medicine/',
+            }
+          ]
+        },
+      },
+    };
+    final twitterClient = MockClient((request) async {
+      if (request.url.path.endsWith('/users/$_twitterUserId/bookmarks')) {
+        return http.Response(jsonEncode(bookmarks([tweet])), 200,
+            headers: {'content-type': 'application/json'});
+      }
+      return http.Response('unexpected ${request.url}', 404);
+    });
+    final page = '<html><head><title>The Future of Medicine</title></head>'
+        '<body><article>'
+        '<p>${'Medicine has advanced enormously in the last century. ' * 4}</p>'
+        '<p>${'Yet millions still suffer from diseases we could treat. ' * 4}</p>'
+        '</article></body></html>';
+    final web = MockClient((request) async =>
+        request.url.host == 'worksinprogress.example'
+            ? http.Response(page, 200,
+                headers: {'content-type': 'text/html; charset=utf-8'})
+            : http.Response('no', 404));
+    final sync = SyncService.forTest(
+      http: web,
+      twitter: TwitterService(
+          client: twitterClient, accessToken: () async => 'tok'),
+    );
+
+    await sync.syncAll();
+
+    final article = (await db.getArticles()).single;
+    expect(article.url, 'https://worksinprogress.example/future-of-medicine/');
+    expect(article.title, 'The Future of Medicine');
+    expect(article.contentMarkdown, contains('> BIG NEW piece by me.'),
+        reason: 'the note survives above the article as a quoted intro');
+    expect(article.contentMarkdown, contains('Medicine has advanced'));
+  });
+
+  test(
+      'reprocess repoints an already-saved link-share bookmark at the '
+      'linked story', () async {
+    useArchive(_no);
+    await db.insertSource(Source(
+      type: SourceType.twitterBookmarks,
+      title: 'Bookmarks',
+      url: 'ada',
+      createdAt: DateTime(2026, 8, 1).millisecondsSinceEpoch,
+    ));
+    // Stored the old way: the note is the article, the link never fetched.
+    final source = (await db.getSources()).single;
+    await db.insertArticleIfNew(Article(
+      sourceId: source.id!,
+      guid: 'N3',
+      title: 'BIG NEW piece by me…',
+      url: 'https://x.com/ada/status/N3',
+      summary: 'old note',
+      contentMarkdown: 'old note',
+      fetched: 1,
+      createdAt: DateTime(2026, 8, 11).millisecondsSinceEpoch,
+    ));
+
+    final tweet = {
+      'id': 'N3',
+      'author_id': _author['id'],
+      'created_at': '2026-08-11T10:00:00.000Z',
+      'text': 'BIG NEW piece by me…',
+      'note_tweet': {
+        'text': 'BIG NEW piece by me.\nhttps://t.co/wip\nRead it.',
+        'entities': {
+          'urls': [
+            {
+              'url': 'https://t.co/wip',
+              'expanded_url':
+                  'https://worksinprogress.example/future-of-medicine/',
+            }
+          ]
+        },
+      },
+    };
+    final twitterClient = MockClient((request) async =>
+        request.url.path.endsWith('/tweets/N3')
+            ? http.Response(
+                jsonEncode({
+                  'data': tweet,
+                  'includes': {
+                    'users': [_author]
+                  }
+                }),
+                200,
+                headers: {'content-type': 'application/json'})
+            : http.Response('unexpected ${request.url}', 404));
+    final page = '<html><head><title>The Future of Medicine</title></head>'
+        '<body><article>'
+        '<p>${'Medicine has advanced enormously in the last century. ' * 4}</p>'
+        '<p>${'Yet millions still suffer from diseases we could treat. ' * 4}</p>'
+        '</article></body></html>';
+    final web = MockClient((request) async =>
+        request.url.host == 'worksinprogress.example'
+            ? http.Response(page, 200,
+                headers: {'content-type': 'text/html; charset=utf-8'})
+            : http.Response('no', 404));
+    final sync = SyncService.forTest(
+      http: web,
+      twitter: TwitterService(
+          client: twitterClient, accessToken: () async => 'tok'),
+    );
+
+    final saved = (await db.getArticles()).single;
+    await sync.reprocessArticle(saved.id!);
+
+    final article = await db.getArticle(saved.id!);
+    expect(article!.url,
+        'https://worksinprogress.example/future-of-medicine/');
+    expect(article.title, 'The Future of Medicine');
+    expect(article.contentMarkdown, contains('> BIG NEW piece by me.'));
+    expect(article.contentMarkdown, contains('Medicine has advanced'));
+  });
+
+  test('a genuinely long note with a link stays the article itself', () async {
+    useArchive(_no);
+    await db.insertSource(Source(
+      type: SourceType.twitterBookmarks,
+      title: 'Bookmarks',
+      url: 'ada',
+      createdAt: DateTime(2026, 8, 1).millisecondsSinceEpoch,
+    ));
+
+    final essay = '${'A long essay paragraph with plenty of substance. ' * 15}'
+        'https://t.co/ref for context.';
+    final tweet = {
+      'id': 'N2',
+      'author_id': _author['id'],
+      'created_at': '2026-08-12T10:00:00.000Z',
+      'text': 'A long essay…',
+      'note_tweet': {
+        'text': essay,
+        'entities': {
+          'urls': [
+            {
+              'url': 'https://t.co/ref',
+              'expanded_url': 'https://blog.example.com/reference',
+            }
+          ]
+        },
+      },
+    };
+    final twitterClient = MockClient((request) async {
+      if (request.url.path.endsWith('/users/$_twitterUserId/bookmarks')) {
+        return http.Response(jsonEncode(bookmarks([tweet])), 200,
+            headers: {'content-type': 'application/json'});
+      }
+      return http.Response('unexpected ${request.url}', 404);
+    });
+    final sync = SyncService.forTest(
+      http: _no,
+      twitter: TwitterService(
+          client: twitterClient, accessToken: () async => 'tok'),
+    );
+
+    await sync.syncAll();
+
+    final article = (await db.getArticles()).single;
+    expect(article.url, contains('x.com/ada/status/N2'),
+        reason: 'the note is the article; no page download');
+    expect(article.contentMarkdown, contains('A long essay paragraph'));
+  });
 }
 
 /// Reads the single archived image's bytes from the temp archive (asserts there
