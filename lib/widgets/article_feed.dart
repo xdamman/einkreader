@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../db/app_database.dart';
 import '../models.dart';
 import '../screens/article_screen.dart';
+import '../services/sync_service.dart';
 
 /// Per-row action shown on the trailing edge of a feed tile.
 enum FeedRowAction {
@@ -166,13 +167,25 @@ class _ArticleTile extends StatelessWidget {
     }
   }
 
+  /// Status shown for an article whose content isn't on the device yet:
+  /// "downloading…" while its fetch is in flight, "not downloaded" when the
+  /// device looks offline, otherwise "queued for download" (the next sync —
+  /// or the one running — will pick it up).
+  String? get _downloadStatus {
+    if (article.fetched != 0) return null;
+    final sync = SyncService.instance;
+    if (sync.downloadingArticleId == article.id) return 'downloading…';
+    if (sync.lastKnownOffline) return 'not downloaded';
+    return 'queued for download';
+  }
+
   @override
   Widget build(BuildContext context) {
     final meta = [
       if (sourceTitle != null) sourceTitle!,
       if (article.author != null && article.author!.isNotEmpty)
         article.author!,
-      if (article.fetched == 0) 'not downloaded',
+      if (_downloadStatus != null) _downloadStatus!,
     ].join(' · ');
 
     final tile = ListTile(

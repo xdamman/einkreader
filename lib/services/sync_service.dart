@@ -96,6 +96,15 @@ class SyncService {
   bool _syncing = false;
   bool get isSyncing => _syncing;
 
+  /// Id of the article whose content is being downloaded right now (null
+  /// when none) — a feed row shows "downloading…" instead of "queued".
+  int? downloadingArticleId;
+
+  /// Last connectivity observed by a probe, sync or download. Feed rows use
+  /// it to label a pending article "not downloaded" (offline) rather than
+  /// "queued for download".
+  bool lastKnownOffline = false;
+
   /// Disabled in widget/screenshot tests to keep them offline.
   bool autoSyncOnLaunch = true;
 
@@ -180,6 +189,7 @@ class SyncService {
           : 'Refresh finished with ${errors.length} error(s): $summary; '
               '${errors.join(' | ')}',
     );
+    lastKnownOffline = errors.isNotEmpty && errors.every(looksOffline);
     if (errors.isEmpty) return summary;
     // Raw exception text stays in the debug log (above); the status line
     // only needs to tell the reader what to do about it.
@@ -287,7 +297,10 @@ class SyncService {
   Future<bool> downloadArticle(int articleId) async {
     final article = await _db.getArticle(articleId);
     if (article == null || article.fetched == 1) return false;
+    downloadingArticleId = articleId;
+    progress.add(SyncProgress('Downloading…', running: _syncing));
     final changed = await _fetchArticleContent(article);
+    downloadingArticleId = null;
     progress.add(SyncProgress('', running: _syncing, reload: true));
     return changed;
   }
@@ -296,7 +309,12 @@ class SyncService {
   /// Test seam: set [debugIsOnline] to skip the real lookup.
   Future<bool> isOnline() async {
     final probe = debugIsOnline;
-    if (probe != null) return probe();
+    final online = probe != null ? await probe() : await _probeOnline();
+    lastKnownOffline = !online;
+    return online;
+  }
+
+  Future<bool> _probeOnline() async {
     try {
       final addresses = await InternetAddress.lookup('one.one.one.one')
           .timeout(const Duration(seconds: 3));
@@ -810,10 +828,14 @@ class SyncService {
     for (var i = 0; i < pending.length; i++) {
       final article = pending[i];
       final label = 'Downloading articles… ${i + 1}/${pending.length}';
+      // Set before the progress event so the rebuild it triggers already
+      // sees this row as "downloading…".
+      downloadingArticleId = article.id;
       progress.add(SyncProgress(label, sourceId: article.sourceId));
       final changed = await _fetchArticleContent(article);
+      downloadingArticleId = null;
       // Refresh the feed as each article finishes downloading so its content
-      // and "not downloaded" badge update live.
+      // and download badge update live.
       if (changed) {
         progress.add(
             SyncProgress(label, sourceId: article.sourceId, reload: true));
@@ -847,12 +869,14 @@ class SyncService {
         'Loaded article #${article.id}: HTTP ${response.statusCode}, '
         '${response.body.length} bytes',
       );
+      lastKnownOffline = false;
       if (response.statusCode != 200) {
         throw Exception('HTTP ${response.statusCode}');
       }
       body = decodeBody(response);
     } catch (e) {
       // Network failure: keep fetched = 0 so the next sync retries.
+      if (looksOffline(e)) lastKnownOffline = true;
       await AppLogService.instance.warn(
         'Could not load article #${article.id} ${article.title}: $e',
       );

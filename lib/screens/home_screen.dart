@@ -64,6 +64,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// ★ filter on the Read tab (Favorites folded in as a chip).
   bool _readFavoritesOnly = false;
+
+  /// Source filters on the Read and Highlights tabs (null = all sources).
+  int? _readSourceId;
+  int? _highlightsSourceId;
   List<Source> _sources = [];
   List<Folder> _folders = [];
   Map<int, String> _sourceTitles = {};
@@ -356,10 +360,19 @@ class _HomeScreenState extends State<HomeScreen> {
           onChanged: _load,
         );
       case _HomeTab.read:
-        final read = _articles
+        final readAll = _articles
             .where((a) =>
                 a.read == 1 && (!_readFavoritesOnly || a.favorite == 1))
             .toList();
+        final readCounts = <int, int>{};
+        for (final a in readAll) {
+          readCounts[a.sourceId] = (readCounts[a.sourceId] ?? 0) + 1;
+        }
+        final readSourceId =
+            readCounts.containsKey(_readSourceId) ? _readSourceId : null;
+        final read = readSourceId == null
+            ? readAll
+            : readAll.where((a) => a.sourceId == readSourceId).toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -386,6 +399,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+            ..._sourceFacetRow(
+              counts: readCounts,
+              selectedId: readSourceId,
+              onSelected: (id) => setState(() => _readSourceId = id),
+            ),
             Expanded(
               child: ArticleFeed(
                 articles: read,
@@ -405,7 +423,38 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         );
       case _HomeTab.highlights:
-        return HighlightList(highlights: _highlights, onChanged: _load);
+        // Highlights belong to articles; group them per source so they can
+        // be filtered the same way as search results.
+        final articleSource = {for (final a in _articles) a.id!: a.sourceId};
+        final highlightCounts = <int, int>{};
+        for (final h in _highlights) {
+          final sourceId = articleSource[h.articleId];
+          if (sourceId == null) continue;
+          highlightCounts[sourceId] = (highlightCounts[sourceId] ?? 0) + 1;
+        }
+        final highlightsSourceId =
+            highlightCounts.containsKey(_highlightsSourceId)
+                ? _highlightsSourceId
+                : null;
+        final highlights = highlightsSourceId == null
+            ? _highlights
+            : _highlights
+                .where(
+                    (h) => articleSource[h.articleId] == highlightsSourceId)
+                .toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ..._sourceFacetRow(
+              counts: highlightCounts,
+              selectedId: highlightsSourceId,
+              onSelected: (id) => setState(() => _highlightsSourceId = id),
+            ),
+            Expanded(
+                child:
+                    HighlightList(highlights: highlights, onChanged: _load)),
+          ],
+        );
       case _HomeTab.shared:
         return SharedList(shares: _shares, onChanged: _load);
       case _HomeTab.debug:
@@ -476,6 +525,54 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Text(remaining == 0
             ? 'Outbox sent ($sent item${sent == 1 ? '' : 's'})'
             : 'Sent $sent — $remaining still waiting')));
+  }
+
+  /// Per-source breakdown chips for the Read and Highlights tabs (mirrors
+  /// the search facets): "All" first, then every source with items —
+  /// alphabetical, counts shown, zero-count sources absent. Returns an empty
+  /// list (no row at all) when everything comes from a single source.
+  List<Widget> _sourceFacetRow({
+    required Map<int, int> counts,
+    required int? selectedId,
+    required ValueChanged<int?> onSelected,
+  }) {
+    if (counts.length < 2) return const [];
+    final entries = [
+      for (final e in counts.entries)
+        (id: e.key, title: _sourceTitles[e.key] ?? 'Unknown', count: e.value)
+    ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    final total = counts.values.fold(0, (sum, value) => sum + value);
+    return [
+      Container(
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(width: 1)),
+        ),
+        height: 52,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          children: [
+            _SourceChip(
+              label: 'All',
+              count: total,
+              selected: selectedId == null,
+              syncing: false,
+              onTap: () => onSelected(null),
+            ),
+            for (final entry in entries) ...[
+              const SizedBox(width: 8),
+              _SourceChip(
+                label: entry.title,
+                count: entry.count,
+                selected: selectedId == entry.id,
+                syncing: false,
+                onTap: () => onSelected(entry.id),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ];
   }
 
   /// The Add source screen covers every kind (RSS, Twitter, Nostr).
