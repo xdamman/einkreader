@@ -1,9 +1,9 @@
 // The v3 wireframe, end to end:
 //   - swipe-right on any unread feed row marks it read (and the row stays)
 //   - home pipeline: Read station with the ★ Favorites chip; Shared station
-//   - share composer: free rows work, plugin rows lock to the pitch,
-//     sharing to the profile records a Share that the Shared tab shows
-//     with medium/recipient filtering
+//   - share composer: profile/email/copy-link work; the Twitter row is
+//     inert until an account is connected; sharing to the profile records
+//     a Share that the Shared tab shows with medium filtering
 import 'dart:convert';
 import 'dart:io';
 
@@ -105,14 +105,14 @@ void main() {
         .runAsync(() => db.markArticleRead(article.id!, read: false));
   });
 
-  testWidgets('composer: free rows active, plugin rows locked to the pitch',
+  testWidgets('composer: free rows active, Twitter inert until connected',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
       home: Scaffold(
           body: ShareNoteDialog(
               article: article,
-              highlight: highlight,
+              highlights: [highlight],
               shareByDefault: true)),
     ));
     await settle(tester);
@@ -123,12 +123,13 @@ void main() {
     expect(find.text('Copy link to this quote'), findsOneWidget);
     expect(find.text('Tweet it'), findsOneWidget);
 
-    // The locked Twitter row opens the supporter pitch.
+    // Without a connected account the Twitter row is inert and says how
+    // to enable it — no pitch, no subscription.
+    expect(find.text('connect Twitter in Settings'), findsOneWidget);
     await tester.ensureVisible(find.text('Tweet it'));
     await tester.tap(find.text('Tweet it'), warnIfMissed: false);
     await settle(tester);
-    expect(find.text('Free forever'), findsOneWidget);
-    expect(find.text('€50'), findsOneWidget);
+    expect(find.text('Free forever'), findsNothing);
   });
 
   testWidgets('sharing to the profile records a Share shown in Shared',
@@ -138,7 +139,7 @@ void main() {
       home: Scaffold(
           body: ShareNoteDialog(
               article: article,
-              highlight: highlight,
+              highlights: [highlight],
               shareByDefault: true)),
     ));
     await settle(tester);
@@ -186,7 +187,7 @@ void main() {
       home: Scaffold(
           body: ShareNoteDialog(
               article: article,
-              highlight: highlight,
+              highlights: [highlight],
               shareByDefault: true)),
     ));
     await settle(tester);
@@ -205,56 +206,68 @@ void main() {
         findsNothing);
   });
 
-  testWidgets('offline one-tap email share queues in the outbox',
-      (tester) async {
-    await PluginService.instance.activateEarlyAccess();
-    await PluginService.instance.setEmailOn(true);
-    // Per-contact sharing is parked behind a feature flag for now.
-    await PluginService.instance.setContactsEnabled(true);
-    await tester.runAsync(() => db.insertContact(const Contact(
-        name: 'Marc', address: 'marc@example.com', createdAt: 1)));
-    // The send endpoint is unreachable (offline).
-    ProfileService.instance.debugHttpClient =
-        MockClient((request) async => throw Exception('offline'));
-
-    await tester.pumpWidget(MaterialApp(
-      theme: buildEinkTheme(),
-      home: Scaffold(
-          body: ShareNoteDialog(
-              article: article,
-              highlight: highlight,
-              shareByDefault: false)),
-    ));
-    await settle(tester);
-    await settle(tester);
-    await tester.tap(find.text('Marc — one tap'));
-    await tester.pump();
-    await tester.ensureVisible(find.text('Share'));
-    await tester.tap(find.text('Share'), warnIfMissed: false);
-    await settle(tester);
-    await settle(tester);
-
-    final queued = await tester.runAsync(() => db.outboxItems());
-    final emailItem = queued!.singleWhere((i) => i.kind == 'email');
-    expect(emailItem.text, contains('Marc'));
-    // The share is recorded — offline never blocks sharing.
-    final shares = await tester.runAsync(() => db.getShares());
-    expect(shares!.where((s) => s.recipient == 'Marc'), isNotEmpty);
-
-    // Back online: the outbox flush delivers it.
+  test('a queued email share is delivered by the outbox flush', () async {
+    await OutboxService.instance.enqueueEmailShare(
+      to: 'marc@example.com',
+      subject: 'A quote',
+      text: 'the passage lives here',
+      description: 'Email to Marc: A quote',
+      error: 'offline',
+    );
     var sentTo = '';
     OutboxService.instance.debugEmailSend =
         ({required to, required subject, required text}) async {
       sentTo = to;
     };
-    await tester.runAsync(() => OutboxService.instance.flush());
+    await OutboxService.instance.flush();
     expect(sentTo, 'marc@example.com');
-    expect(
-        (await tester.runAsync(() => db.outboxItems()))!
-            .where((i) => i.kind == 'email'),
-        isEmpty);
+    expect((await db.outboxItems()).where((i) => i.kind == 'email'), isEmpty);
     OutboxService.instance.debugEmailSend = null;
-    ProfileService.instance.debugHttpClient = null;
+  });
+
+  testWidgets('sharing several highlights combined publishes each',
+      (tester) async {
+    final second = await tester.runAsync(() async {
+      await db.insertHighlight(Highlight(
+          articleId: article.id!,
+          text: 'a second passage',
+          createdAt: 2));
+      return (await db.getHighlights())
+          .firstWhere((h) => h.text == 'a second passage');
+    });
+    final before =
+        (await tester.runAsync(() => db.getShares()))!.length;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+          body: ShareNoteDialog(
+              key: const ValueKey('multi'),
+              article: article,
+              highlights: [highlight, second!],
+              shareByDefault: true)),
+    ));
+    await settle(tester);
+    await settle(tester);
+
+    // Both quotes in the preview, no per-quote note field.
+    expect(find.textContaining('2 highlights ·'), findsOneWidget);
+    expect(find.text('Your note (optional)'), findsNothing);
+
+    await tester.ensureVisible(find.text('Share'));
+    await tester.tap(find.text('Share'), warnIfMissed: false);
+    await settle(tester);
+    await settle(tester);
+
+    final shares = await tester.runAsync(() => db.getShares());
+    // One profile share per not-yet-published highlight (the first was
+    // already on the profile from the earlier test).
+    expect(shares!.length, before + 1);
+    expect(shares.where((sh) => sh.medium == 'profile'), isNotEmpty);
+    // Keep the later profile-screen test deterministic: a comment-less
+    // shared quote would show its "add a comment" nudge there.
+    await tester.runAsync(
+        () => db.updateHighlightComment(second.id!, 'second take'));
   });
 
   testWidgets('profile screen lists shared highlights, grouped by story',
@@ -324,16 +337,11 @@ void main() {
     ProfileService.instance.debugPublish = (event) async => 1;
   });
 
-  test('supporter early access unlocks plugin gates', () async {
-    // Earlier tests activate early access; start this one from scratch.
+  test('each plugin is gated by its own toggle', () async {
     final prefs = await SharedPreferences.getInstance();
-    for (final key in [
-      'supporter_early_access', 'plugin_twitter_on', 'plugin_email_on',
-    ]) {
+    for (final key in ['plugin_twitter_on', 'plugin_email_on']) {
       await prefs.remove(key);
     }
-    expect(await PluginService.instance.isSupporter, isFalse);
-    await PluginService.instance.activateEarlyAccess();
     await PluginService.instance.setEmailOn(true);
     expect(await PluginService.instance.emailActive, isTrue);
     expect(await PluginService.instance.twitterActive, isFalse,

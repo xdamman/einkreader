@@ -76,7 +76,9 @@ void main() {
     expect(find.text('Copy url'), findsOneWidget);
     expect(find.text('Share article by email'), findsOneWidget);
     expect(find.text('Share highlights by email'), findsOneWidget);
-    expect(find.textContaining('1 highlight'), findsOneWidget);
+    // The menu subtitle plus the bottom-of-article "Share your 1
+    // highlight" button behind the sheet.
+    expect(find.textContaining('1 highlight'), findsNWidgets(2));
     // No Twitter account connected in the test environment.
     expect(find.text('Share on Twitter'), findsNothing);
     expect(find.text('Share highlights on Twitter'), findsNothing);

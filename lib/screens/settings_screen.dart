@@ -21,8 +21,6 @@ import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import '../widgets/profile_switcher.dart';
 import '../widgets/relay_settings.dart';
-import 'contacts_screen.dart';
-import 'plugin_pitch_screen.dart';
 import 'sources_screen.dart';
 
 /// App settings: source management entry point, storage location, backup /
@@ -32,7 +30,7 @@ import 'sources_screen.dart';
 /// the hub stays a calm list, and every section gets room to breathe.
 enum SettingsSection {
   sources('Sources', 'Feeds and folders', Icons.rss_feed),
-  plugins('Plugins', 'Twitter & Email · supporter', Icons.extension_outlined),
+  plugins('Plugins', 'Twitter & Email', Icons.extension_outlined),
   profiles('Profiles', 'Nostr identities and switching',
       Icons.person_outline),
   relays('Nostr relays', 'Where shares are published', Icons.dns_outlined),
@@ -62,10 +60,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _developerMode = false;
-  bool _supporter = false;
   bool _twitterPluginOn = false;
   bool _emailPluginOn = false;
-  bool _contactsEnabled = false;
 
   late final _updates = widget.updateService ?? UpdateService();
   UpdateInfo? _update;
@@ -100,19 +96,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     final developerMode = await AppLogService.instance.isDeveloperModeEnabled();
     final archiveDir = await ArchiveStore.instance.baseDir();
-    final supporter = await PluginService.instance.isSupporter;
     final twitterOn = await PluginService.instance.twitterOn;
     final emailOn = await PluginService.instance.emailOn;
-    final contactsEnabled = await PluginService.instance.contactsEnabled;
     if (!mounted) return;
     setState(() {
       _developerMode = developerMode;
       _archiveDir = archiveDir;
       _customArchiveDir = prefs.getString(ArchiveStore.dirPrefKey) != null;
-      _supporter = supporter;
       _twitterPluginOn = twitterOn;
       _emailPluginOn = emailOn;
-      _contactsEnabled = contactsEnabled;
     });
     if (developerMode && _update == null) _checkForUpdate();
   }
@@ -364,12 +356,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _openPitch() async {
-    await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const PluginPitchScreen()));
-    _load();
-  }
-
   void _toast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -491,7 +477,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Widget> _pluginsSection() => [
         const Text(
           'Plugins let you add sources or channels to share content. '
-          'They run on our servers and need the supporter subscription.',
+          'They run on our servers.',
           style: TextStyle(fontSize: 14),
         ),
         const SizedBox(height: 12),
@@ -499,44 +485,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: '@ Twitter',
           description: 'Sync your bookmarks as a source · share '
               'highlights as tweets & quote-tweets',
-          enabled: _supporter,
+          enabled: true,
           on: _twitterPluginOn,
           onChanged: (v) async {
             await PluginService.instance.setTwitterOn(v);
             _load();
           },
-          onLockedTap: _openPitch,
         ),
         const SizedBox(height: 10),
         _PluginCard(
           title: '✉ Email',
           description: 'Send anything to your @einkreader.app address '
               'to read it · one-tap shares from your address',
-          enabled: _supporter,
+          enabled: true,
           on: _emailPluginOn,
           onChanged: (v) async {
             await PluginService.instance.setEmailOn(v);
             _load();
           },
-          onLockedTap: _openPitch,
         ),
-        const SizedBox(height: 12),
-        if (!_supporter)
-          OutlinedButton(
-            onPressed: _openPitch,
-            child: const Text('Subscribe to activate plugins'),
-          )
-        else
-          const Text('Supporter · early access',
-              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
-        const SizedBox(height: 12),
-        if (_contactsEnabled)
-          OutlinedButton.icon(
-            icon: const Icon(Icons.people_outline),
-            label: const Text('Contacts'),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => const ContactsScreen())),
-          ),
       ];
 
   List<Widget> _profilesSection() => [
@@ -701,15 +668,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ];
 }
 
-/// A plugin card: capabilities in plain words, a toggle that is inert until
-/// the subscription unlocks it (tapping then opens the pitch).
+/// A plugin card: capabilities in plain words and an on/off toggle.
 class _PluginCard extends StatelessWidget {
   final String title;
   final String description;
   final bool enabled;
   final bool on;
   final ValueChanged<bool> onChanged;
-  final VoidCallback onLockedTap;
 
   const _PluginCard({
     required this.title,
@@ -717,46 +682,35 @@ class _PluginCard extends StatelessWidget {
     required this.enabled,
     required this.on,
     required this.onChanged,
-    required this.onLockedTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: enabled ? null : onLockedTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          border: Border.all(width: 1.5),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  Text(description, style: const TextStyle(fontSize: 12.5)),
-                  if (!enabled)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text('requires subscription',
-                          style: TextStyle(
-                              fontSize: 11, fontStyle: FontStyle.italic)),
-                    ),
-                ],
-              ),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(width: 1.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                Text(description, style: const TextStyle(fontSize: 12.5)),
+              ],
             ),
-            Switch(
-              value: on && enabled,
-              onChanged: enabled ? onChanged : null,
-            ),
-          ],
-        ),
+          ),
+          Switch(
+            value: on && enabled,
+            onChanged: enabled ? onChanged : null,
+          ),
+        ],
       ),
     );
   }

@@ -188,7 +188,9 @@ void main() {
           // visible but dimmed behind the overlay.
           Positioned.fill(child: ColoredBox(color: Colors.black54)),
           ShareNoteDialog(
-              article: _story, highlight: _highlight, shareByDefault: true),
+              article: _story,
+              highlights: [_highlight],
+              shareByDefault: true),
         ]),
         '12_share_dialog',
         setup: (t) async {

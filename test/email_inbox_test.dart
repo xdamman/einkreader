@@ -40,7 +40,6 @@ void main() {
     await ProfileService.instance.registerUsername('xavier');
     ProfileService.instance.debugHttpClient = null;
     // Inbound email is the Email plugin.
-    await PluginService.instance.activateEarlyAccess();
     await PluginService.instance.setEmailOn(true);
   });
 

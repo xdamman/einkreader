@@ -3,12 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
-import '../screens/contacts_screen.dart';
-import '../screens/plugin_pitch_screen.dart';
 import '../screens/profile_screen.dart';
 import '../services/errors.dart';
 import '../services/outbox_service.dart';
-import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import '../services/share_actions.dart';
 import '../services/sync_service.dart';
@@ -19,9 +16,17 @@ import '../services/twitter_service.dart';
 /// difference between "Add note" and "Share…" is what's checked by default
 /// (a note stays private unless a channel is picked). An overlay rather
 /// than a full screen on purpose: the article stays visible behind it.
+///
+/// With several highlights ([ShareNoteDialog.openAll]) the same overlay
+/// shares them combined: one tweet / email with every quote, each published
+/// to the profile. The note field is hidden — notes belong to a single
+/// highlight.
 class ShareNoteDialog extends StatefulWidget {
   final Article article;
-  final Highlight highlight;
+
+  /// The highlights being shared, in reading order. A single entry is the
+  /// classic note/share flow; several entries share them combined.
+  final List<Highlight> highlights;
 
   /// True when entered via "Share…": the profile channel starts checked.
   /// Via "Add note" nothing is checked — saving keeps the note private.
@@ -30,9 +35,9 @@ class ShareNoteDialog extends StatefulWidget {
   const ShareNoteDialog({
     super.key,
     required this.article,
-    required this.highlight,
+    required this.highlights,
     required this.shareByDefault,
-  });
+  }) : assert(highlights.length > 0);
 
   static Future<void> open(BuildContext context,
       {required Article article,
@@ -42,8 +47,17 @@ class ShareNoteDialog extends StatefulWidget {
         context: context,
         builder: (_) => ShareNoteDialog(
             article: article,
-            highlight: highlight,
+            highlights: [highlight],
             shareByDefault: shareByDefault),
+      );
+
+  /// Shares all of an article's [highlights] combined (always share mode).
+  static Future<void> openAll(BuildContext context,
+      {required Article article, required List<Highlight> highlights}) =>
+      showDialog(
+        context: context,
+        builder: (_) => ShareNoteDialog(
+            article: article, highlights: highlights, shareByDefault: true),
       );
 
   @override
@@ -53,20 +67,19 @@ class ShareNoteDialog extends StatefulWidget {
 class _ShareNoteDialogState extends State<ShareNoteDialog> {
   final _db = AppDatabase.instance;
   late final TextEditingController _comment =
-      TextEditingController(text: widget.highlight.comment ?? '');
+      TextEditingController(text: _single?.comment ?? '');
 
   bool _loaded = false;
   bool _hasProfile = false;
   bool _twitterConnected = false;
-  bool _supporter = false;
-  bool _emailPluginOn = false;
-  bool _contactsEnabled = false;
-  List<Contact> _contacts = [];
 
   bool _toProfile = false;
   bool _toTwitter = false;
-  final Set<int> _toContacts = {};
   bool _sharing = false;
+
+  /// The one highlight of the classic flow; null when sharing several.
+  Highlight? get _single =>
+      widget.highlights.length == 1 ? widget.highlights.first : null;
 
   @override
   void initState() {
@@ -83,51 +96,44 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   Future<void> _load() async {
     final hasProfile = await ProfileService.instance.enabled;
     final twitterConnected = await ShareActions.twitterConnected();
-    final supporter = await PluginService.instance.isSupporter;
-    final emailOn = await PluginService.instance.emailActive;
-    final contactsEnabled = await PluginService.instance.contactsEnabled;
-    final contacts = contactsEnabled ? await _db.getContacts() : <Contact>[];
     if (!mounted) return;
     setState(() {
       _hasProfile = hasProfile;
       _twitterConnected = twitterConnected;
-      _supporter = supporter;
-      _emailPluginOn = emailOn;
-      _contactsEnabled = contactsEnabled;
-      _contacts = contacts;
       _toProfile = widget.shareByDefault && hasProfile;
       _loaded = true;
     });
   }
 
-  bool get _twitterUsable => _supporter && _twitterConnected;
-
   bool get _anyChannel =>
-      (_toProfile && _hasProfile) ||
-      (_toTwitter && _twitterUsable) ||
-      _toContacts.isNotEmpty;
+      (_toProfile && _hasProfile) || (_toTwitter && _twitterConnected);
 
-  /// The highlight with the dialog's note attached.
-  Future<Highlight> _withComment() async {
+  /// The single highlight with the dialog's note attached (multi-share
+  /// leaves comments untouched — notes belong to one highlight).
+  Future<List<Highlight>> _withComment() async {
+    final single = _single;
+    if (single == null) return widget.highlights;
     final comment = _comment.text.trim();
-    if (comment != (widget.highlight.comment ?? '')) {
+    if (comment != (single.comment ?? '')) {
       await _db.updateHighlightComment(
-          widget.highlight.id!, comment.isEmpty ? null : comment);
+          single.id!, comment.isEmpty ? null : comment);
     }
-    return Highlight(
-      id: widget.highlight.id,
-      articleId: widget.highlight.articleId,
-      text: widget.highlight.text,
-      comment: comment.isEmpty ? null : comment,
-      shared: _anyChannel ? 1 : widget.highlight.shared,
-      createdAt: widget.highlight.createdAt,
-    );
+    return [
+      Highlight(
+        id: single.id,
+        articleId: single.articleId,
+        text: single.text,
+        comment: comment.isEmpty ? null : comment,
+        shared: _anyChannel ? 1 : single.shared,
+        createdAt: single.createdAt,
+      )
+    ];
   }
 
-  Future<void> _record(String medium,
+  Future<void> _record(String medium, Highlight highlight,
       {String? recipient, String? ref}) async {
     await _db.insertShare(Share(
-      highlightId: widget.highlight.id!,
+      highlightId: highlight.id!,
       medium: medium,
       recipient: recipient,
       ref: ref,
@@ -135,10 +141,10 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     ));
   }
 
-  /// Ensures the highlight is published to the profile; returns the event id
+  /// Ensures a highlight is published to the profile; returns the event id
   /// (existing or fresh).
   Future<String> _ensurePublished(Highlight highlight) async {
-    final existing = await _db.profileShareRef(widget.highlight.id!);
+    final existing = await _db.profileShareRef(highlight.id!);
     if (existing != null) return existing;
     final result = await ProfileService.instance
         .publishHighlight(widget.article, highlight);
@@ -146,10 +152,11 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   }
 
   /// Copy link is immediate — publishes to the profile if needed so the
-  /// link resolves, then copies. Without a profile the article URL is
-  /// copied instead (quote links require a profile).
+  /// link resolves, then copies. Without a profile (or with several
+  /// highlights) the article URL is copied instead.
   Future<void> _copyLink() async {
-    if (!_hasProfile) {
+    final single = _single;
+    if (!_hasProfile || single == null) {
       final url = widget.article.url;
       if (url == null) return;
       await Clipboard.setData(ClipboardData(text: url));
@@ -158,11 +165,11 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
           const SnackBar(content: Text('Article link copied')));
       return;
     }
-    final highlight = await _withComment();
+    final highlight = (await _withComment()).first;
     final eventId = await _ensurePublished(highlight);
     final link = await ProfileService.instance.quoteLink(eventId);
     if (link == null) return;
-    await _record('link', ref: eventId);
+    await _record('link', highlight, ref: eventId);
     await Clipboard.setData(ClipboardData(text: link));
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -171,14 +178,17 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
 
   /// Opens the mail app pre-filled — an immediate hand-off, not a channel.
   Future<void> _composeEmail() async {
-    final highlight = await _withComment();
+    final highlights = await _withComment();
     if (!mounted) return;
     await ShareActions.byEmail(
       context,
-      subject: ShareActions.highlightsSubject(widget.article, 1),
-      body: ShareActions.highlightsBody(widget.article, [highlight]),
+      subject:
+          ShareActions.highlightsSubject(widget.article, highlights.length),
+      body: ShareActions.highlightsBody(widget.article, highlights),
     );
-    await _record('email');
+    for (final highlight in highlights) {
+      await _record('email', highlight);
+    }
   }
 
   /// Save (private note only) or Share (checked channels). Offline never
@@ -187,62 +197,52 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     if (_sharing) return;
     setState(() => _sharing = true);
     final article = widget.article;
-    final highlight = await _withComment();
+    final highlights = await _withComment();
     final done = <String>[];
     final failed = <String>[];
 
     if (_toProfile && _hasProfile) {
       try {
-        final result = await ProfileService.instance
-            .publishHighlight(article, highlight);
-        await _record('profile', ref: result.eventId);
-        done.add(result.accepted > 0 ? 'profile' : 'profile (queued)');
+        var accepted = 0;
+        var published = 0;
+        for (final highlight in highlights) {
+          // A single share always (re)publishes — the note may have changed.
+          // A combined share skips quotes already on the profile.
+          if (_single == null &&
+              await _db.profileShareRef(highlight.id!) != null) {
+            continue;
+          }
+          final result = await ProfileService.instance
+              .publishHighlight(article, highlight);
+          await _record('profile', highlight, ref: result.eventId);
+          published++;
+          accepted += result.accepted;
+        }
+        done.add(
+            published > 0 && accepted == 0 ? 'profile (queued)' : 'profile');
       } catch (e) {
         failed.add(friendlyError(e, doing: 'publishing to your profile'));
       }
     }
 
-    if (_toTwitter && _twitterUsable) {
+    if (_toTwitter && _twitterConnected) {
       final quoteId = TwitterService.tweetIdFromUrl(article.url);
-      final text = ShareActions.highlightsBody(article, [highlight],
+      final text = ShareActions.highlightsBody(article, highlights,
           withAttribution: quoteId == null);
       try {
         await SyncService.instance.twitter
             .postTweet(text, quoteTweetId: quoteId);
-        await _record('twitter');
+        for (final highlight in highlights) {
+          await _record('twitter', highlight);
+        }
         done.add('twitter');
       } catch (e) {
         await OutboxService.instance
             .enqueueTweet(text, quoteTweetId: quoteId, error: '$e');
-        await _record('twitter');
+        for (final highlight in highlights) {
+          await _record('twitter', highlight);
+        }
         done.add('twitter (queued)');
-      }
-    }
-
-    for (final contact
-        in _contacts.where((c) => _toContacts.contains(c.id))) {
-      final subject = ShareActions.highlightsSubject(article, 1);
-      final body = ShareActions.highlightsBody(article, [highlight]);
-      try {
-        await ProfileService.instance.sendShareEmail(
-          to: contact.address,
-          subject: subject,
-          text: body,
-        );
-        await _record('email', recipient: contact.name);
-        done.add(contact.name);
-      } catch (e) {
-        // Offline never blocks a share: it waits in the outbox and goes
-        // out at the next sync.
-        await OutboxService.instance.enqueueEmailShare(
-          to: contact.address,
-          subject: subject,
-          text: body,
-          description: 'Email to ${contact.name}: $subject',
-          error: '$e',
-        );
-        await _record('email', recipient: contact.name);
-        done.add('${contact.name} (queued)');
       }
     }
 
@@ -254,12 +254,6 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
         : 'Shared: ${done.join(', ')} — failed: ${failed.join('; ')}';
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _openPitch() async {
-    await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const PluginPitchScreen()));
-    _load();
   }
 
   Widget _actionRow({
@@ -291,10 +285,9 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     required String label,
     String? trailing,
     bool enabled = true,
-    VoidCallback? onLockedTap,
   }) {
     return InkWell(
-      onTap: enabled ? () => onChanged(!value) : onLockedTap,
+      onTap: enabled ? () => onChanged(!value) : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
@@ -325,6 +318,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) return const SizedBox.shrink();
+    final single = _single;
     return Dialog(
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
       insetPadding:
@@ -337,7 +331,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // The quote this note/share is about, like the share screen.
+              // The quote(s) this note/share is about.
               Container(
                 padding: const EdgeInsets.only(left: 12),
                 decoration: const BoxDecoration(
@@ -346,12 +340,19 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.highlight.text,
-                        maxLines: 5,
+                    Text(
+                        widget.highlights
+                            .map((h) => h.text)
+                            .join('\n\n'),
+                        maxLines: single == null ? 8 : 5,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 15, height: 1.4)),
                     const SizedBox(height: 4),
-                    Text(widget.article.displayTitle,
+                    Text(
+                        single == null
+                            ? '${widget.highlights.length} highlights · '
+                                '${widget.article.displayTitle}'
+                            : widget.article.displayTitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -361,20 +362,23 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
               ),
               const SizedBox(height: 16),
               // Roomy on purpose: notes are written here, not in a slit.
-              TextField(
-                controller: _comment,
-                autofocus: !widget.shareByDefault,
-                minLines: 6,
-                maxLines: 14,
-                style: const TextStyle(fontSize: 15, height: 1.4),
-                decoration: const InputDecoration(
-                  labelText: 'Your note (optional)',
-                  helperText: 'Stays private unless you share it',
-                  border: OutlineInputBorder(),
-                  alignLabelWithHint: true,
+              // Only for a single highlight — a note belongs to one quote.
+              if (single != null) ...[
+                TextField(
+                  controller: _comment,
+                  autofocus: !widget.shareByDefault,
+                  minLines: 6,
+                  maxLines: 14,
+                  style: const TextStyle(fontSize: 15, height: 1.4),
+                  decoration: const InputDecoration(
+                    labelText: 'Your note (optional)',
+                    helperText: 'Stays private unless you share it',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
+                const SizedBox(height: 14),
+              ],
               if (_hasProfile)
                 _checkRow(
                   value: _toProfile,
@@ -416,47 +420,14 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                 value: _toTwitter,
                 onChanged: (v) => setState(() => _toTwitter = v),
                 label: 'Tweet it',
-                enabled: _twitterUsable,
-                trailing: _twitterUsable
+                enabled: _twitterConnected,
+                trailing: _twitterConnected
                     ? (TwitterService.tweetIdFromUrl(widget.article.url) !=
                             null
                         ? 'quote-tweet'
                         : null)
-                    : (_supporter ? 'connect Twitter ›' : 'plugin ›'),
-                onLockedTap: _supporter ? null : _openPitch,
+                    : 'connect Twitter in Settings',
               ),
-              if (_contactsEnabled) ...[
-                for (final contact in _contacts)
-                  _checkRow(
-                    value: _toContacts.contains(contact.id),
-                    onChanged: (v) => setState(() {
-                      if (v) {
-                        _toContacts.add(contact.id!);
-                      } else {
-                        _toContacts.remove(contact.id);
-                      }
-                    }),
-                    label: '${contact.name} — one tap',
-                    enabled: _emailPluginOn && contact.channel == 'email',
-                    trailing: contact.channel == 'nostr'
-                        ? 'nostr dm — soon'
-                        : (_emailPluginOn
-                            ? 'from your address'
-                            : 'plugin ›'),
-                    onLockedTap: contact.channel == 'nostr'
-                        ? null
-                        : (_supporter ? null : _openPitch),
-                  ),
-                TextButton.icon(
-                  onPressed: () async {
-                    await Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => const ContactsScreen()));
-                    _load();
-                  },
-                  icon: const Icon(Icons.person_add_outlined, size: 18),
-                  label: const Text('Add contact'),
-                ),
-              ],
               const SizedBox(height: 14),
               OutlinedButton(
                 onPressed: _sharing ? null : _save,
@@ -475,7 +446,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
               const Divider(height: 28),
               _actionRow(
                 icon: Icons.link,
-                label: _hasProfile
+                label: _hasProfile && single != null
                     ? 'Copy link to this quote'
                     : 'Copy article link',
                 trailing: Icons.copy,

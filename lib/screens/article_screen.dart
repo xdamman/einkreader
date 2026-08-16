@@ -420,6 +420,19 @@ class _ArticleScreenState extends State<ArticleScreen> {
     }
   }
 
+  /// Bottom-of-article shortcut: all highlights combined in the share
+  /// overlay (one tweet / email with every quote, each on the profile).
+  Future<void> _shareAllHighlights() async {
+    final article = _article;
+    if (article == null || _highlights.isEmpty) return;
+    await ShareNoteDialog.openAll(context,
+        article: article,
+        highlights: ShareActions.inReadingOrder(article, _highlights));
+    final highlights = await _db.getHighlights(articleId: _currentId);
+    if (!mounted) return;
+    setState(() => _highlights = highlights);
+  }
+
   Future<void> _toggleFavorite() async {
     final article = _article;
     if (article == null) return;
@@ -736,14 +749,34 @@ class _ArticleScreenState extends State<ArticleScreen> {
                     child: Divider(),
                   ),
                   Center(
-                    child: OutlinedButton.icon(
-                      icon: Icon(article.favorite == 1
-                          ? Icons.star
-                          : Icons.star_border),
-                      label: Text(article.favorite == 1
-                          ? 'Favorited'
-                          : 'Add to favorites'),
-                      onPressed: _toggleFavorite,
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.center,
+                      children: [
+                        OutlinedButton.icon(
+                          icon: Icon(article.favorite == 1
+                              ? Icons.star
+                              : Icons.star_border),
+                          label: Text(article.favorite == 1
+                              ? 'Favorited'
+                              : 'Add to favorites'),
+                          onPressed: _toggleFavorite,
+                        ),
+                        // With highlights, one tap shares them all combined
+                        // (profile / Twitter / email); without, the regular
+                        // article share menu.
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.share_outlined),
+                          label: Text(_highlights.isEmpty
+                              ? 'Share'
+                              : 'Share your ${_highlights.length} '
+                                  'highlight${_highlights.length == 1 ? '' : 's'}'),
+                          onPressed: _highlights.isEmpty
+                              ? _showShareMenu
+                              : _shareAllHighlights,
+                        ),
+                      ],
                     ),
                   ),
                 ],
