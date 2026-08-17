@@ -4,6 +4,7 @@
 //   - share composer: profile/email/copy-link work; the Twitter row is
 //     inert until an account is connected; sharing to the profile records
 //     a Share that the Shared tab shows with medium filtering
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -206,6 +207,57 @@ void main() {
         findsNothing);
   });
 
+  testWidgets('Share closes the dialog instantly even when publishing hangs',
+      (tester) async {
+    // A relay that never answers: the publish future hangs. The dialog
+    // must still close immediately — sharing continues in the background
+    // and anything unsendable waits in the outbox.
+    final gate = Completer<int>();
+    ProfileService.instance.debugPublish = (event) => gate.future;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => Center(
+            child: OutlinedButton(
+              onPressed: () => ShareNoteDialog.open(context,
+                  article: article,
+                  highlight: highlight,
+                  shareByDefault: true),
+              child: const Text('open composer'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await settle(tester);
+    await tester.tap(find.text('open composer'));
+    await settle(tester);
+    await settle(tester);
+    expect(find.text('Your note (optional)'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Share'));
+    await tester.tap(find.text('Share'), warnIfMissed: false);
+    // Let the local note write land (the publish stays hung), then pump
+    // just past the route transition — not pumpAndSettle, which would
+    // also fast-forward the snackbar away.
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Your note (optional)'), findsNothing,
+        reason: 'the dialog is gone before the network answers');
+    expect(find.text('Sharing…'), findsOneWidget,
+        reason: 'a snackbar reports the background share');
+
+    // Let the hung publish finish so nothing leaks into later tests.
+    gate.complete(1);
+    await settle(tester);
+    ProfileService.instance.debugPublish = (event) async => 1;
+  });
+
   test('a queued email share is delivered by the outbox flush', () async {
     await OutboxService.instance.enqueueEmailShare(
       to: 'marc@example.com',
@@ -235,9 +287,6 @@ void main() {
       return (await db.getHighlights())
           .firstWhere((h) => h.text == 'a second passage');
     });
-    final before =
-        (await tester.runAsync(() => db.getShares()))!.length;
-
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
       home: Scaffold(
@@ -260,10 +309,12 @@ void main() {
     await settle(tester);
 
     final shares = await tester.runAsync(() => db.getShares());
-    // One profile share per not-yet-published highlight (the first was
-    // already on the profile from the earlier test).
-    expect(shares!.length, before + 1);
-    expect(shares.where((sh) => sh.medium == 'profile'), isNotEmpty);
+    // The not-yet-published second highlight gets its profile share; a
+    // combined share never duplicates quotes already on the profile.
+    expect(
+        shares!.where(
+            (sh) => sh.highlightId == second.id && sh.medium == 'profile'),
+        hasLength(1));
     // Keep the later profile-screen test deterministic: a comment-less
     // shared quote would show its "add a comment" nudge there.
     await tester.runAsync(

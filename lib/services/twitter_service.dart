@@ -407,17 +407,21 @@ class TwitterService {
           .error('Twitter: no valid access token for posting: $e');
       rethrow;
     }
-    final response = await _client.post(
-      Uri.parse('$_apiBase/tweets'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'text': text,
-        if (quoteTweetId != null) 'quote_tweet_id': quoteTweetId,
-      }),
-    );
+    // Timeout so a dead connection fails fast into the outbox instead of
+    // hanging the caller.
+    final response = await _client
+        .post(
+          Uri.parse('$_apiBase/tweets'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'text': text,
+            if (quoteTweetId != null) 'quote_tweet_id': quoteTweetId,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
     if (response.statusCode == 403) {
       await AppLogService.instance
           .error('Twitter: post refused (403): ${response.body}');
@@ -446,7 +450,8 @@ class TwitterService {
     final uri =
         Uri.parse('$_apiBase$path').replace(queryParameters: query);
     final response = await _client
-        .get(uri, headers: {'Authorization': 'Bearer $token'});
+        .get(uri, headers: {'Authorization': 'Bearer $token'})
+        .timeout(const Duration(seconds: 25));
     if (response.statusCode == 429) {
       throw Exception('Twitter rate limit reached, try again later');
     }
@@ -480,7 +485,7 @@ class TwitterService {
       'grant_type': 'refresh_token',
       'refresh_token': refreshToken,
       'client_id': clientId,
-    });
+    }).timeout(const Duration(seconds: 20));
     if (response.statusCode != 200) {
       throw Exception('Twitter session expired, please reconnect '
           '(${response.statusCode})');

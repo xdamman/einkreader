@@ -101,8 +101,10 @@ class NostrService {
     } catch (_) {
       return false;
     } finally {
+      // Never await the close (see _publishTo): it can hang on a socket
+      // that never finished connecting.
       try {
-        await channel?.sink.close();
+        unawaited(channel?.sink.close());
       } catch (_) {}
     }
   }
@@ -492,8 +494,10 @@ class NostrService {
     } catch (_) {
       // Relay unreachable; other relays may still answer.
     } finally {
+      // Never await the close (see _publishTo): it can hang on a socket
+      // that never finished connecting.
       try {
-        await channel?.sink.close();
+        unawaited(channel?.sink.close());
       } catch (_) {}
     }
     return events;
@@ -538,8 +542,10 @@ class NostrService {
     } catch (_) {
       return false;
     } finally {
+      // Never await the close: on a socket that never finished connecting
+      // it can hang forever, freezing the publish (and whoever awaits it).
       try {
-        await channel?.sink.close();
+        unawaited(channel?.sink.close());
       } catch (_) {}
     }
   }

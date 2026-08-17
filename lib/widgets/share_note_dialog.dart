@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -191,17 +193,46 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     }
   }
 
-  /// Save (private note only) or Share (checked channels). Offline never
-  /// blocks: everything unsendable waits in the outbox.
+  /// Save (private note only) or Share (checked channels). Sharing is
+  /// instant for the user: the note is persisted, the dialog closes right
+  /// away, and the actual publishing runs in the background — offline or
+  /// slow networks never block, anything unsendable waits in the outbox.
   Future<void> _save() async {
     if (_sharing) return;
     setState(() => _sharing = true);
-    final article = widget.article;
     final highlights = await _withComment();
+    final toProfile = _toProfile && _hasProfile;
+    final toTwitter = _toTwitter && _twitterConnected;
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    if (!toProfile && !toTwitter) {
+      messenger.showSnackBar(const SnackBar(content: Text('Note saved')));
+      return;
+    }
+    messenger.showSnackBar(const SnackBar(content: Text('Sharing…')));
+    unawaited(_shareInBackground(
+      highlights: highlights,
+      toProfile: toProfile,
+      toTwitter: toTwitter,
+      messenger: messenger,
+    ));
+  }
+
+  /// The slow part of sharing, detached from the (already closed) dialog.
+  /// Touches no widget state — only services, the db and the app-level
+  /// messenger it was handed.
+  Future<void> _shareInBackground({
+    required List<Highlight> highlights,
+    required bool toProfile,
+    required bool toTwitter,
+    required ScaffoldMessengerState messenger,
+  }) async {
+    final article = widget.article;
     final done = <String>[];
     final failed = <String>[];
 
-    if (_toProfile && _hasProfile) {
+    if (toProfile) {
       try {
         var accepted = 0;
         var published = 0;
@@ -225,7 +256,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
       }
     }
 
-    if (_toTwitter && _twitterConnected) {
+    if (toTwitter) {
       final quoteId = TwitterService.tweetIdFromUrl(article.url);
       final text = ShareActions.highlightsBody(article, highlights,
           withAttribution: quoteId == null);
@@ -246,14 +277,15 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
       }
     }
 
-    if (!mounted) return;
-    setState(() => _sharing = false);
-    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    // Report the outcome via the app-level messenger — the dialog is long
+    // gone. "queued" entries go out with the outbox on the next sync.
     final message = failed.isEmpty
-        ? (done.isEmpty ? 'Note saved' : 'Shared: ${done.join(', ')}')
-        : 'Shared: ${done.join(', ')} — failed: ${failed.join('; ')}';
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+        ? 'Shared: ${done.join(', ')}'
+        : done.isEmpty
+            ? failed.join('; ')
+            : 'Shared: ${done.join(', ')} — failed: ${failed.join('; ')}';
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _actionRow({
