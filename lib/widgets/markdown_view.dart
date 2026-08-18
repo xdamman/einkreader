@@ -442,7 +442,30 @@ class _MarkdownViewState extends State<MarkdownView> {
           i++;
           quote.add(lines[i].trim().replaceFirst(RegExp(r'^>\s?'), ''));
         }
-        blocks.add(_Block(_BlockType.quote, quote.join(' ').trim()));
+        // Soft-wrapped lines join into one paragraph, but structure inside
+        // the quote survives: blank `>` lines keep their paragraph break,
+        // and list lines keep their own line (with a reader-style bullet).
+        final listish = RegExp(r'^([-*+•]|\d+[.)])\s+');
+        final out = StringBuffer();
+        var atLineStart = true;
+        for (final line in quote) {
+          final text = line.trim();
+          if (text.isEmpty) {
+            if (out.isNotEmpty) out.write('\n\n');
+            atLineStart = true;
+          } else if (listish.hasMatch(text)) {
+            if (!atLineStart && out.isNotEmpty) out.write('\n');
+            out.write(text.replaceFirst(RegExp(r'^[-*+]\s+'), '• '));
+            out.write('\n');
+            atLineStart = true;
+          } else {
+            if (!atLineStart) out.write(' ');
+            out.write(text);
+            atLineStart = false;
+          }
+        }
+        blocks.add(_Block(_BlockType.quote,
+            out.toString().replaceAll(RegExp(r'\n{3,}'), '\n\n').trim()));
         continue;
       }
 
