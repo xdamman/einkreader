@@ -68,6 +68,31 @@ void main() {
     expect(out, contains('Revenue'));
   });
 
+  test('table-layout pages with no <p> extract the essay, not raw HTML', () {
+    // paulgraham.com-style markup: nested layout tables, the whole essay a
+    // <br><br>-separated run inside a <font>. The old candidate scorer
+    // found no <p> text, fell back to the body, and html2md garbled the
+    // nested tables into literal "<table …>" text.
+    final essay = List.generate(
+        12,
+        (i) => 'Paragraph $i of the essay, long enough to count as real '
+            'article text for the extractor scoring pass.').join('<br><br>');
+    final html = '<html><body>'
+        '<table border="0"><tr valign="top">'
+        '<td><a href="index.html"><img src="nav.gif"></a></td>'
+        '<td><table width="435"><tr><td>'
+        '<font size="2" face="verdana">$essay</font>'
+        '</td></tr></table></td>'
+        '</tr></table></body></html>';
+    final out = ArticleExtractor.extract(html,
+        baseUrl: 'https://paulgraham.example/own.html')!;
+    expect(out, contains('Paragraph 0 of the essay'));
+    expect(out, contains('Paragraph 11 of the essay'));
+    expect(out, isNot(contains('<table')));
+    expect(out, isNot(contains('<font')));
+    expect(out, isNot(contains('|')), reason: 'no layout-table pipe rows');
+  });
+
   test('fragment links with real text survive', () {
     final out = md('<p>See the <a href="#notes">notes below</a>.</p>');
     expect(out, contains('[notes below](#notes)'));

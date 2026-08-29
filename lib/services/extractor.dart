@@ -152,7 +152,33 @@ class ArticleExtractor {
         bestScore = score;
       }
     }
-    return bestScore > 250 ? best : null;
+    if (bestScore > 250) return best;
+    // Table-layout era pages (paulgraham.com): no <p> anywhere — the essay
+    // is one long text run separated by <br><br> inside nested layout
+    // tables. Descend to the deepest element still holding most of the
+    // page text; converting from there leaves the layout tables (which
+    // html2md would garble into raw-HTML table cells) behind.
+    return _deepTextCandidate(body);
+  }
+
+  /// The deepest element containing ≥80% of the page's text, or null when
+  /// the text is spread out (then the caller keeps its body fallback).
+  static dom.Element? _deepTextCandidate(dom.Element body) {
+    if (body.text.trim().length < 500) return null;
+    var current = body;
+    while (true) {
+      dom.Element? dominant;
+      final threshold = current.text.trim().length * 0.8;
+      for (final child in current.children) {
+        if (_negative.hasMatch('${child.id} ${child.className}')) continue;
+        if (child.text.trim().length >= threshold) {
+          dominant = child;
+          break;
+        }
+      }
+      if (dominant == null) return identical(current, body) ? null : current;
+      current = dominant;
+    }
   }
 
   static int _paragraphLength(dom.Element el) {
