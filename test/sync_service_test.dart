@@ -436,6 +436,59 @@ void main() {
         reason: 'the note is the article; no page download');
     expect(article.contentMarkdown, contains('A long essay paragraph'));
   });
+
+  test('a failing source is flagged with a friendly message, cleared once '
+      'it refreshes cleanly', () async {
+    useArchive(_no);
+    final source = await db.insertSource(Source(
+      type: SourceType.twitterBookmarks,
+      title: 'Bookmarks',
+      url: 'ada',
+      createdAt: DateTime(2026, 9, 1).millisecondsSinceEpoch,
+    ));
+
+    var expired = true;
+    final twitterClient = MockClient((request) async {
+      if (expired) {
+        return http.Response('{"title":"Unauthorized"}', 401);
+      }
+      return http.Response(jsonEncode(bookmarks([])), 200,
+          headers: {'content-type': 'application/json'});
+    });
+    final sync = SyncService.forTest(
+      http: _no,
+      twitter: TwitterService(
+          client: twitterClient, accessToken: () async => 'tok'),
+    );
+
+    await sync.syncAll();
+    expect(sync.sourceErrors[source.id],
+        'Twitter session expired, please reconnect');
+
+    // Session valid again (e.g. after reconnecting): the flag clears.
+    expired = false;
+    await sync.syncAll();
+    expect(sync.sourceErrors, isEmpty);
+  });
+
+  test('being offline never flags a source', () async {
+    useArchive(_no);
+    await db.insertSource(Source(
+      type: SourceType.rss,
+      title: 'Alpha',
+      url: 'https://alpha.example/feed',
+      createdAt: DateTime(2026, 9, 1).millisecondsSinceEpoch,
+    ));
+    final sync = SyncService.forTest(
+      http: MockClient(
+          (_) async => throw const SocketException('Network is unreachable')),
+      twitter: TwitterService(client: _no, accessToken: () async => 'tok'),
+    );
+
+    await sync.syncAll();
+    expect(sync.sourceErrors, isEmpty,
+        reason: 'offline is a global condition, not a per-source error');
+  });
 }
 
 /// Reads the single archived image's bytes from the temp archive (asserts there

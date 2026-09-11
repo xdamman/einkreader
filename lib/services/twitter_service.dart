@@ -455,6 +455,12 @@ class TwitterService {
     if (response.statusCode == 429) {
       throw Exception('Twitter rate limit reached, try again later');
     }
+    // A revoked/invalid token gets a 401 straight from the API (the refresh
+    // path below catches the expired-refresh-token case); both mean the same
+    // thing to the reader: reconnect the account.
+    if (response.statusCode == 401) {
+      throw Exception('Twitter session expired, please reconnect');
+    }
     if (response.statusCode != 200) {
       throw Exception('Twitter API error ${response.statusCode}: '
           '${response.body}');

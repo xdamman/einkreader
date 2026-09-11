@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
+import '../services/errors.dart';
 import '../services/archive_store.dart';
 import '../services/outbox_service.dart';
 import '../services/share_service.dart';
@@ -582,6 +584,41 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
   }
 
+  bool _reconnectingTwitter = false;
+
+  /// Re-runs the Twitter OAuth flow right from the feed's error banner (the
+  /// client id from the original connection is remembered), then refreshes
+  /// the source. Falls back to the Add source screen when no client id is
+  /// stored on this install.
+  Future<void> _reconnectTwitter(Source source) async {
+    if (_reconnectingTwitter) return;
+    final prefs = await SharedPreferences.getInstance();
+    final clientId = prefs.getString('twitter_client_id') ?? '';
+    if (clientId.isEmpty) {
+      await _openAddSource();
+      return;
+    }
+    setState(() => _reconnectingTwitter = true);
+    try {
+      final username = await SyncService.instance.twitter.connect(clientId);
+      SyncService.instance.sourceErrors.remove(source.id);
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+                Text('Reconnected as @$username — refreshing bookmarks')));
+      }
+      await SyncService.instance.syncSources([source]);
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(friendlyError(e, doing: 'reconnecting Twitter'))));
+    } finally {
+      if (mounted) setState(() => _reconnectingTwitter = false);
+    }
+  }
+
   /// Feed tab: a swipable filter strip above the article list — "All" first,
   /// then folders, then top-level sources, each group alphabetical. A stable
   /// order preserves the reader's spatial memory of where each chip lives.
@@ -728,6 +765,7 @@ class _HomeScreenState extends State<HomeScreen> {
           selectedFolderId: selectedFolderId,
           allUnread: allUnread,
           syncingSourceIds: _syncingSourceIds,
+          errorSourceIds: SyncService.instance.sourceErrors.keys.toSet(),
           authors: authorRow,
           selectedAuthor: _feedAuthor,
           onAuthorSelected: (author) =>
@@ -743,6 +781,17 @@ class _HomeScreenState extends State<HomeScreen> {
             _feedAuthor = null;
           }),
         ),
+        // The selected source's last refresh failed: say why above its feed,
+        // and for Twitter offer to reconnect the account right here.
+        if (selectedSource != null &&
+            SyncService.instance.sourceErrors.containsKey(selectedSource.id))
+          _SourceErrorBanner(
+            message: SyncService.instance.sourceErrors[selectedSource.id]!,
+            busy: _reconnectingTwitter,
+            onReconnect: selectedSource.type == SourceType.twitterBookmarks
+                ? () => _reconnectTwitter(selectedSource)
+                : null,
+          ),
         Expanded(
           child: ArticleFeed(
             articles: articles,
@@ -859,6 +908,9 @@ class _SourceFilterBar extends StatelessWidget {
   final int? selectedFolderId;
   final int allUnread;
   final Set<int> syncingSourceIds;
+
+  /// Sources whose last refresh failed — their chips carry a warning icon.
+  final Set<int> errorSourceIds;
   final ValueChanged<int?> onSelected;
   final ValueChanged<_FolderFilter> onFolderTap;
 
@@ -874,6 +926,7 @@ class _SourceFilterBar extends StatelessWidget {
     required this.selectedFolderId,
     required this.allUnread,
     required this.syncingSourceIds,
+    required this.errorSourceIds,
     required this.onSelected,
     required this.onFolderTap,
     this.authors,
@@ -935,6 +988,8 @@ class _SourceFilterBar extends StatelessWidget {
                     folder.members.any((m) => m.id == selectedId),
                 syncing: folder.members
                     .any((m) => syncingSourceIds.contains(m.id)),
+                error: folder.members
+                    .any((m) => errorSourceIds.contains(m.id)),
                 onTap: () => onFolderTap(folder),
               ),
             for (final source in sources)
@@ -943,6 +998,7 @@ class _SourceFilterBar extends StatelessWidget {
                 count: source.unread,
                 selected: selectedId == source.id,
                 syncing: syncingSourceIds.contains(source.id),
+                error: errorSourceIds.contains(source.id),
                 onTap: () => onSelected(source.id),
               ),
           ]),
@@ -955,6 +1011,7 @@ class _SourceFilterBar extends StatelessWidget {
                   count: member.unread,
                   selected: selectedId == member.id,
                   syncing: syncingSourceIds.contains(member.id),
+                  error: errorSourceIds.contains(member.id),
                   onTap: () => onSelected(member.id),
                 ),
             ]),
@@ -998,6 +1055,10 @@ class _SourceChip extends StatelessWidget {
   /// While true, a spinner replaces the unread count to show this source is
   /// being updated.
   final bool syncing;
+
+  /// True when the source's last refresh failed: a warning icon tells the
+  /// reader to tap the chip and see (and fix) the error above the feed.
+  final bool error;
   final VoidCallback onTap;
 
   const _SourceChip({
@@ -1006,6 +1067,7 @@ class _SourceChip extends StatelessWidget {
     required this.selected,
     required this.syncing,
     required this.onTap,
+    this.error = false,
     this.icon,
   });
 
@@ -1024,6 +1086,10 @@ class _SourceChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (error) ...[
+              Icon(Icons.warning_amber_rounded, size: 16, color: foreground),
+              const SizedBox(width: 6),
+            ],
             if (icon != null) ...[
               Icon(icon, size: 16, color: foreground),
               const SizedBox(width: 6),
@@ -1059,6 +1125,71 @@ class _SourceChip extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Shown above a source's feed when its last refresh failed: what went
+/// wrong, and — for a Twitter source — a button that reconnects the account
+/// on the spot instead of sending the reader hunting through Settings.
+class _SourceErrorBanner extends StatelessWidget {
+  final String message;
+  final bool busy;
+
+  /// Null for sources with no in-place fix (the message alone still helps).
+  final VoidCallback? onReconnect;
+
+  const _SourceErrorBanner({
+    required this.message,
+    required this.busy,
+    this.onReconnect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(width: 1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 1),
+                child: Icon(Icons.warning_amber_rounded, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'This source could not refresh: $message',
+                  style: const TextStyle(fontSize: 14, height: 1.35),
+                ),
+              ),
+            ],
+          ),
+          if (onReconnect != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton(
+              onPressed: busy ? null : onReconnect,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(width: 1.5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              ),
+              child: Text(
+                busy ? 'Reconnecting…' : 'Reconnect Twitter',
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -105,6 +105,31 @@ class SyncService {
   /// "queued for download".
   bool lastKnownOffline = false;
 
+  /// Sources whose last refresh failed for a reason of their own (an expired
+  /// Twitter session, a broken feed) mapped to a human-readable message.
+  /// The feed marks them with a warning icon and shows the message above
+  /// their articles. Being offline is not a per-source problem, so
+  /// connectivity failures never land here. Cleared on the next clean
+  /// refresh of the source.
+  final Map<int, String> sourceErrors = {};
+
+  void _recordSourceOutcome(Source source, Object? error) {
+    if (error == null || looksOffline(error)) {
+      sourceErrors.remove(source.id);
+    } else {
+      sourceErrors[source.id!] = sourceErrorMessage(error);
+    }
+  }
+
+  /// The message shown to the reader for a failed source: the exception text
+  /// without the "Exception: " noise, cut short so an API's JSON error body
+  /// doesn't flood the banner (the full text is in the debug log).
+  static String sourceErrorMessage(Object error) {
+    final text =
+        error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    return text.length > 160 ? '${text.substring(0, 160)}…' : text;
+  }
+
   /// Disabled in widget/screenshot tests to keep them offline.
   bool autoSyncOnLaunch = true;
 
@@ -162,8 +187,10 @@ class SyncService {
             final source = sources[i];
             try {
               counts[i] = await _refreshSource(source);
+              _recordSourceOutcome(source, null);
             } catch (e) {
               errors.add('${source.title}: $e');
+              _recordSourceOutcome(source, e);
               await AppLogService.instance.error(
                 'Refresh failed for source #${source.id} ${source.title}: $e',
               );
@@ -217,7 +244,9 @@ class SyncService {
           () async {
             try {
               await _refreshSource(source);
+              _recordSourceOutcome(source, null);
             } catch (e) {
+              _recordSourceOutcome(source, e);
               await AppLogService.instance.error(
                 'Auto-sync failed for source #${source.id} ${source.title}: $e',
               );
