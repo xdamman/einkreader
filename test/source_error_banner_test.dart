@@ -95,6 +95,21 @@ void main() {
     expect(find.text('Story from Bookmarks'), findsOneWidget);
   });
 
+  testWidgets(
+      'a non-auth Twitter error (depleted credits) gets no reconnect button',
+      (tester) async {
+    SyncService.instance.sourceErrors[twitterId] =
+        "Twitter's monthly API credits are used up — this will work again "
+        'once the X API plan renews';
+    await pumpHome(tester, const ValueKey('twitter-credits'));
+
+    await tester.tap(find.text('Bookmarks').first);
+    await settle(tester);
+    expect(find.textContaining('API credits are used up'), findsOneWidget);
+    expect(find.text('Reconnect Twitter'), findsNothing,
+        reason: 'reconnecting cannot fix a billing problem');
+  });
+
   testWidgets('a failed RSS source shows the error but no reconnect button',
       (tester) async {
     SyncService.instance.sourceErrors[rssId] = 'HTTP 500';

@@ -471,6 +471,34 @@ void main() {
     expect(sync.sourceErrors, isEmpty);
   });
 
+  test('a 402 credits-depleted response maps to a friendly message', () async {
+    useArchive(_no);
+    final source = await db.insertSource(Source(
+      type: SourceType.twitterBookmarks,
+      title: 'Bookmarks',
+      url: 'ada',
+      createdAt: DateTime(2026, 9, 1).millisecondsSinceEpoch,
+    ));
+    final twitterClient = MockClient((_) async => http.Response(
+        '{"detail":"credits depleted","status":402,"title":"Payment '
+        'Required","type":"https://api.x.com/2/problems/credits-depleted"}',
+        402));
+    final sync = SyncService.forTest(
+      http: _no,
+      twitter: TwitterService(
+          client: twitterClient, accessToken: () async => 'tok'),
+    );
+
+    await sync.syncAll();
+    final message = sync.sourceErrors[source.id]!;
+    expect(message, contains('API credits are used up'));
+    expect(message, isNot(contains('{')),
+        reason: 'the raw JSON problem document stays in the debug log');
+    expect(message, isNot(contains('reconnect')),
+        reason: 'reconnecting does not fix depleted credits, so the banner '
+            'must not offer it');
+  });
+
   test('being offline never flags a source', () async {
     useArchive(_no);
     await db.insertSource(Source(

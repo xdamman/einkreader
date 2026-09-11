@@ -430,11 +430,7 @@ class TwitterService {
           'grant the posting permission.');
     }
     if (response.statusCode != 201) {
-      await AppLogService.instance.error(
-          'Twitter: post failed (HTTP ${response.statusCode}): '
-          '${response.body}');
-      throw Exception('Twitter API error ${response.statusCode}: '
-          '${response.body}');
+      await _throwApiError(response, 'posting a tweet');
     }
     final id =
         ((jsonDecode(response.body) as Map<String, dynamic>?)?['data']
@@ -452,20 +448,44 @@ class TwitterService {
     final response = await _client
         .get(uri, headers: {'Authorization': 'Bearer $token'})
         .timeout(const Duration(seconds: 25));
-    if (response.statusCode == 429) {
-      throw Exception('Twitter rate limit reached, try again later');
-    }
-    // A revoked/invalid token gets a 401 straight from the API (the refresh
-    // path below catches the expired-refresh-token case); both mean the same
-    // thing to the reader: reconnect the account.
-    if (response.statusCode == 401) {
-      throw Exception('Twitter session expired, please reconnect');
-    }
     if (response.statusCode != 200) {
-      throw Exception('Twitter API error ${response.statusCode}: '
-          '${response.body}');
+      await _throwApiError(response, 'GET $path');
     }
     return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  /// Turns an API error response into a message a reader can act on. The
+  /// raw body (often a JSON problem document) goes to the debug log; the
+  /// exception carries only the human-readable part, because this text ends
+  /// up on screen in the source's error banner.
+  Future<Never> _throwApiError(http.Response response, String doing) async {
+    await _log((log) => log.warn(
+        'Twitter: API error ${response.statusCode} while $doing: '
+        '${response.body}'));
+    switch (response.statusCode) {
+      // A revoked/invalid token gets a 401 straight from the API (the
+      // refresh path catches the expired-refresh-token case); both mean the
+      // same thing to the reader: reconnect the account.
+      case 401:
+        throw Exception('Twitter session expired, please reconnect');
+      // The X API's usage-based billing: the plan's monthly credits ran
+      // out. Nothing to fix in the app — reconnecting would not help.
+      case 402:
+        throw Exception(
+            "Twitter's monthly API credits are used up — this will work "
+            'again once the X API plan renews');
+      case 429:
+        throw Exception('Twitter rate limit reached, try again later');
+    }
+    String? reason;
+    try {
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      reason = (json['detail'] ?? json['title']) as String?;
+    } catch (_) {
+      // Not a JSON problem document; the body stays in the log only.
+    }
+    throw Exception('Twitter API error ${response.statusCode}'
+        '${reason == null ? '' : ': $reason'}');
   }
 
   Future<String> _validAccessToken() async {

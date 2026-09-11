@@ -782,13 +782,18 @@ class _HomeScreenState extends State<HomeScreen> {
           }),
         ),
         // The selected source's last refresh failed: say why above its feed,
-        // and for Twitter offer to reconnect the account right here.
+        // and — when the error is an auth problem that reconnecting actually
+        // fixes (not, say, depleted API credits) — offer to reconnect the
+        // Twitter account right here.
         if (selectedSource != null &&
             SyncService.instance.sourceErrors.containsKey(selectedSource.id))
           _SourceErrorBanner(
             message: SyncService.instance.sourceErrors[selectedSource.id]!,
             busy: _reconnectingTwitter,
-            onReconnect: selectedSource.type == SourceType.twitterBookmarks
+            onReconnect: selectedSource.type == SourceType.twitterBookmarks &&
+                    SyncService.instance.sourceErrors[selectedSource.id]!
+                        .toLowerCase()
+                        .contains('reconnect')
                 ? () => _reconnectTwitter(selectedSource)
                 : null,
           ),
