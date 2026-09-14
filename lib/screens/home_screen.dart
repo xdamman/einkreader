@@ -747,17 +747,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final allUnread = unread.values.fold(0, (sum, value) => sum + value);
 
-    final currentReads = ResumeReadingSection.currentReads(_articles);
+    // Resume reading obeys the chip filters: computed from the filtered
+    // list, so selecting a source/folder/author narrows it too.
+    final currentReads = ResumeReadingSection.currentReads(articles);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (currentReads.isNotEmpty)
-          ResumeReadingSection(
-            articles: currentReads,
-            sourceTitles: _sourceTitles,
-            onChanged: _load,
-          ),
         _SourceFilterBar(
           folders: folders,
           sources: topSources,
@@ -796,6 +792,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         .contains('reconnect')
                 ? () => _reconnectTwitter(selectedSource)
                 : null,
+          ),
+        if (currentReads.isNotEmpty)
+          ResumeReadingSection(
+            articles: currentReads,
+            sourceTitles: _sourceTitles,
+            onChanged: _load,
           ),
         Expanded(
           child: ArticleFeed(

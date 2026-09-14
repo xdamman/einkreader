@@ -4,9 +4,10 @@ import '../db/app_database.dart';
 import '../models.dart';
 import '../screens/article_screen.dart';
 
-/// "Resume reading" section shown at the top of the Feed tab: articles the
-/// user started but hasn't finished (unread, with a saved scroll position,
-/// not parked in To Read), most recently touched first.
+/// "Resume reading" section shown on the Feed tab, below the filter strip
+/// (and narrowed by the same filters): articles the user started but hasn't
+/// finished (unread, with a saved scroll position, not parked in To Read),
+/// most recently touched first.
 ///
 /// Each row can be swiped right to mark as read, swiped left to mark as
 /// unread (dropping the saved position), or bookmarked via the trailing
