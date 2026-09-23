@@ -220,6 +220,110 @@ class TwitterService {
     return await threadOf(item) ?? await _withLinkedArticle(item);
   }
 
+  /// The status id in an x.com / twitter.com post URL, or null.
+  static String? statusIdOf(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return null;
+    final host = uri.host.toLowerCase();
+    if (!(host == 'x.com' ||
+        host.endsWith('.x.com') ||
+        host == 'twitter.com' ||
+        host.endsWith('.twitter.com'))) {
+      return null;
+    }
+    return RegExp(r'/status(?:es)?/(\d+)').firstMatch(uri.path)?.group(1);
+  }
+
+  /// A linked post (e.g. a Daring Fireball link to a tweet) rendered as
+  /// Markdown. x.com serves a logged-out page with no post in it, so page
+  /// extraction yields only "Log in / Sign up": this reads the public embed
+  /// data instead — no account or API credits needed — with the connected
+  /// API as a fallback. Includes the post it replies to and any quoted post
+  /// as context.
+  Future<String> linkedPostMarkdown(String id) async {
+    try {
+      final response = await _client
+          .get(Uri.https('cdn.syndication.twimg.com', '/tweet-result',
+              {'id': id, 'token': 'a', 'lang': 'en'}))
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        if (json['text'] != null) return _syndicationMarkdown(json);
+      }
+      await _log((log) => log.warn(
+          'Twitter: public embed for $id unavailable '
+          '(HTTP ${response.statusCode})'));
+    } catch (e) {
+      await _log((log) => log.warn('Twitter: public embed for $id failed: $e'));
+    }
+    final item = await fetchTweet(id);
+    final who = item.authorName ?? item.authorUsername ?? 'Post';
+    return '**$who**'
+        '${item.authorUsername != null ? ' ([@${item.authorUsername}](https://x.com/${item.authorUsername}))' : ''}'
+        '\n\n${item.text}';
+  }
+
+  /// Markdown for one syndication tweet object: author line, text with
+  /// t.co links expanded (media links dropped — the photos follow as
+  /// images), the replied-to post above as context, a quoted post below.
+  static String _syndicationMarkdown(Map<String, dynamic> tweet,
+      {bool nested = false}) {
+    final user = tweet['user'] as Map<String, dynamic>? ?? const {};
+    final name = user['name'] as String?;
+    final handle = user['screen_name'] as String?;
+    final note = ((tweet['note_tweet'] as Map?)?['note_tweet_results']
+        as Map?)?['result']?['text'] as String?;
+    var text = note ?? (tweet['text'] as String? ?? '');
+    final entities = tweet['entities'] as Map<String, dynamic>? ?? const {};
+    for (final u in (entities['urls'] as List?) ?? const []) {
+      final short = u['url'] as String?;
+      final expanded = u['expanded_url'] as String?;
+      final display = (u['display_url'] as String?) ?? expanded;
+      if (short != null && expanded != null) {
+        text = text.replaceAll(short, '[$display]($expanded)');
+      }
+    }
+    for (final m in (entities['media'] as List?) ?? const []) {
+      final short = m['url'] as String?;
+      if (short != null) text = text.replaceAll(short, '');
+    }
+    final images = <String>[
+      for (final m in (tweet['mediaDetails'] as List?) ?? const [])
+        if (m['media_url_https'] != null) m['media_url_https'] as String,
+    ];
+    final header = [
+      if (name != null) '**$name**',
+      if (handle != null) '([@$handle](https://x.com/$handle))',
+    ].join(' ');
+    final parts = <String>[
+      if (header.isNotEmpty) '$header:',
+      text.trim(),
+      for (final src in images) '![]($src)',
+    ];
+    final quoted = tweet['quoted_tweet'] as Map<String, dynamic>?;
+    if (quoted != null && quoted['text'] != null) {
+      final inner = _syndicationMarkdown(quoted, nested: true);
+      // The reader renders one quote level: inside an already-quoted post,
+      // label the quoted one instead of nesting another blockquote.
+      parts.add(nested ? '*Quoting* $inner' : _quote(inner));
+    }
+    final parent = tweet['parent'] as Map<String, dynamic>?;
+    if (!nested && parent != null && parent['text'] != null) {
+      return '*In reply to:*\n\n'
+          '${_quote(_syndicationMarkdown(parent, nested: true))}'
+          '\n\n---\n\n${parts.join('\n\n')}';
+    }
+    return parts.join('\n\n');
+  }
+
+  /// Markdown blockquote of [text], every line quoted (blank ones too, so
+  /// paragraph breaks survive).
+  static String _quote(String text) => text
+      .trim()
+      .split('\n')
+      .map((line) => line.trim().isEmpty ? '>' : '> $line')
+      .join('\n');
+
   Future<TweetItem> _fetchTweet(String id) async {
     final json = await _get('/tweets/$id', query: _tweetQuery);
     return _parseTweet(

@@ -211,6 +211,94 @@ void main() {
     expect(reprocessed.contentMarkdown, isNot(contains('Could not extract')));
   });
 
+  test('a feed item linking to an X post reads the post, not the login wall',
+      () async {
+    // Daring Fireball-style link post to a tweet. x.com's logged-out page
+    // has no post in it; the public embed data does. The reprocess path is
+    // exercised too: the item's guid is DF's, not a tweet id, so it must
+    // not take the bookmark branch.
+    useArchive(_no);
+    final source = await db.insertSource(Source(
+      type: SourceType.rss,
+      title: 'Daring Fireball',
+      url: 'https://df.example/feed',
+      createdAt: DateTime(2026, 9, 1).millisecondsSinceEpoch,
+    ));
+    await db.insertArticleIfNew(Article(
+      sourceId: source.id!,
+      guid: 'tag:daringfireball.net,2026:/linked/gm',
+      title: 'GM Confirms They’re Still Smoking Crack',
+      url: 'https://x.com/JoannaStern/status/2102105565195288859',
+      summary: 'Joanna Stern with a correction.',
+      publishedAt: DateTime(2026, 9, 21).millisecondsSinceEpoch,
+      fetched: 0,
+      createdAt: DateTime(2026, 9, 21).millisecondsSinceEpoch,
+    ));
+    final article = (await db.getArticles(sourceId: source.id)).single;
+
+    const user = {'name': 'Joanna Stern', 'screen_name': 'JoannaStern'};
+    final embed = {
+      'id_str': '2102105565195288859',
+      'text': 'Correction: GM has confirmed it is NOT rolling phone '
+          'projection to GM EVs. https://t.co/abc\n\nYou know where I '
+          'stand on this!',
+      'entities': {
+        'urls': [
+          {
+            'url': 'https://t.co/abc',
+            'expanded_url': 'https://wsj.example/gm',
+            'display_url': 'wsj.example/gm',
+          }
+        ],
+      },
+      'user': user,
+      'parent': {
+        'text': 'lol',
+        'user': user,
+        'quoted_tweet': {
+          'text': 'GM is bringing Apple CarPlay and Android Auto back.',
+          'user': {'name': 'Sawyer Merritt', 'screen_name': 'SawyerMerritt'},
+        },
+      },
+    };
+    final twitterClient = MockClient((request) async {
+      if (request.url.host == 'cdn.syndication.twimg.com' &&
+          request.url.queryParameters['id'] == '2102105565195288859') {
+        return http.Response(jsonEncode(embed), 200,
+            headers: {'content-type': 'application/json'});
+      }
+      return http.Response('unexpected ${request.url}', 404);
+    });
+    final pageClient = MockClient((request) async => http.Response(
+        '<html><body><h2>Post</h2><a href="/login">Log in</a></body></html>',
+        200));
+    final sync = SyncService.forTest(
+      http: pageClient,
+      twitter: TwitterService(
+          client: twitterClient, accessToken: () async => 'tok'),
+    );
+
+    expect(await sync.downloadArticle(article.id!), isTrue);
+    var content = (await db.getArticle(article.id!))!.contentMarkdown!;
+    expect(content, contains('> Joanna Stern with a correction.'),
+        reason: "DF's own comment stays on top as the intro");
+    expect(content, contains('**Joanna Stern** ([@JoannaStern]'));
+    expect(content, contains('Correction: GM has confirmed'));
+    expect(content, contains('[wsj.example/gm](https://wsj.example/gm)'),
+        reason: 't.co links are expanded');
+    expect(content, contains('You know where I stand on this!'));
+    expect(content, contains('*In reply to:*'));
+    expect(content, contains('Sawyer Merritt'),
+        reason: 'the replied-to post and what it quotes give context');
+    expect(content, isNot(contains('Log in')));
+
+    // Reload & reprocess goes through the same path (not fetchTweet(guid)).
+    await sync.reprocessArticle(article.id!);
+    content = (await db.getArticle(article.id!))!.contentMarkdown!;
+    expect(content, contains('Correction: GM has confirmed'));
+    expect(content, isNot(contains('Log in')));
+  });
+
   test('reprocess throws when the download fails', () async {
     useArchive(_no);
     final source = await db.insertSource(Source(

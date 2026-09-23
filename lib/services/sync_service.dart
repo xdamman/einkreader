@@ -369,7 +369,11 @@ class SyncService {
     try {
       final host = Uri.tryParse(article.url ?? '')?.host ?? '';
       final isTweet = host.endsWith('x.com') || host.endsWith('twitter.com');
-      if (isTweet && source != null) {
+      // Only a bookmark's guid is a tweet id; a feed item that merely links
+      // to a post (a Daring Fireball link) re-downloads like any page.
+      if (isTweet &&
+          source != null &&
+          source.type == SourceType.twitterBookmarks) {
         // Re-fetch the post (picks up edits / new media) and re-localize.
         final item = await twitter.fetchTweet(article.guid);
         if (_sharesLink(item)) {
@@ -886,35 +890,53 @@ class SyncService {
       await _db.markArticleFetched(article.id!);
       return true;
     }
-    String body;
-    try {
-      await AppLogService.instance.debug(
-        'Loading article #${article.id}: ${article.title} <$url>',
-      );
-      final response = await _http
-          .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
-          .timeout(const Duration(seconds: 25));
-      await AppLogService.instance.debug(
-        'Loaded article #${article.id}: HTTP ${response.statusCode}, '
-        '${response.body.length} bytes',
-      );
-      lastKnownOffline = false;
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
+    // A link to an X post: x.com serves logged-out visitors a page with no
+    // post in it ("Log in / Sign up"), so read the post itself instead.
+    final tweetId = TwitterService.statusIdOf(url);
+    String? tweetMarkdown;
+    if (tweetId != null) {
+      try {
+        tweetMarkdown = await twitter.linkedPostMarkdown(tweetId);
+        lastKnownOffline = false;
+      } catch (e) {
+        if (looksOffline(e)) lastKnownOffline = true;
+        await AppLogService.instance.warn(
+          'Could not load linked post for article #${article.id}: $e',
+        );
+        return false;
       }
-      body = decodeBody(response);
-    } catch (e) {
-      // Network failure: keep fetched = 0 so the next sync retries.
-      if (looksOffline(e)) lastKnownOffline = true;
-      await AppLogService.instance.warn(
-        'Could not load article #${article.id} ${article.title}: $e',
-      );
-      return false;
+    }
+    var body = '';
+    if (tweetMarkdown == null) {
+  try {
+        await AppLogService.instance.debug(
+          'Loading article #${article.id}: ${article.title} <$url>',
+        );
+        final response = await _http
+            .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
+            .timeout(const Duration(seconds: 25));
+        await AppLogService.instance.debug(
+          'Loaded article #${article.id}: HTTP ${response.statusCode}, '
+          '${response.body.length} bytes',
+        );
+        lastKnownOffline = false;
+        if (response.statusCode != 200) {
+          throw Exception('HTTP ${response.statusCode}');
+        }
+        body = decodeBody(response);
+      } catch (e) {
+        // Network failure: keep fetched = 0 so the next sync retries.
+        if (looksOffline(e)) lastKnownOffline = true;
+        await AppLogService.instance.warn(
+          'Could not load article #${article.id} ${article.title}: $e',
+        );
+        return false;
+      }
     }
     try {
       // Parsing + readability-scoring a full page is CPU-heavy enough to
       // freeze the UI on slow devices, so it runs on a background isolate.
-      final markdown =
+      final markdown = tweetMarkdown ??
           await Isolate.run(() => ArticleExtractor.extract(body, baseUrl: url));
       if (markdown != null) {
         final source = await _db.getSource(article.sourceId);
@@ -948,9 +970,10 @@ class SyncService {
         // links carry their anchor text or URL; replace it with the real page
         // title once we have it.
         var titled = article;
-        if (article.title.endsWith('…') ||
-            article.title == article.url ||
-            source?.type == SourceType.savedLinks) {
+        if (tweetMarkdown == null &&
+            (article.title.endsWith('…') ||
+                article.title == article.url ||
+                source?.type == SourceType.savedLinks)) {
           final pageTitle =
               await Isolate.run(() => ArticleExtractor.extractTitle(body));
           if (pageTitle != null) {

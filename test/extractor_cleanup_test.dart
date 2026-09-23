@@ -93,6 +93,50 @@ void main() {
     expect(out, isNot(contains('|')), reason: 'no layout-table pipe rows');
   });
 
+  test('the post container wins over a page wrapper with sidebar text', () {
+    // seths.blog: the sidebar's one paragraph lives inside the same
+    // content wrapper as the post, and ancestors are visited first — the
+    // wrapper used to win, dragging in menus, "Subscribe" and share icons.
+    final paragraphs = List.generate(
+        5,
+        (i) => '<p>Paragraph $i of the post, with enough words in it to '
+            'count as real article text for the scorer.</p>').join();
+    final html = '<html><body><div id="content-container">'
+        '<div class="sidebar-widget"><h2>More Seth</h2><ul>'
+        '<li><a href="/more">Books, videos, and speaking</a></li></ul></div>'
+        '<div id="nudge"><p>Have you thought about subscribing? It is free.'
+        '</p></div>'
+        '<div class="wrapper"><div class="post single">'
+        '<h2><a href="/post">Measuring nothing</a></h2>$paragraphs'
+        '<p class="byline">January 25, 2014</p>'
+        '<ul class="icons"><li><a href="https://facebook.example/share">'
+        '<svg><path d="M0"/></svg></a></li>'
+        '<li><a href="https://twitter.example/intent"><svg/></a></li></ul>'
+        '</div></div></div></body></html>';
+    final out = ArticleExtractor.extract(html,
+        baseUrl: 'https://seths.example/2014/01/post/')!;
+    expect(out, startsWith('## [Measuring nothing]'));
+    expect(out, contains('Paragraph 4 of the post'));
+    expect(out, isNot(contains('More Seth')));
+    expect(out, isNot(contains('subscribing')));
+    expect(out, isNot(contains('facebook')),
+        reason: 'icon-only share links vanish with their empty bullets');
+    expect(out.trim(), endsWith('January 25, 2014'));
+  });
+
+  test('icon-only links and the lists they empty are dropped', () {
+    final out = md('<p>Text.</p><ul><li><a href="https://a.example">'
+        '<svg/></a></li><li><a href="https://b.example"> </a></li></ul>'
+        '<p>More <a href="https://c.example">real link</a>.</p>'
+        '<a href="https://d.example"><img src="https://d.example/big.png" '
+        'width="800"></a>');
+    expect(out, isNot(contains('a.example')));
+    expect(out, isNot(contains('b.example')));
+    expect(out, isNot(contains('*')), reason: 'no empty bullets left');
+    expect(out, contains('[real link](https://c.example)'));
+    expect(out, contains('big.png'), reason: 'image links are content');
+  });
+
   test('fragment links with real text survive', () {
     final out = md('<p>See the <a href="#notes">notes below</a>.</p>');
     expect(out, contains('[notes below](#notes)'));

@@ -73,9 +73,19 @@ class ArticleExtractor {
         el.remove();
       }
     }
+    // Links with nothing to show — a heading's self-link, or a share button
+    // whose SVG icon was stripped — would render as empty "[ ](url)" text.
     for (final a in frag.querySelectorAll('a')) {
-      final href = a.attributes['href'] ?? '';
-      if (href.startsWith('#') && a.text.trim().isEmpty) a.remove();
+      if (a.text.trim().isEmpty && a.querySelector('img') == null) a.remove();
+    }
+    // …and the list items / lists they leave behind (share-icon bars).
+    for (final li in frag.querySelectorAll('li')) {
+      if (li.text.trim().isEmpty && li.querySelector('img') == null) {
+        li.remove();
+      }
+    }
+    for (final list in frag.querySelectorAll('ul, ol')) {
+      if (list.querySelector('li') == null) list.remove();
     }
     // Avatars, icons and tracking pixels are byline chrome, not article
     // content — and they render as awkward blocks on e-ink.
@@ -148,6 +158,16 @@ class ArticleExtractor {
         if (best != null && _contains(el, best) && score < bestScore * 1.5) {
           continue;
         }
+        best = el;
+        bestScore = score;
+      } else if (best != null &&
+          _contains(best, el) &&
+          score * 1.5 > bestScore) {
+        // Document order visits ancestors first, so the rule above rarely
+        // fires: a page wrapper holding the post plus a stray sidebar
+        // paragraph (seths.blog) won before its own post container was
+        // seen. Same rule the other way round: a descendant holding most
+        // of the ancestor's text is the more specific container.
         best = el;
         bestScore = score;
       }
