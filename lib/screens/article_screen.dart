@@ -255,59 +255,102 @@ class _ArticleScreenState extends State<ArticleScreen> {
     }
   }
 
-  /// A tapped link offers to open in the browser (online) and/or save the
-  /// page to read later. Saving queues it for download (immediately when
-  /// online, on the next sync otherwise), bookmarks it under To Read, and
-  /// remembers this article as where it came from.
-  Future<void> _onLinkTap(String url, String anchorText) async {
+  /// A tapped link offers to open in the browser and/or save the page to
+  /// read later. Saving queues it for download (immediately when online, on
+  /// the next sync otherwise), bookmarks it under To Read, and remembers this
+  /// article as where it came from.
+  ///
+  /// The menu opens instantly: it never waits on a connectivity probe
+  /// (offline, the DNS lookup takes seconds to time out). It trusts the
+  /// last known state, and the probe runs alongside to decide what "Read
+  /// later" does once chosen. On tablets it is a small menu anchored at
+  /// the tapped link, like the highlight menu — only phones get a drawer.
+  Future<void> _onLinkTap(
+      String url, String anchorText, Offset position) async {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     if (uri.scheme != 'http' && uri.scheme != 'https') {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       return;
     }
-    final online = await SyncService.instance.isOnline();
-    if (!mounted) return;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text(
-                online ? url : 'You\'re offline\n$url',
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 14),
+    final onlineProbe = SyncService.instance.isOnline();
+    final offline = SyncService.instance.lastKnownOffline;
+    final compact = MediaQuery.sizeOf(context).shortestSide < 600;
+    final String? action;
+    if (compact) {
+      action = await showModalBottomSheet<String>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(
+                  offline ? 'You\'re offline\n$url' : url,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14),
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            if (online)
+              const Divider(height: 1),
+              if (!offline)
+                ListTile(
+                  leading: const Icon(Icons.open_in_browser),
+                  title: const Text('Open in browser'),
+                  onTap: () => Navigator.pop(context, 'open'),
+                ),
               ListTile(
-                leading: const Icon(Icons.open_in_browser),
-                title: const Text('Open in browser'),
-                onTap: () => Navigator.pop(context, 'open'),
+                leading: const Icon(Icons.bookmark_add_outlined),
+                title: const Text('Read later'),
+                subtitle: Text(offline
+                    ? 'Added to To Read; downloads when back online'
+                    : 'Download now and add to To Read'),
+                onTap: () => Navigator.pop(context, 'save'),
               ),
-            ListTile(
-              leading: const Icon(Icons.bookmark_add_outlined),
-              title: const Text('Read later'),
-              subtitle: Text(online
-                  ? 'Download now and add to To Read'
-                  : 'Added to To Read; downloads when back online'),
-              onTap: () => Navigator.pop(context, 'save'),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    } else {
+      final overlay =
+          Overlay.of(context).context.findRenderObject() as RenderBox;
+      action = await showMenu<String>(
+        context: context,
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        position: RelativeRect.fromRect(
+          Rect.fromCenter(center: position, width: 1, height: 1),
+          Offset.zero & overlay.size,
+        ),
+        items: [
+          PopupMenuItem(
+            enabled: false,
+            child: Text(
+              Uri.parse(url).host.replaceFirst(RegExp(r'^www\.'), ''),
+              style: const TextStyle(fontSize: 13, color: Colors.black),
+            ),
+          ),
+          const PopupMenuDivider(),
+          if (!offline)
+            const PopupMenuItem(
+                value: 'open', child: Text('Open in browser')),
+          PopupMenuItem(
+              value: 'save',
+              child: Text(offline
+                  ? 'Read later (downloads when online)'
+                  : 'Read later')),
+        ],
+      );
+    }
     if (!mounted || action == null) return;
     if (action == 'open') {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
       return;
     }
+    // By now the probe has usually finished (the reader spent that time
+    // choosing); it only decides whether to download right away.
+    final online = await onlineProbe;
     final saved = await _db.saveLinkForLater(
       url: url,
       title: anchorText,

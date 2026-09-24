@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/home_screen.dart';
+import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:flutter/material.dart';
@@ -125,5 +126,23 @@ void main() {
   testWidgets('a healthy strip shows no warning icons', (tester) async {
     await pumpHome(tester, const ValueKey('no-errors'));
     expect(find.byIcon(Icons.warning_amber_rounded), findsNothing);
+  });
+
+  testWidgets('an outbox tweet refused for auth offers Reconnect Twitter',
+      (tester) async {
+    await tester.runAsync(() => OutboxService.instance.enqueueTweet(
+        'a highlight worth sharing',
+        error: 'Exception: Twitter refused the post — reconnect Twitter to '
+            'grant the posting permission'));
+    await pumpHome(tester, const ValueKey('outbox-reconnect'));
+
+    await tester.tap(find.byIcon(Icons.outbox_outlined));
+    await settle(tester);
+    await settle(tester);
+    expect(find.text('Reconnect Twitter'), findsOneWidget);
+    expect(find.textContaining('Exception:'), findsNothing,
+        reason: 'the error reads as a sentence');
+    await tester.tap(find.text('Close'));
+    await settle(tester);
   });
 }

@@ -530,8 +530,8 @@ class TwitterService {
       await AppLogService.instance
           .error('Twitter: post refused (403): ${response.body}');
       throw Exception(
-          'Twitter refused the post. Reconnect Twitter (Add source) to '
-          'grant the posting permission.');
+          'Twitter refused the post — reconnect Twitter to grant the '
+          'posting permission');
     }
     if (response.statusCode != 201) {
       await _throwApiError(response, 'posting a tweet');

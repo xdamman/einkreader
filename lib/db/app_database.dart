@@ -75,7 +75,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -225,6 +225,10 @@ class AppDatabase {
       await db.execute('DROP TABLE sources');
       await db.execute('ALTER TABLE sources_v12 RENAME TO sources');
     }
+    if (oldVersion < 13) {
+      // When each article was read, so the Read tab lists by reading time.
+      await _addColumnIfMissing(db, 'articles', 'read_at', 'INTEGER');
+    }
   }
 
   static const _createContactsSql = '''
@@ -304,6 +308,7 @@ class AppDatabase {
         scroll_position REAL NOT NULL DEFAULT 0,
         scrolled_at INTEGER,
         via_article_id INTEGER,
+        read_at INTEGER,
         UNIQUE(source_id, guid)
       )
     ''');
@@ -685,7 +690,12 @@ class AppDatabase {
     final db = await database;
     await db.update(
       'articles',
-      {'read': read ? 1 : 0, 'scroll_position': 0.0, 'scrolled_at': null},
+      {
+        'read': read ? 1 : 0,
+        'read_at': read ? DateTime.now().millisecondsSinceEpoch : null,
+        'scroll_position': 0.0,
+        'scrolled_at': null,
+      },
       where: 'id = ?',
       whereArgs: [id],
     );

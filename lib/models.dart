@@ -159,6 +159,10 @@ class Article {
   /// link was found in, shown as "From: …" in the reader header.
   final int? viaArticleId;
 
+  /// When the article was marked read (null while unread, and for articles
+  /// read before this was recorded). The Read tab lists by it.
+  final int? readAt;
+
   const Article({
     this.id,
     required this.sourceId,
@@ -177,6 +181,7 @@ class Article {
     this.scrollPosition = 0,
     this.scrolledAt,
     this.viaArticleId,
+    this.readAt,
   });
 
   Article copyWith({String? title, String? contentMarkdown, int? favorite}) =>
@@ -198,6 +203,7 @@ class Article {
         scrollPosition: scrollPosition,
         scrolledAt: scrolledAt,
         viaArticleId: viaArticleId,
+        readAt: readAt,
       );
 
   /// Normalized form of [url] used to detect the same story arriving from
@@ -250,6 +256,7 @@ class Article {
         'scroll_position': scrollPosition,
         'scrolled_at': scrolledAt,
         'via_article_id': viaArticleId,
+        'read_at': readAt,
       };
 
   /// Canonicalizes a URL for deduplication: lowercases the host, drops
@@ -302,6 +309,7 @@ class Article {
         scrollPosition: (m['scroll_position'] as num?)?.toDouble() ?? 0,
         scrolledAt: m['scrolled_at'] as int?,
         viaArticleId: m['via_article_id'] as int?,
+        readAt: m['read_at'] as int?,
       );
 }
 

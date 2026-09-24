@@ -12,6 +12,7 @@ import '../services/profile_service.dart';
 import '../services/share_actions.dart';
 import '../services/sync_service.dart';
 import '../services/twitter_service.dart';
+import 'reconnect_twitter.dart';
 
 /// Note-taking and sharing merged into one overlay: the quote, a roomy note
 /// field, the share channels, and the immediate hand-offs — the only
@@ -205,6 +206,9 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     final toTwitter = _toTwitter && _twitterConnected;
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
+    // The root navigator outlives this dialog: needed if the share ends
+    // up offering to reconnect Twitter.
+    final navigator = Navigator.of(context, rootNavigator: true);
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
     if (!toProfile && !toTwitter) {
       messenger.showSnackBar(const SnackBar(content: Text('Note saved')));
@@ -216,6 +220,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
       toProfile: toProfile,
       toTwitter: toTwitter,
       messenger: messenger,
+      navigator: navigator,
     ));
   }
 
@@ -227,8 +232,10 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     required bool toProfile,
     required bool toTwitter,
     required ScaffoldMessengerState messenger,
+    required NavigatorState navigator,
   }) async {
     final article = widget.article;
+    var reconnect = false;
     final done = <String>[];
     final failed = <String>[];
 
@@ -268,12 +275,15 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
         }
         done.add('twitter');
       } catch (e) {
+        reconnect = needsTwitterReconnect(e);
         await OutboxService.instance
             .enqueueTweet(text, quoteTweetId: quoteId, error: '$e');
         for (final highlight in highlights) {
           await _record('twitter', highlight);
         }
-        done.add('twitter (queued)');
+        done.add(reconnect
+            ? 'twitter (queued — reconnect Twitter to send)'
+            : 'twitter (queued)');
       }
     }
 
@@ -285,7 +295,12 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
             ? failed.join('; ')
             : 'Shared: ${done.join(', ')} — failed: ${failed.join('; ')}';
     messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(content: Text(message)));
+    messenger.showSnackBar(SnackBar(
+      content: Text(message),
+      action: reconnect
+          ? reconnectTwitterAction(messenger: messenger, navigator: navigator)
+          : null,
+    ));
   }
 
   Widget _actionRow({

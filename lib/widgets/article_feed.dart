@@ -26,6 +26,11 @@ class ArticleFeed extends StatelessWidget {
   final FeedRowAction rowAction;
   final VoidCallback onChanged;
 
+  /// The timestamp that places an article under a day header — its
+  /// publication date by default; the Read tab passes the reading time.
+  /// [articles] must already be ordered by it.
+  final int Function(Article article)? dateOf;
+
   const ArticleFeed({
     super.key,
     required this.articles,
@@ -33,6 +38,7 @@ class ArticleFeed extends StatelessWidget {
     required this.emptyMessage,
     this.rowAction = FeedRowAction.readLater,
     required this.onChanged,
+    this.dateOf,
   });
 
   @override
@@ -56,8 +62,9 @@ class ArticleFeed extends StatelessWidget {
     final entries = <Object>[];
     DateTime? currentDay;
     for (final article in articles) {
-      final date = DateTime.fromMillisecondsSinceEpoch(
-          article.publishedAt ?? article.createdAt);
+      final date = DateTime.fromMillisecondsSinceEpoch(dateOf != null
+          ? dateOf!(article)
+          : article.publishedAt ?? article.createdAt);
       final day = DateTime(date.year, date.month, date.day);
       if (day != currentDay) {
         entries.add(day);

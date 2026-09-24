@@ -6,6 +6,7 @@ import '../models.dart';
 import 'outbox_service.dart';
 import 'sync_service.dart';
 import 'twitter_service.dart';
+import '../widgets/reconnect_twitter.dart';
 
 /// Share actions used by the reader's share menu, the in-article highlight
 /// menu and the Highlights tab: prefilled email, an editable tweet sized to
@@ -253,17 +254,25 @@ class ShareActions {
       return;
     }
     String message = 'Posted to Twitter';
+    SnackBarAction? action;
     try {
       await twitter.postTweet(text, quoteTweetId: quoteTweetId);
     } catch (e) {
+      if (needsTwitterReconnect(e) && context.mounted) {
+        action = reconnectTwitterAction(
+            messenger: ScaffoldMessenger.of(context),
+            navigator: Navigator.of(context));
+      }
       // Keep the tweet: it lands in the outbox (icon on the home screen)
       // and is retried on the next sync or manually.
       await OutboxService.instance
           .enqueueTweet(text, quoteTweetId: quoteTweetId, error: '$e');
-      message = 'Couldn\'t post now — kept in the outbox for retry';
+      message = action != null
+          ? 'Twitter needs reconnecting — the post waits in the outbox'
+          : 'Couldn\'t post now — kept in the outbox for retry';
     }
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+        .showSnackBar(SnackBar(content: Text(message), action: action));
   }
 }

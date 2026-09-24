@@ -53,7 +53,10 @@ void main() {
     originId = (await db.getArticles()).single.id!;
   });
 
-  tearDown(() => SyncService.instance.debugIsOnline = null);
+  tearDown(() {
+    SyncService.instance.debugIsOnline = null;
+    SyncService.instance.lastKnownOffline = false;
+  });
 
   Future<void> settle(WidgetTester tester) async {
     await tester
@@ -92,7 +95,8 @@ void main() {
       walk(rich.text);
     }
     expect(found, isNotNull, reason: 'no link span "$anchor"');
-    found!.onTap!();
+    found!.onTapUp!(TapUpDetails(
+        kind: PointerDeviceKind.touch, globalPosition: const Offset(200, 200)));
   }
 
   testWidgets(r'renders \[ and \] as literal brackets', (tester) async {
@@ -189,6 +193,7 @@ void main() {
   testWidgets('offline link tap offers Read later only and queues the page',
       (tester) async {
     SyncService.instance.debugIsOnline = () async => false;
+    SyncService.instance.lastKnownOffline = true;
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
       home: ArticleScreen(articleId: originId),
@@ -196,11 +201,15 @@ void main() {
     await settle(tester);
 
     tapLink(tester, 'a great essay');
-    await settle(tester);
+    // The menu is up on the very next frame — no waiting on a probe.
+    await tester.pump();
     expect(find.text('Open in browser'), findsNothing);
-    expect(find.text('Read later'), findsOneWidget);
+    expect(find.textContaining('Read later'), findsOneWidget);
+    expect(find.byType(BottomSheet), findsNothing,
+        reason: 'tablets get a contextual menu at the link, not a drawer');
 
-    await tester.tap(find.text('Read later'));
+    await settle(tester);
+    await tester.tap(find.textContaining('Read later'));
     await settle(tester);
     expect(find.textContaining('will download when back online'),
         findsOneWidget);
@@ -225,6 +234,7 @@ void main() {
 
   testWidgets('online link tap also offers Open in browser', (tester) async {
     SyncService.instance.debugIsOnline = () async => true;
+    SyncService.instance.lastKnownOffline = false;
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
       home: ArticleScreen(articleId: originId),
@@ -236,6 +246,26 @@ void main() {
     expect(find.text('Open in browser'), findsOneWidget);
     expect(find.text('Read later'), findsOneWidget);
     // Close without choosing.
+    await tester.tapAt(const Offset(10, 10));
+    await settle(tester);
+  });
+
+  testWidgets('on a phone, a link tap opens the drawer instead',
+      (tester) async {
+    SyncService.instance.debugIsOnline = () async => true;
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: ArticleScreen(articleId: originId),
+    ));
+    await settle(tester);
+
+    tapLink(tester, 'a great essay');
+    await tester.pump();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('Open in browser'), findsOneWidget);
     await tester.tapAt(const Offset(10, 10));
     await settle(tester);
   });

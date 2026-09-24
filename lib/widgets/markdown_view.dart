@@ -22,9 +22,11 @@ class MarkdownView extends StatefulWidget {
   /// (share / note / remove).
   final void Function(String highlightText, Offset position)? onHighlightTap;
 
-  /// Called when a link is tapped, with its URL and anchor text. When null,
-  /// links open in the external browser.
-  final void Function(String url, String anchorText)? onLinkTap;
+  /// Called when a link is tapped, with its URL, anchor text and the tap
+  /// position (to anchor a menu there). When null, links open in the
+  /// external browser.
+  final void Function(String url, String anchorText, Offset position)?
+      onLinkTap;
 
   const MarkdownView({
     super.key,
@@ -584,10 +586,10 @@ class _MarkdownViewState extends State<MarkdownView> {
         // Empty anchor text = an invisible in-page anchor: show nothing.
         if (anchor.isNotEmpty) {
           final recognizer = TapGestureRecognizer()
-            ..onTap = () {
+            ..onTapUp = (details) {
               final onLinkTap = widget.onLinkTap;
               if (onLinkTap != null) {
-                onLinkTap(url, anchor);
+                onLinkTap(url, anchor, details.globalPosition);
               } else {
                 launchUrl(Uri.parse(url),
                     mode: LaunchMode.externalApplication);
@@ -611,10 +613,10 @@ class _MarkdownViewState extends State<MarkdownView> {
         // Bare URL in running text: tappable, shown as-is.
         final url = match.group(12)!;
         final recognizer = TapGestureRecognizer()
-          ..onTap = () {
+          ..onTapUp = (details) {
             final onLinkTap = widget.onLinkTap;
             if (onLinkTap != null) {
-              onLinkTap(url, url);
+              onLinkTap(url, url, details.globalPosition);
             } else {
               launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
             }

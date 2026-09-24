@@ -416,7 +416,7 @@ void main() {
       expect(
         twitter.postTweet('hello'),
         throwsA(
-            predicate((e) => e.toString().contains('Reconnect Twitter'))),
+            predicate((e) => e.toString().contains('reconnect Twitter'))),
       );
     });
   });

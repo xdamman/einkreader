@@ -1,12 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
-import '../services/errors.dart';
 import '../services/archive_store.dart';
 import '../services/outbox_service.dart';
 import '../services/share_service.dart';
@@ -16,6 +14,7 @@ import '../widgets/clipboard_link_prompt.dart';
 import '../widgets/highlight_list.dart';
 import '../widgets/resume_reading.dart';
 import '../widgets/profile_switcher.dart';
+import '../widgets/reconnect_twitter.dart';
 import '../widgets/shared_list.dart';
 import 'add_source_screen.dart';
 import 'profile_screen.dart';
@@ -362,10 +361,14 @@ class _HomeScreenState extends State<HomeScreen> {
           onChanged: _load,
         );
       case _HomeTab.read:
+        // Most recently read first. Articles read before reading times
+        // were recorded fall back to their publication date.
+        int readTime(Article a) => a.readAt ?? a.publishedAt ?? a.createdAt;
         final readAll = _articles
             .where((a) =>
                 a.read == 1 && (!_readFavoritesOnly || a.favorite == 1))
-            .toList();
+            .toList()
+          ..sort((a, b) => readTime(b).compareTo(readTime(a)));
         final readCounts = <int, int>{};
         for (final a in readAll) {
           readCounts[a.sourceId] = (readCounts[a.sourceId] ?? 0) + 1;
@@ -409,6 +412,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: ArticleFeed(
                 articles: read,
+                dateOf: readTime,
                 sourceTitles: _sourceTitles,
                 emptyMessage: _readFavoritesOnly
                     ? 'No favorites yet.\n\nUse the favorite button at '
@@ -468,7 +472,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _showOutbox() async {
     final items = await OutboxService.instance.items();
     if (!mounted) return;
-    final retry = await showDialog<bool>(
+    // A tweet refused for auth reasons says "reconnect Twitter": offer the
+    // button right here rather than sending the reader to find it.
+    final offerReconnect = items.any((item) =>
+        item.kind != 'nostr' &&
+        item.kind != 'email' &&
+        needsTwitterReconnect(item.lastError));
+    final choice = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
@@ -491,7 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       : Text(
                           '${item.attempts} attempt'
                           '${item.attempts == 1 ? '' : 's'} · '
-                          '${item.lastError}',
+                          '${item.lastError!.replaceFirst(RegExp(r'^Exception:\s*'), '')}',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 12),
@@ -502,7 +512,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: () async {
                       await OutboxService.instance.delete(item.id!);
                       if (dialogContext.mounted) {
-                        Navigator.pop(dialogContext, false);
+                        Navigator.pop(dialogContext);
                       }
                     },
                   ),
@@ -512,15 +522,27 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Close')),
+          if (offerReconnect)
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext, 'reconnect'),
+                child: const Text('Reconnect Twitter')),
           TextButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
+              onPressed: () => Navigator.pop(dialogContext, 'retry'),
               child: const Text('Retry now')),
         ],
       ),
     );
-    if (retry != true || !mounted) return;
+    if (!mounted) return;
+    if (choice == 'reconnect') {
+      // Reconnecting sends the outbox itself once connected.
+      await reconnectTwitter(
+          messenger: ScaffoldMessenger.of(context),
+          navigator: Navigator.of(context));
+      return;
+    }
+    if (choice != 'retry') return;
     final (sent, remaining) = await OutboxService.instance.flush();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -592,28 +614,16 @@ class _HomeScreenState extends State<HomeScreen> {
   /// stored on this install.
   Future<void> _reconnectTwitter(Source source) async {
     if (_reconnectingTwitter) return;
-    final prefs = await SharedPreferences.getInstance();
-    final clientId = prefs.getString('twitter_client_id') ?? '';
-    if (clientId.isEmpty) {
-      await _openAddSource();
-      return;
-    }
     setState(() => _reconnectingTwitter = true);
     try {
-      final username = await SyncService.instance.twitter.connect(clientId);
+      final connected = await reconnectTwitter(
+          messenger: ScaffoldMessenger.of(context),
+          navigator: Navigator.of(context));
+      if (!connected) return;
       SyncService.instance.sourceErrors.remove(source.id);
-      if (mounted) {
-        setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text('Reconnected as @$username — refreshing bookmarks')));
-      }
+      if (mounted) setState(() {});
       await SyncService.instance.syncSources([source]);
       await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'reconnecting Twitter'))));
     } finally {
       if (mounted) setState(() => _reconnectingTwitter = false);
     }
@@ -787,9 +797,8 @@ class _HomeScreenState extends State<HomeScreen> {
             message: SyncService.instance.sourceErrors[selectedSource.id]!,
             busy: _reconnectingTwitter,
             onReconnect: selectedSource.type == SourceType.twitterBookmarks &&
-                    SyncService.instance.sourceErrors[selectedSource.id]!
-                        .toLowerCase()
-                        .contains('reconnect')
+                    needsTwitterReconnect(
+                        SyncService.instance.sourceErrors[selectedSource.id])
                 ? () => _reconnectTwitter(selectedSource)
                 : null,
           ),
