@@ -30,9 +30,12 @@ class NostrProfileCache {
     }
   }
 
+  /// Adds a profile known locally (e.g. the reader's own, right after
+  /// posting) without a relay round trip.
+  static void put(NostrProfile profile) => _profiles[profile.pubkey] = profile;
+
   @visibleForTesting
-  static void debugPut(NostrProfile profile) =>
-      _profiles[profile.pubkey] = profile;
+  static void debugPut(NostrProfile profile) => put(profile);
 
   @visibleForTesting
   static void debugClear() => _profiles.clear();

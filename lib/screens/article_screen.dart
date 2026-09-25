@@ -13,6 +13,7 @@ import '../services/sync_service.dart';
 import '../theme.dart';
 import '../widgets/markdown_view.dart';
 import '../widgets/share_note_dialog.dart';
+import 'feedback_screen.dart';
 
 /// Reader screen. Select any text and choose "Highlight" from the selection
 /// menu to save it; saved highlights are painted inline with a grey wash and
@@ -818,6 +819,14 @@ class _ArticleScreenState extends State<ArticleScreen> {
                           onPressed: _highlights.isEmpty
                               ? _showShareMenu
                               : _shareAllHighlights,
+                        ),
+                        // Feedback about the app, prefilled with this
+                        // article's link (e.g. "this page didn't parse").
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.forum_outlined),
+                          label: const Text('Feedback'),
+                          onPressed: () =>
+                              openNewFeedback(context, url: article.url),
                         ),
                       ],
                     ),

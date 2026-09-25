@@ -2,6 +2,7 @@
 // of replies (NIP-10), emoji reactions (NIP-25) with the reader's favorite
 // emojis first, and native profiles opened from any avatar or name.
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/screens/feedback_screen.dart';
@@ -12,6 +13,7 @@ import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -59,6 +61,18 @@ class _FakeRelay extends NostrService {
   Future<Map<String, NostrProfile>> fetchProfiles(
           Iterable<String> hexPubkeys) async =>
       {};
+}
+
+/// Uploads nowhere: returns a fixed URL for the screenshot.
+class _NoUploadFeedback extends FeedbackService {
+  _NoUploadFeedback(NostrService nostr) : super(nostr: nostr);
+  Uint8List? uploaded;
+
+  @override
+  Future<String> uploadScreenshot(Uint8List bytes) async {
+    uploaded = bytes;
+    return 'https://blossom.example/abc123.jpg';
+  }
 }
 
 void main() {
@@ -206,5 +220,102 @@ void main() {
     expect(reaction['kind'], 7);
     expect(reaction['content'], '🔥');
     expect(reaction['tags'], anyElement(equals(['e', note.id])));
+  });
+
+  test('subject, link and screenshot travel as tags and in the text',
+      () async {
+    await ProfileService.instance.createIdentity();
+    await service.post('The table rendered as raw HTML.',
+        subject: 'Broken table',
+        url: 'https://example.org/post',
+        imageUrl: 'https://blossom.example/shot.jpg');
+    final event = relay.events.single;
+    expect(event['tags'], anyElement(equals(['subject', 'Broken table'])));
+    expect(event['tags'], anyElement(equals(['r', 'https://example.org/post'])));
+    expect(event['tags'],
+        anyElement(equals(['imeta', 'url https://blossom.example/shot.jpg',
+          'm image/jpeg'])));
+    // Other clients show the subject and image from the text itself.
+    expect(event['content'], startsWith('Broken table\n\n'));
+    expect(event['content'], contains('https://blossom.example/shot.jpg'));
+
+    final note = FeedbackNote.fromEvent(event);
+    expect(note.subject, 'Broken table');
+    expect(note.images, ['https://blossom.example/shot.jpg']);
+    expect(note.displayText,
+        'The table rendered as raw HTML.\n\nhttps://example.org/post');
+  });
+
+  testWidgets('the new-feedback form: public warning, identity, prefilled '
+      'link, screenshot', (tester) async {
+    await tester.runAsync(() async {
+      await ProfileService.instance.createIdentity();
+      ProfileService.instance.debugPublish = (_) async => 1;
+      await ProfileService.instance.saveProfile(const Profile(name: 'Xavier'));
+    });
+    addTearDown(() => ProfileService.instance.debugPublish = null);
+    final shot = Uint8List.fromList(
+        img.encodePng(img.Image(width: 4, height: 4)));
+    NewFeedbackScreen.debugPickImage = () async => shot;
+    addTearDown(() => NewFeedbackScreen.debugPickImage = null);
+    final feedback = _NoUploadFeedback(relay);
+    // Tablet-sized, like the e-ink device: the whole form fits.
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    FeedbackNote? posted;
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => TextButton(
+            onPressed: () async => posted = await openNewFeedback(context,
+                service: feedback, url: 'https://example.org/article'),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    expect(find.textContaining('Feedback is public'), findsOneWidget);
+    expect(find.textContaining('personal information'), findsOneWidget);
+    expect(find.text('Posting as Xavier'), findsOneWidget);
+    expect(find.textContaining('npub1'), findsOneWidget);
+    expect(find.text('https://example.org/article'), findsOneWidget,
+        reason: 'the link is prefilled');
+
+    await tester.tap(find.text('Attach a screenshot'));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove'), findsOneWidget);
+
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Subject'), 'Parsing issue');
+    await tester.enterText(
+        find.widgetWithText(
+            TextField, 'What happened, or what would you like?'),
+        'Images are missing.');
+    await tester.tap(find.text('Post publicly'));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+
+    expect(feedback.uploaded, shot);
+    final event = relay.events.last;
+    expect(event['tags'], anyElement(equals(['subject', 'Parsing issue'])));
+    expect(event['tags'],
+        anyElement(equals(['r', 'https://example.org/article'])));
+    expect(event['content'], contains('https://blossom.example/abc123.jpg'));
+    expect(posted, isNotNull, reason: 'the form returns the posted note');
+    // Let the "Feedback posted" snackbar time out.
+    await tester.pump(const Duration(seconds: 5));
   });
 }

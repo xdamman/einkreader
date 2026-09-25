@@ -1,3 +1,7 @@
+import 'dart:isolate';
+import 'dart:typed_data';
+
+import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_log.dart';
@@ -22,6 +26,12 @@ class FeedbackNote {
   /// emoji → pubkeys (hex) that reacted with it.
   final Map<String, Set<String>> reactions;
 
+  /// NIP-14 subject, when the note has one.
+  final String? subject;
+
+  /// Attached images (NIP-92 imeta, or bare image links in the text).
+  final List<String> images;
+
   FeedbackNote({
     required this.id,
     required this.pubkey,
@@ -29,8 +39,27 @@ class FeedbackNote {
     required this.createdAt,
     this.rootId,
     this.replyToId,
+    this.subject,
+    this.images = const [],
     Map<String, Set<String>>? reactions,
   }) : reactions = reactions ?? {};
+
+  static final _imageUrl = RegExp(
+      r'https?://\S+\.(?:png|jpe?g|gif|webp)(?:\?\S*)?',
+      caseSensitive: false);
+
+  /// The text to show under the subject: the content without the subject
+  /// line it starts with (other clients need it there) and without the
+  /// image links (shown as images instead).
+  String get displayText {
+    var text = content;
+    final s = subject;
+    if (s != null && text.startsWith(s)) text = text.substring(s.length);
+    for (final image in images) {
+      text = text.replaceAll(image, '');
+    }
+    return text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+  }
 
   static FeedbackNote fromEvent(Map<String, dynamic> event) {
     String? root;
@@ -51,10 +80,28 @@ class FeedbackNote {
     // Deprecated positional e-tags (NIP-10): first = root, last = reply.
     if (root == null && positional.isNotEmpty) root = positional.first;
     if (reply == null && positional.length > 1) reply = positional.last;
+    String? subject;
+    final images = <String>[];
+    for (final tag in (event['tags'] as List? ?? const [])) {
+      final t = (tag as List).map((e) => '$e').toList();
+      if (t.length >= 2 && t[0] == 'subject' && t[1].trim().isNotEmpty) {
+        subject = t[1].trim();
+      } else if (t.isNotEmpty && t[0] == 'imeta') {
+        for (final part in t.skip(1)) {
+          if (part.startsWith('url ')) images.add(part.substring(4).trim());
+        }
+      }
+    }
+    final content = (event['content'] as String?) ?? '';
+    for (final m in _imageUrl.allMatches(content)) {
+      if (!images.contains(m.group(0))) images.add(m.group(0)!);
+    }
     return FeedbackNote(
       id: event['id'] as String,
       pubkey: event['pubkey'] as String,
-      content: (event['content'] as String?) ?? '',
+      content: content,
+      subject: subject,
+      images: images,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
           ((event['created_at'] as int?) ?? 0) * 1000),
       rootId: root,
@@ -74,6 +121,10 @@ class FeedbackService {
 
   final NostrService _nostr;
   final ProfileService _profile;
+
+  /// The relays this service reads from, also used to fetch the authors'
+  /// profiles.
+  NostrService get nostr => _nostr;
 
   /// einkreader's official Nostr account; feedback is addressed to it.
   static const officialNpub =
@@ -169,13 +220,64 @@ class FeedbackService {
   Future<String?> get myPubkey async =>
       await canPost ? await _profile.publicKeyHex : null;
 
+  /// Who the reader posts as: the active profile's name, address and key,
+  /// shown in the new-feedback form so nobody posts under an identity they
+  /// didn't expect.
+  Future<({String name, String? address, String npub, String picture})>
+      identity() async {
+    final profile = await _profile.profile();
+    return (
+      name: profile.name,
+      address: await _profile.nip05Address,
+      npub: await _profile.npub,
+      picture: profile.picture,
+    );
+  }
+
+  /// Uploads a screenshot (shrunk to 1600px on its long side, JPG) and
+  /// returns its public URL.
+  Future<String> uploadScreenshot(Uint8List bytes) async {
+    final shrunk = await Isolate.run(() => _shrink(bytes));
+    return _profile.uploadImage(shrunk, what: 'screenshot');
+  }
+
+  static Uint8List _shrink(Uint8List bytes) {
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return bytes;
+    final longest =
+        decoded.width > decoded.height ? decoded.width : decoded.height;
+    final resized = longest > 1600
+        ? img.copyResize(decoded,
+            width: decoded.width >= decoded.height ? 1600 : null,
+            height: decoded.height > decoded.width ? 1600 : null)
+        : decoded;
+    return img.encodeJpg(resized, quality: 85);
+  }
+
   /// Posts a new top-level feedback note addressed to the official account.
-  Future<FeedbackNote> post(String text) => _publish(
-        content: text,
-        tags: [
-          ['p', officialHex],
-        ],
-      );
+  /// The subject (NIP-14 tag, also the first line so every client shows
+  /// it), link and screenshot (NIP-92 imeta, also its URL in the text) are
+  /// optional.
+  Future<FeedbackNote> post(String body,
+      {String? subject, String? url, String? imageUrl}) {
+    final s = subject?.trim() ?? '';
+    final link = url?.trim() ?? '';
+    final content = [
+      if (s.isNotEmpty) s,
+      body.trim(),
+      if (link.isNotEmpty) link,
+      if (imageUrl != null) imageUrl,
+    ].where((part) => part.isNotEmpty).join('\n\n');
+    return _publish(
+      content: content,
+      tags: [
+        ['p', officialHex],
+        if (s.isNotEmpty) ['subject', s],
+        if (link.isNotEmpty) ['r', link],
+        if (imageUrl != null) ['imeta', 'url $imageUrl', 'm image/jpeg'],
+      ],
+    );
+  }
 
   /// Replies inside a thread (NIP-10 marked e-tags), notifying the author
   /// of the note answered and the official account.

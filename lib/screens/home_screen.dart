@@ -293,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // Public feedback on Nostr: read, post, reply, react.
           IconButton(
             tooltip: 'Feedback',
-            icon: const Icon(Icons.feedback_outlined),
+            icon: const Icon(Icons.forum_outlined),
             onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const FeedbackScreen())),
           ),

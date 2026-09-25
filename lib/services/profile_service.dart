@@ -483,17 +483,22 @@ class ProfileService {
   /// Media host for avatars (Blossom protocol, BUD-02).
   static const blossomServer = 'https://blossom.primal.net';
 
-  /// Uploads an avatar image and returns its public URL. The request is
-  /// authorized with a signed kind-24242 event carrying the blob's sha256,
-  /// per the Blossom spec.
-  Future<String> uploadAvatar(Uint8List bytes,
-      {String mime = 'image/jpeg'}) async {
+  /// Uploads an avatar image and returns its public URL.
+  Future<String> uploadAvatar(Uint8List bytes, {String mime = 'image/jpeg'}) =>
+      uploadImage(bytes, mime: mime, what: 'avatar');
+
+  /// Uploads an image (avatar, feedback screenshot) to the Blossom media
+  /// host and returns its public URL. The request is authorized with a
+  /// signed kind-24242 event carrying the blob's sha256, per the Blossom
+  /// spec.
+  Future<String> uploadImage(Uint8List bytes,
+      {String mime = 'image/jpeg', String what = 'image'}) async {
     final hash = sha256.convert(bytes).toString();
     final expiration =
         DateTime.now().millisecondsSinceEpoch ~/ 1000 + 10 * 60;
     final auth = await signEvent(
       kind: 24242,
-      content: 'Upload avatar',
+      content: 'Upload $what',
       tags: [
         ['t', 'upload'],
         ['x', hash],
@@ -513,14 +518,14 @@ class ProfileService {
         .timeout(const Duration(seconds: 30));
     if (response.statusCode != 200 && response.statusCode != 201) {
       throw Exception(
-          'Avatar upload failed (HTTP ${response.statusCode})');
+          'Upload of the $what failed (HTTP ${response.statusCode})');
     }
     final url =
         (jsonDecode(response.body) as Map<String, dynamic>)['url'] as String?;
     if (url == null) {
-      throw Exception('Avatar upload returned no URL');
+      throw Exception('Upload of the $what returned no URL');
     }
-    await AppLogService.instance.info('Profile: avatar uploaded to $url');
+    await AppLogService.instance.info('Profile: $what uploaded to $url');
     return url;
   }
 
