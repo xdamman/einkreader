@@ -1,6 +1,6 @@
 // NIP-05: GET /.well-known/nostr.json?name=<username>
 // (rewritten here by vercel.json)
-import { loadRegistry, pubkeyOf } from '../lib/registry.js';
+import { loadRegistry, pubkeyOf, OFFICIAL_NIP05 } from '../lib/registry.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,6 +9,9 @@ export default async function handler(req, res) {
   const name = String(req.query.name ?? '').toLowerCase();
   const registry = await loadRegistry();
   const names = {};
+  for (const [n, pubkey] of Object.entries(OFFICIAL_NIP05)) {
+    if (!name || n === name) names[n] = pubkey;
+  }
   for (const [n, entry] of Object.entries(registry)) {
     if (!name || n === name) names[n] = pubkeyOf(entry);
   }

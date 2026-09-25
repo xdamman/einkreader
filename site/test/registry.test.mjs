@@ -5,6 +5,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { bytesToHex } from '@noble/hashes/utils';
 import {
   NAME_RULE,
+  OFFICIAL_NIP05,
   RESERVED,
   applyRegistration,
   eventId,
@@ -18,6 +19,12 @@ assert.ok(NAME_RULE.test('x_1234'));
 assert.ok(!NAME_RULE.test('xavi'), 'under 5 chars rejected');
 assert.ok(!NAME_RULE.test('Xavier'), 'uppercase rejected');
 assert.ok(!NAME_RULE.test('xa vier'), 'space rejected');
+
+// -- official root identity (_@einkreader.app) ------------------------------
+assert.equal(OFFICIAL_NIP05._,
+  '6823118eaab2720840f6905affd57353c2101528e524a3e1e767e00974433ae8',
+  'npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7');
+assert.ok(!NAME_RULE.test('_'), '"_" can never be registered by a user');
 assert.ok(!NAME_RULE.test('xavier!'), 'punctuation rejected');
 assert.ok(!NAME_RULE.test('a'.repeat(21)), 'over 20 chars rejected');
 assert.ok(RESERVED.has('einkreader'));

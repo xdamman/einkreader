@@ -9,6 +9,15 @@ import { list, put } from '@vercel/blob';
 // digits and underscore only.
 export const NAME_RULE = /^[a-z0-9_]{5,20}$/;
 
+// einkreader's official Nostr account
+// (npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7), verified
+// as the domain's root identity: NIP-05 "_@einkreader.app", shown by
+// clients as just "einkreader.app". "_" can never be registered (NAME_RULE
+// needs 5+ characters), so it can't collide with a username.
+export const OFFICIAL_NIP05 = {
+  _: '6823118eaab2720840f6905affd57353c2101528e524a3e1e767e00974433ae8',
+};
+
 export const RESERVED = new Set([
   'admin', 'root', 'einkreader', 'support', 'help', 'info', 'contact',
   'www', 'mail', 'postmaster', 'abuse', 'security', 'nostr', 'reader',
