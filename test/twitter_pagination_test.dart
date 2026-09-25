@@ -110,7 +110,7 @@ void main() {
       accessToken: () async => 'token',
       client: MockClient((request) async {
         if (request.url.path.endsWith('/users/me/bookmarks')) {
-          expect(request.url.queryParameters['max_results'], '20');
+          expect(request.url.queryParameters['max_results'], '10');
           return http.Response(jsonEncode(timeline), 200,
               headers: {'content-type': 'application/json'});
         }
@@ -213,10 +213,10 @@ void main() {
 
   test('bookmarks page until the first known one, not 100 every sync',
       () async {
-    // Newest first: 20 on page 1 (b0..b19), page 2 starts b20..b39.
+    // Newest first, 10 per page: b0..b9, b10..b19, b20..b29.
     Map<String, dynamic> page(int from, {String? next}) => {
           'data': [
-            for (var i = from; i < from + 20; i++)
+            for (var i = from; i < from + 10; i++)
               {'id': 'b$i', 'text': 'bookmark $i', 'author_id': 'u1'},
           ],
           'includes': {
@@ -230,24 +230,26 @@ void main() {
     final twitter = TwitterService(
       accessToken: () async => 'token',
       client: MockClient((request) async {
+        expect(request.url.queryParameters['max_results'], '10');
         final token = request.url.queryParameters['pagination_token'];
         requested.add(token);
         final body = token == null
             ? page(0, next: 'p2')
             : token == 'p2'
-                ? page(20, next: 'p3')
-                : page(40);
+                ? page(10, next: 'p3')
+                : page(20);
         return http.Response(jsonEncode(body), 200,
             headers: {'content-type': 'application/json'});
       }),
     );
 
-    // b25 and older are already in the library: page 3 is never read.
-    final known = {for (var i = 25; i < 60; i++) 'b$i'};
+    // Page 1 is all new, so page 2 is read; b15 onwards is already in the
+    // library, so page 3 never is.
+    final known = {for (var i = 15; i < 30; i++) 'b$i'};
     final items =
         await twitter.fetchBookmarks(isKnown: (id) async => known.contains(id));
     expect(requested, [null, 'p2']);
-    expect(items.map((t) => t.id), [for (var i = 0; i < 25; i++) 'b$i']);
+    expect(items.map((t) => t.id), [for (var i = 0; i < 15; i++) 'b$i']);
 
     // Nothing new: a single page read.
     requested.clear();

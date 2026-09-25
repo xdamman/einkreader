@@ -180,7 +180,7 @@ class TwitterService {
   /// Fetches the newest bookmarks, most recently bookmarked first (the API
   /// orders by bookmark time and has no date filter).
   ///
-  /// The X API bills per post read, so this pages through 20 at a time and
+  /// The X API bills per post read, so this pages through 10 at a time and
   /// stops at the first page holding a bookmark [isKnown] already has:
   /// everything after it was bookmarked earlier and is in the library. A
   /// routine sync reads one page instead of re-reading 100 posts every
@@ -226,7 +226,7 @@ class TwitterService {
     return Future.wait(items.map(_withLinkedArticle));
   }
 
-  static const _bookmarkPageSize = 20;
+  static const _bookmarkPageSize = 10;
 
   /// Standard fields needed to render a tweet, including the long-form body.
   static const _tweetQuery = {
