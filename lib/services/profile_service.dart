@@ -585,8 +585,8 @@ class ProfileService {
     await AppLogService.instance.info('Profile: share emailed to $to');
   }
 
-  /// Builds and Schnorr-signs a Nostr event (NIP-01).
-  @visibleForTesting
+  /// Builds and Schnorr-signs a Nostr event (NIP-01) with the active
+  /// profile's key. Used here and by feedback posts and reactions.
   Future<Map<String, dynamic>> signEvent({
     required int kind,
     required String content,

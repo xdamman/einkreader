@@ -11,12 +11,14 @@ class NostrProfile {
   final String name;
   final String about;
   final String picture;
+  final String nip05;
 
   const NostrProfile({
     required this.pubkey,
     this.name = '',
     this.about = '',
     this.picture = '',
+    this.nip05 = '',
   });
 }
 
@@ -287,8 +289,38 @@ class NostrService {
           : ((meta['name'] as String?) ?? '').trim(),
       about: ((meta['about'] as String?) ?? '').trim(),
       picture: ((meta['picture'] as String?) ?? '').trim(),
+      nip05: ((meta['nip05'] as String?) ?? '').trim(),
     );
   }
+
+  /// Latest kind-0 profiles for several pubkeys (hex) in one query, keyed
+  /// by pubkey. Missing profiles are simply absent.
+  Future<Map<String, NostrProfile>> fetchProfiles(
+      Iterable<String> hexPubkeys) async {
+    final authors = hexPubkeys.toSet().toList();
+    if (authors.isEmpty) return {};
+    final events = await _query({
+      'kinds': [0],
+      'authors': authors,
+    });
+    final latest = <String, Map<String, dynamic>>{};
+    for (final event in events) {
+      final pubkey = event['pubkey'] as String?;
+      if (pubkey == null) continue;
+      final known = latest[pubkey];
+      if (known == null ||
+          (event['created_at'] as int? ?? 0) >
+              (known['created_at'] as int? ?? 0)) {
+        latest[pubkey] = event;
+      }
+    }
+    return latest.map((k, v) => MapEntry(k, _profileFromEvent(v)));
+  }
+
+  /// Raw events matching a NIP-01 [filter], merged across relays.
+  Future<List<Map<String, dynamic>>> query(Map<String, dynamic> filter,
+          {Duration timeout = const Duration(seconds: 8)}) =>
+      _query(filter, timeout: timeout);
 
   /// Loads a profile's kind-0 metadata; null when none is found.
   Future<NostrProfile?> fetchProfile(String npub) async {

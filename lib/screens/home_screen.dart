@@ -17,6 +17,7 @@ import '../widgets/profile_switcher.dart';
 import '../widgets/reconnect_twitter.dart';
 import '../widgets/shared_list.dart';
 import 'add_source_screen.dart';
+import 'feedback_screen.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
@@ -288,6 +289,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     onPressed: _showOutbox,
                   ),
+          ),
+          // Public feedback on Nostr: read, post, reply, react.
+          IconButton(
+            tooltip: 'Feedback',
+            icon: const Icon(Icons.feedback_outlined),
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FeedbackScreen())),
           ),
           IconButton(
             tooltip: 'Update all sources',
