@@ -1,0 +1,324 @@
+[
+  {
+    "name": "icon",
+    "label": "App icon",
+    "group": "icon",
+    "w": 1024,
+    "h": 1024,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "icon.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "icon.png",
+        "size": "1024×1024"
+      },
+      {
+        "format": "PNG",
+        "file": "icon-512.png",
+        "size": "512×512"
+      },
+      {
+        "format": "PNG",
+        "file": "icon-192.png",
+        "size": "192×192"
+      }
+    ]
+  },
+  {
+    "name": "icon-square",
+    "label": "App icon, square (unmasked)",
+    "group": "icon",
+    "w": 1024,
+    "h": 1024,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "icon-square.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "icon-square.png",
+        "size": "1024×1024"
+      },
+      {
+        "format": "PNG",
+        "file": "icon-square-512.png",
+        "size": "512×512"
+      }
+    ]
+  },
+  {
+    "name": "mark",
+    "label": "Mark",
+    "group": "logo",
+    "w": 1024,
+    "h": 1024,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "mark.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "mark.png",
+        "size": "1024×1024"
+      },
+      {
+        "format": "PNG",
+        "file": "mark-256.png",
+        "size": "256×256"
+      }
+    ]
+  },
+  {
+    "name": "mark-dark-bg",
+    "label": "Mark for dark backgrounds",
+    "group": "logo",
+    "w": 1024,
+    "h": 1024,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "mark-dark-bg.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "mark-dark-bg.png",
+        "size": "1024×1024"
+      },
+      {
+        "format": "PNG",
+        "file": "mark-dark-bg-256.png",
+        "size": "256×256"
+      }
+    ]
+  },
+  {
+    "name": "wordmark",
+    "label": "Wordmark",
+    "group": "logo",
+    "w": 1079,
+    "h": 201,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "wordmark.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "wordmark.png",
+        "size": "1079×201"
+      }
+    ]
+  },
+  {
+    "name": "wordmark-white",
+    "label": "Wordmark, white",
+    "group": "logo",
+    "w": 1079,
+    "h": 201,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "wordmark-white.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "wordmark-white.png",
+        "size": "1079×201"
+      }
+    ]
+  },
+  {
+    "name": "logo-horizontal",
+    "label": "Horizontal logo",
+    "group": "logo",
+    "w": 1348,
+    "h": 292,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "logo-horizontal.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "logo-horizontal@2x.png",
+        "size": "2696×584"
+      },
+      {
+        "format": "PNG",
+        "file": "logo-horizontal.png",
+        "size": "1348×292"
+      }
+    ]
+  },
+  {
+    "name": "logo-horizontal-white",
+    "label": "Horizontal logo, for dark backgrounds",
+    "group": "logo",
+    "w": 1348,
+    "h": 292,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "logo-horizontal-white.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "logo-horizontal-white@2x.png",
+        "size": "2696×584"
+      },
+      {
+        "format": "PNG",
+        "file": "logo-horizontal-white.png",
+        "size": "1348×292"
+      }
+    ]
+  },
+  {
+    "name": "logo-stacked",
+    "label": "Stacked logo",
+    "group": "logo",
+    "w": 1079,
+    "h": 645,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "logo-stacked.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "logo-stacked@2x.png",
+        "size": "2158×1290"
+      },
+      {
+        "format": "PNG",
+        "file": "logo-stacked.png",
+        "size": "1079×645"
+      }
+    ]
+  },
+  {
+    "name": "og-image",
+    "label": "Link preview (Open Graph) · 1200×630",
+    "group": "banner",
+    "w": 1200,
+    "h": 630,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "og-image.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "og-image.png",
+        "size": "1200×630"
+      },
+      {
+        "format": "JPG",
+        "file": "og-image.jpg",
+        "size": "1200×630"
+      }
+    ]
+  },
+  {
+    "name": "x-header",
+    "label": "X / Twitter header · 1500×500",
+    "group": "banner",
+    "w": 1500,
+    "h": 500,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "x-header.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "x-header.png",
+        "size": "1500×500"
+      },
+      {
+        "format": "JPG",
+        "file": "x-header.jpg",
+        "size": "1500×500"
+      }
+    ]
+  },
+  {
+    "name": "linkedin-cover",
+    "label": "LinkedIn cover · 1584×396",
+    "group": "banner",
+    "w": 1584,
+    "h": 396,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "linkedin-cover.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "linkedin-cover.png",
+        "size": "1584×396"
+      },
+      {
+        "format": "JPG",
+        "file": "linkedin-cover.jpg",
+        "size": "1584×396"
+      }
+    ]
+  },
+  {
+    "name": "play-feature-graphic",
+    "label": "Google Play feature graphic · 1024×500",
+    "group": "banner",
+    "w": 1024,
+    "h": 500,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "play-feature-graphic.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "play-feature-graphic.png",
+        "size": "1024×500"
+      },
+      {
+        "format": "JPG",
+        "file": "play-feature-graphic.jpg",
+        "size": "1024×500"
+      }
+    ]
+  },
+  {
+    "name": "avatar",
+    "label": "Profile picture · 400×400",
+    "group": "social",
+    "w": 400,
+    "h": 400,
+    "files": [
+      {
+        "format": "SVG",
+        "file": "avatar.svg"
+      },
+      {
+        "format": "PNG",
+        "file": "avatar.png",
+        "size": "400×400"
+      },
+      {
+        "format": "PNG",
+        "file": "avatar@2x.png",
+        "size": "800×800"
+      },
+      {
+        "format": "JPG",
+        "file": "avatar.jpg",
+        "size": "400×400"
+      }
+    ]
+  }
+]

@@ -12,6 +12,8 @@ export const NAME_RULE = /^[a-z0-9_]{5,20}$/;
 export const RESERVED = new Set([
   'admin', 'root', 'einkreader', 'support', 'help', 'info', 'contact',
   'www', 'mail', 'postmaster', 'abuse', 'security', 'nostr', 'reader',
+  // Site pages whose paths would otherwise match a username.
+  'brand', 'branding', 'privacy', 'opensource',
 ]);
 
 const BLOB_PATH = 'nostr-registry.json';

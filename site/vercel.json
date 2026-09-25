@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/brand",
+      "destination": "/brand.html"
+    },
+    {
       "source": "/.well-known/nostr.json",
       "destination": "/api/nostr-json"
     },
@@ -19,6 +23,13 @@
     {
       "source": "/:name([a-z0-9_]{5,20})/q/:qid([0-9a-f]{8,64})",
       "destination": "/api/profile-page?name=:name&qid=:qid"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/branding",
+      "destination": "/brand",
+      "permanent": true
     }
   ]
 }
