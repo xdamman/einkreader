@@ -1271,6 +1271,10 @@ class _DebugLogViewState extends State<_DebugLogView> {
   final _searchController = TextEditingController();
   String _query = '';
 
+  /// Warnings and errors only: the entries worth reading when something
+  /// failed, without the routine sync chatter around them.
+  bool _problemsOnly = false;
+
   @override
   void initState() {
     super.initState();
@@ -1301,11 +1305,12 @@ class _DebugLogViewState extends State<_DebugLogView> {
     // Case-insensitive substring filter, e.g. "twitter" for the whole story
     // of a post attempt.
     final query = _query.trim().toLowerCase();
-    final visible = query.isEmpty
-        ? _entries
-        : _entries
-            .where((e) => e.message.toLowerCase().contains(query))
-            .toList();
+    final visible = _entries
+        .where((e) =>
+            (!_problemsOnly || e.level == 'warn' || e.level == 'error') &&
+            (query.isEmpty || e.message.toLowerCase().contains(query)))
+        .toList();
+    final filtered = query.isNotEmpty || _problemsOnly;
     return Column(
       children: [
         Container(
@@ -1315,6 +1320,12 @@ class _DebugLogViewState extends State<_DebugLogView> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             children: [
+              _ReadFilterChip(
+                label: 'Problems',
+                selected: _problemsOnly,
+                onTap: () => setState(() => _problemsOnly = !_problemsOnly),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: TextField(
                   controller: _searchController,
@@ -1337,7 +1348,7 @@ class _DebugLogViewState extends State<_DebugLogView> {
               ),
               const SizedBox(width: 8),
               Text(
-                query.isEmpty
+                !filtered
                     ? '${_entries.length}'
                     : '${visible.length}/${_entries.length}',
                 style:

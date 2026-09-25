@@ -476,7 +476,11 @@ class SyncService {
       case SourceType.rss:
         return _syncRss(source);
       case SourceType.twitterBookmarks:
-        return _insertTweets(source, await twitter.fetchBookmarks());
+        return _insertTweets(
+            source,
+            await twitter.fetchBookmarks(
+                isKnown: (id) =>
+                    _db.articleExists(sourceId: source.id!, guid: id)));
       case SourceType.twitterLikes:
         // Likes are no longer synced; legacy sources are simply skipped.
         return 0;
@@ -630,10 +634,12 @@ class SyncService {
             _sharesLink(tweet) ? tweet.articleUrl! : tweet.tweetUrl;
         sameUrl = await _db.findArticleByUrl(checkUrl);
       }
-      if (knownByGuid || sameUrl != null) {
+      if (knownByGuid) continue;
+      if (sameUrl != null) {
+        // Worth a line: it explains a bookmark that seems to be missing.
         await AppLogService.instance.debug(
           'Twitter: bookmark by $userLabel (${tweet.id}) skipped — '
-          '${knownByGuid ? 'already in library' : 'same link already saved as "${sameUrl!.title}"'}',
+          'same link already saved as "${sameUrl.title}"',
         );
         continue;
       }
@@ -681,10 +687,12 @@ class SyncService {
         }
       }
     }
-    await AppLogService.instance.info(
-      'Processed tweets for source #${source.id}: '
-      '$inserted inserted, ${tweets.length - inserted} skipped',
-    );
+    if (tweets.isNotEmpty) {
+      await AppLogService.instance.info(
+        'Processed tweets for source #${source.id}: '
+        '$inserted inserted, ${tweets.length - inserted} skipped',
+      );
+    }
     return inserted;
   }
 

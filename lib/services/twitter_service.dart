@@ -177,28 +177,56 @@ class TwitterService {
     return user['username'] as String;
   }
 
-  /// Fetches the 100 most recently bookmarked tweets (the API orders by
-  /// bookmark time; there is no date filter). One request keeps rate-limit
-  /// pressure low on free API tiers; the sync layer logs every item with
-  /// its author so a missing bookmark can be traced in the debug log.
-  Future<List<TweetItem>> fetchBookmarks() async {
+  /// Fetches the newest bookmarks, most recently bookmarked first (the API
+  /// orders by bookmark time and has no date filter).
+  ///
+  /// The X API bills per post read, so this pages through 20 at a time and
+  /// stops at the first page holding a bookmark [isKnown] already has:
+  /// everything after it was bookmarked earlier and is in the library. A
+  /// routine sync reads one page instead of re-reading 100 posts every
+  /// time; a first sync (or after a long gap) still gets up to [limit].
+  /// Known bookmarks are dropped before any follow-up lookups (linked
+  /// articles), which cost reads too.
+  Future<List<TweetItem>> fetchBookmarks({
+    Future<bool> Function(String tweetId)? isKnown,
+    int limit = 100,
+  }) async {
     final userId = await _storage.read(key: _kUserId);
     if (userId == null) throw Exception('Twitter is not connected');
-    final json = await _get('/users/$userId/bookmarks', query: {
-      'max_results': '100',
-      ..._tweetQuery,
-    });
-    final users = _usersFrom(json);
-    final media = _mediaFrom(json);
     final items = <TweetItem>[];
-    for (final t in (json['data'] as List?) ?? const []) {
-      items.add(_parseTweet(t as Map<String, dynamic>, users, media));
-    }
-    await _log((log) =>
-        log.info('Twitter: fetched ${items.length} bookmarks'));
+    String? nextToken;
+    var pages = 0;
+    var reachedKnown = false;
+    do {
+      final json = await _get('/users/$userId/bookmarks', query: {
+        'max_results': '$_bookmarkPageSize',
+        if (nextToken != null) 'pagination_token': nextToken,
+        ..._tweetQuery,
+      });
+      pages++;
+      final users = _usersFrom(json);
+      final media = _mediaFrom(json);
+      for (final t in (json['data'] as List?) ?? const []) {
+        final item = _parseTweet(t as Map<String, dynamic>, users, media);
+        if (isKnown != null && await isKnown(item.id)) {
+          reachedKnown = true;
+          continue;
+        }
+        items.add(item);
+      }
+      nextToken = (json['meta'] as Map?)?['next_token'] as String?;
+    } while (!reachedKnown &&
+        nextToken != null &&
+        pages * _bookmarkPageSize < limit);
+    await _log((log) => log.info(
+        'Twitter: ${items.length} new bookmark${items.length == 1 ? '' : 's'} '
+        '($pages page${pages == 1 ? '' : 's'} read'
+        '${reachedKnown ? ', stopped at the first known one' : ''})'));
     // Inline any referenced native article below the tweet that links to it.
     return Future.wait(items.map(_withLinkedArticle));
   }
+
+  static const _bookmarkPageSize = 20;
 
   /// Standard fields needed to render a tweet, including the long-form body.
   static const _tweetQuery = {
@@ -529,9 +557,7 @@ class TwitterService {
     if (response.statusCode == 403) {
       await AppLogService.instance
           .error('Twitter: post refused (403): ${response.body}');
-      throw Exception(
-          'Twitter refused the post — reconnect Twitter to grant the '
-          'posting permission');
+      throw Exception(refusalMessage(response.body));
     }
     if (response.statusCode != 201) {
       await _throwApiError(response, 'posting a tweet');
@@ -540,6 +566,40 @@ class TwitterService {
         ((jsonDecode(response.body) as Map<String, dynamic>?)?['data']
             as Map<String, dynamic>?)?['id'];
     await AppLogService.instance.info('Twitter: tweet posted, id $id');
+  }
+
+  /// What to tell the reader when X refuses a post (HTTP 403). X uses 403
+  /// for several unrelated reasons — a duplicate of an earlier post, a
+  /// connection lacking the posting permission, a restricted account — so
+  /// the reason is read from the response. Only a permission problem asks
+  /// to reconnect (and gets the Reconnect button); anything else shows X's
+  /// own explanation, since reconnecting would not change it.
+  static String refusalMessage(String body) {
+    String detail = '';
+    try {
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      detail = ((json['detail'] ?? json['title'] ??
+                  ((json['errors'] as List?)?.firstOrNull as Map?)?['message'])
+              as String?) ??
+          '';
+    } catch (_) {
+      // Not JSON: fall through to the generic permission message.
+    }
+    final lower = detail.toLowerCase();
+    if (lower.contains('duplicate')) {
+      return 'Twitter refused the post: it duplicates one you already '
+          'posted';
+    }
+    if (detail.isEmpty ||
+        lower.contains('permission') ||
+        lower.contains('scope') ||
+        lower.contains('oauth') ||
+        lower.contains('not permitted') ||
+        lower.contains('forbidden')) {
+      return 'Twitter refused the post — reconnect Twitter to grant the '
+          'posting permission';
+    }
+    return 'Twitter refused the post: $detail';
   }
 
   // ----------------------------------------------------------------- tokens

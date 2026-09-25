@@ -21,7 +21,6 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
@@ -48,7 +47,12 @@
             </intent-filter>
         </activity>
         <!-- OAuth callback receiver for flutter_web_auth_2 (Twitter login).
-             The einkreader:// scheme must match TwitterService.callbackScheme. -->
+             The einkreader:// scheme must match TwitterService.callbackScheme.
+             MainActivity must NOT set android:taskAffinity (the Flutter
+             template's taskAffinity="" broke this): the callback then lands
+             outside the app's task, the login completes but the browser
+             tab stays in front and reloads X's consent page in a loop.
+             See flutter_web_auth_2 issue #113. -->
         <activity
             android:name="com.linusu.flutter_web_auth_2.CallbackActivity"
             android:exported="true">

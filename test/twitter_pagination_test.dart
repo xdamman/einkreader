@@ -1,4 +1,5 @@
-// Twitter bookmarks: one 100-item fetch, every insert/skip decision logged
+// Twitter bookmarks: paged fetch that stops at the first known bookmark,
+// URL-dedup skips logged
 // with the author's username (so a "missing" bookmark is one debug-log
 // search away), and the feed's author strip — a Twitter source behaves like
 // a folder of accounts, collapsing one-off authors into "Others" past 10.
@@ -109,7 +110,7 @@ void main() {
       accessToken: () async => 'token',
       client: MockClient((request) async {
         if (request.url.path.endsWith('/users/me/bookmarks')) {
-          expect(request.url.queryParameters['max_results'], '100');
+          expect(request.url.queryParameters['max_results'], '20');
           return http.Response(jsonEncode(timeline), 200,
               headers: {'content-type': 'application/json'});
         }
@@ -208,5 +209,69 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('thread about proofs'), findsOneWidget);
     expect(find.text('single bookmark 0'), findsNothing);
+  });
+
+  test('bookmarks page until the first known one, not 100 every sync',
+      () async {
+    // Newest first: 20 on page 1 (b0..b19), page 2 starts b20..b39.
+    Map<String, dynamic> page(int from, {String? next}) => {
+          'data': [
+            for (var i = from; i < from + 20; i++)
+              {'id': 'b$i', 'text': 'bookmark $i', 'author_id': 'u1'},
+          ],
+          'includes': {
+            'users': [
+              {'id': 'u1', 'name': 'Jack', 'username': 'jack'}
+            ],
+          },
+          'meta': {if (next != null) 'next_token': next},
+        };
+    final requested = <String?>[];
+    final twitter = TwitterService(
+      accessToken: () async => 'token',
+      client: MockClient((request) async {
+        final token = request.url.queryParameters['pagination_token'];
+        requested.add(token);
+        final body = token == null
+            ? page(0, next: 'p2')
+            : token == 'p2'
+                ? page(20, next: 'p3')
+                : page(40);
+        return http.Response(jsonEncode(body), 200,
+            headers: {'content-type': 'application/json'});
+      }),
+    );
+
+    // b25 and older are already in the library: page 3 is never read.
+    final known = {for (var i = 25; i < 60; i++) 'b$i'};
+    final items =
+        await twitter.fetchBookmarks(isKnown: (id) async => known.contains(id));
+    expect(requested, [null, 'p2']);
+    expect(items.map((t) => t.id), [for (var i = 0; i < 25; i++) 'b$i']);
+
+    // Nothing new: a single page read.
+    requested.clear();
+    final none = await twitter.fetchBookmarks(isKnown: (_) async => true);
+    expect(none, isEmpty);
+    expect(requested, [null]);
+  });
+
+  test('a 403 on posting says why, and only permission issues ask to '
+      'reconnect', () {
+    expect(
+        TwitterService.refusalMessage(
+            '{"detail":"You are not allowed to create a Tweet with '
+            'duplicate content.","status":403}'),
+        allOf(contains('duplicates'), isNot(contains('reconnect'))));
+    expect(
+        TwitterService.refusalMessage('{"detail":"You are not permitted to '
+            'perform this action.","status":403}'),
+        contains('reconnect Twitter'));
+    expect(TwitterService.refusalMessage('not json'),
+        contains('reconnect Twitter'));
+    expect(
+        TwitterService.refusalMessage(
+            '{"detail":"Your account is temporarily locked."}'),
+        'Twitter refused the post: Your account is temporarily locked.');
   });
 }
