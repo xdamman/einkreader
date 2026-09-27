@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -41,6 +43,9 @@ class ArticleScreen extends StatefulWidget {
 
 class _ArticleScreenState extends State<ArticleScreen> {
   final _db = AppDatabase.instance;
+
+  /// Wraps the whole screen, for the screenshot attached to feedback.
+  final _screenKey = GlobalKey();
   Article? _article;
 
   /// The article this one was saved from (via a tapped link), for the
@@ -649,9 +654,11 @@ class _ArticleScreenState extends State<ArticleScreen> {
       if (date != null) date,
     ].join(' · ');
 
-    final content = _renderedContent;
+    final content = MarkdownView.trimEdgeRules(_renderedContent);
 
-    return Scaffold(
+    return RepaintBoundary(
+      key: _screenKey,
+      child: Scaffold(
       appBar: AppBar(
         title: Text(
             _originLabel == null
@@ -820,15 +827,37 @@ class _ArticleScreenState extends State<ArticleScreen> {
                               ? _showShareMenu
                               : _shareAllHighlights,
                         ),
-                        // Feedback about the app, prefilled with this
-                        // article's link (e.g. "this page didn't parse").
-                        OutlinedButton.icon(
-                          icon: const Icon(Icons.forum_outlined),
-                          label: const Text('Feedback'),
-                          onPressed: () =>
-                              openNewFeedback(context, url: article.url),
-                        ),
                       ],
+                    ),
+                  ),
+                  // Feedback about the app, kept quiet: a line of text with
+                  // a link, prefilled with this article's link and a
+                  // screenshot of the page (e.g. "this page didn't parse").
+                  Padding(
+                    padding: const EdgeInsets.only(top: 28),
+                    child: Center(
+                      child: Text.rich(
+                        TextSpan(
+                          text: 'How was your reading experience? ',
+                          children: [
+                            WidgetSpan(
+                              alignment: PlaceholderAlignment.baseline,
+                              baseline: TextBaseline.alphabetic,
+                              child: GestureDetector(
+                                onTap: () => _leaveFeedback(article),
+                                child: const Text(
+                                  'Leave a feedback to improve einkreader',
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      decoration: TextDecoration.underline),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 14),
+                      ),
                     ),
                   ),
                 ],
@@ -839,6 +868,24 @@ class _ArticleScreenState extends State<ArticleScreen> {
         ),
         ),
       ),
+      ),
     );
+  }
+
+  /// Captures the page as it looks right now (before the form covers it)
+  /// and opens the feedback form with it and the article's link.
+  Future<void> _leaveFeedback(Article article) async {
+    Uint8List? shot;
+    try {
+      final boundary = _screenKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      final image = await boundary?.toImage();
+      final data = await image?.toByteData(format: ui.ImageByteFormat.png);
+      shot = data?.buffer.asUint8List();
+    } catch (_) {
+      // No screenshot is fine: the form works without one.
+    }
+    if (!mounted) return;
+    await openNewFeedback(context, url: article.url, screenshot: shot);
   }
 }

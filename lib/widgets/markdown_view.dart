@@ -53,6 +53,23 @@ class MarkdownView extends StatefulWidget {
             }
       ]..removeWhere((t) => t.trim().isEmpty);
 
+  /// Drops horizontal rules (and blank lines) at the very start and end of
+  /// [markdown]: the reader already draws a divider above and below the
+  /// body, so an article opening or closing with one would show two lines.
+  static String trimEdgeRules(String markdown) {
+    final rule = RegExp(r'^\s*([*\-_])(?:\s*\1){2,}\s*$');
+    final lines = markdown.split('\n');
+    while (lines.isNotEmpty &&
+        (lines.first.trim().isEmpty || rule.hasMatch(lines.first))) {
+      lines.removeAt(0);
+    }
+    while (lines.isNotEmpty &&
+        (lines.last.trim().isEmpty || rule.hasMatch(lines.last))) {
+      lines.removeLast();
+    }
+    return lines.join('\n');
+  }
+
   /// Re-inserts the newlines Flutter's SelectionArea drops between blocks: a
   /// selection spanning paragraphs arrives glued ("…ends here.Second
   /// paragraph…"), which can never be matched or shared correctly. Decomposes

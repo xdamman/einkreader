@@ -1,12 +1,12 @@
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../services/errors.dart';
 import '../services/feedback_service.dart';
 import '../services/nostr_service.dart';
 import '../widgets/markdown_view.dart';
+import '../widgets/profile_switcher.dart';
 import 'nostr_profile_screen.dart';
 import 'profile_screen.dart';
 
@@ -697,33 +697,47 @@ Future<String?> composeNote(
 
 /// Opens the new-feedback form (after making sure the reader has a
 /// profile to post with). [url] prefills the link, e.g. the article the
-/// feedback is about. Returns the posted note, or null.
+/// feedback is about; [screenshot] (the screen it was opened from) is
+/// attached by default and can be removed in one tap. Returns the posted
+/// note, or null.
 Future<FeedbackNote?> openNewFeedback(BuildContext context,
-    {FeedbackService? service, String? url, String? subject}) async {
+    {FeedbackService? service,
+    String? url,
+    String? subject,
+    Uint8List? screenshot}) async {
   final feedback = service ?? FeedbackService();
   if (!await ensureCanPost(context, feedback)) return null;
   if (!context.mounted) return null;
   return Navigator.of(context).push<FeedbackNote>(MaterialPageRoute(
     fullscreenDialog: true,
-    builder: (_) =>
-        NewFeedbackScreen(service: feedback, url: url, subject: subject),
+    builder: (_) => NewFeedbackScreen(
+        service: feedback,
+        url: url,
+        subject: subject,
+        screenshot: screenshot),
   ));
 }
 
 /// The new-feedback form: subject, body, optional link and screenshot,
-/// with a plain warning that everything posted is public and a clear
-/// "Posting as" line naming the profile that signs it.
+/// with a short note that everything posted is public and a "Posting as"
+/// line naming the profile that signs it. Switching profiles opens a menu
+/// over the form, so whatever was written stays.
 class NewFeedbackScreen extends StatefulWidget {
   final FeedbackService service;
   final String? url;
   final String? subject;
+  final Uint8List? screenshot;
 
-  /// Test seam: returns picked image bytes instead of the system picker.
+  /// Test seam: stands in for the profile switcher menu.
   @visibleForTesting
-  static Future<Uint8List?> Function()? debugPickImage;
+  static Future<void> Function(BuildContext context)? debugSwitchProfile;
 
   const NewFeedbackScreen(
-      {super.key, required this.service, this.url, this.subject});
+      {super.key,
+      required this.service,
+      this.url,
+      this.subject,
+      this.screenshot});
 
   @override
   State<NewFeedbackScreen> createState() => _NewFeedbackScreenState();
@@ -733,13 +747,18 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
   late final _subject = TextEditingController(text: widget.subject ?? '');
   final _body = TextEditingController();
   late final _url = TextEditingController(text: widget.url ?? '');
-  Uint8List? _screenshot;
+  late bool _includeScreenshot = widget.screenshot != null;
   ({String name, String? address, String npub, String picture})? _identity;
   bool _posting = false;
 
   @override
   void initState() {
     super.initState();
+    _url.addListener(() => setState(() {}));
+    _loadIdentity();
+  }
+
+  void _loadIdentity() {
     widget.service.identity().then((identity) {
       if (mounted) setState(() => _identity = identity);
     });
@@ -753,15 +772,10 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
     super.dispose();
   }
 
-  Future<void> _pickScreenshot() async {
-    final pick = NewFeedbackScreen.debugPickImage ??
-        () async => (await FilePicker.platform
-                .pickFiles(type: FileType.image, withData: true))
-            ?.files
-            .single
-            .bytes;
-    final bytes = await pick();
-    if (bytes != null && mounted) setState(() => _screenshot = bytes);
+  Future<void> _switchProfile(BuildContext anchor) async {
+    await (NewFeedbackScreen.debugSwitchProfile ?? showProfileSwitcherMenu)(
+        anchor);
+    if (mounted) _loadIdentity();
   }
 
   Future<void> _post() async {
@@ -770,22 +784,22 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
           content: Text('Add a subject or a few words first')));
       return;
     }
+    // The profile may have been switched to an empty one meanwhile.
+    if (!await ensureCanPost(context, widget.service) || !mounted) return;
     setState(() => _posting = true);
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      final shot = _screenshot;
+      final shot = _includeScreenshot ? widget.screenshot : null;
       final imageUrl =
           shot == null ? null : await widget.service.uploadScreenshot(shot);
       final note = await widget.service.post(_body.text,
           subject: _subject.text, url: _url.text, imageUrl: imageUrl);
       // Our own name and picture are already known: no relay round trip
       // before the form closes.
-      final me = _identity;
-      if (me != null) {
-        NostrProfileCache.put(NostrProfile(
-            pubkey: note.pubkey, name: me.name, picture: me.picture));
-      }
+      final me = await widget.service.identity();
+      NostrProfileCache.put(NostrProfile(
+          pubkey: note.pubkey, name: me.name, picture: me.picture));
       messenger.showSnackBar(
           const SnackBar(content: Text('Feedback posted — thank you!')));
       navigator.pop(note);
@@ -805,22 +819,9 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
         : identity.name.isNotEmpty
             ? identity.name
             : 'your einkreader profile';
-    final shortNpub = identity == null
-        ? ''
-        : '${identity.npub.substring(0, 12)}…'
-            '${identity.npub.substring(identity.npub.length - 4)}';
+    final screenshot = widget.screenshot;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('New feedback'),
-        actions: [
-          TextButton(
-            onPressed: _posting ? null : _post,
-            child: Text(_posting ? 'Posting…' : 'Post publicly',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('New feedback')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         children: [
@@ -834,11 +835,10 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Feedback is public: anyone can read it on Nostr, and '
-                    'it can\'t be fully deleted once posted. Don\'t include '
-                    'personal information — no email addresses, phone '
-                    'numbers, home addresses or private messages — and '
-                    'check your screenshot for any.',
+                    'Feedback is public so we can improve this app together '
+                    'as a community. Don\'t include personal information or '
+                    'anything that shouldn\'t be public (also in the '
+                    'screenshot).',
                     style: TextStyle(fontSize: 14, height: 1.4),
                   ),
                 ),
@@ -846,47 +846,42 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          // Which identity signs this: the active profile.
-          Row(
-            children: [
-              ClipOval(
-                child: (identity?.picture ?? '').isEmpty
-                    ? const Icon(Icons.account_circle_outlined, size: 40)
-                    : Image.network(identity!.picture,
-                        width: 40,
-                        height: 40,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(
-                            Icons.account_circle_outlined,
-                            size: 40)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Posting as $name',
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w700)),
-                    if (identity != null)
-                      Text(
-                          [
-                            if (identity.address != null) identity.address!,
-                            shortNpub,
-                          ].join(' · '),
-                          style: const TextStyle(fontSize: 13)),
-                  ],
+          // Which identity signs this: the active profile. The avatar and
+          // "switch profile" open the switcher on top of the form.
+          Builder(
+            builder: (anchor) => Row(
+              children: [
+                GestureDetector(
+                  onTap: () => _switchProfile(anchor),
+                  child: ClipOval(
+                    child: (identity?.picture ?? '').isEmpty
+                        ? const Icon(Icons.account_circle_outlined, size: 40)
+                        : Image.network(identity!.picture,
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Icon(
+                                Icons.account_circle_outlined,
+                                size: 40)),
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text('Posting as $name',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+                TextButton(
+                  onPressed: () => _switchProfile(anchor),
+                  child: const Text('switch profile',
+                      style: TextStyle(
+                          fontSize: 14,
+                          decoration: TextDecoration.underline)),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'Your profile name and picture show next to your feedback. '
-            'Switch profiles from the profile icon on the home screen.',
-            style: TextStyle(fontSize: 13),
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           TextField(
             controller: _subject,
             textCapitalization: TextCapitalization.sentences,
@@ -909,41 +904,59 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
           TextField(
             controller: _url,
             keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Link (optional)',
               hintText: 'The article or page this is about',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              suffixIcon: _url.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Remove the link',
+                      icon: const Icon(Icons.close),
+                      onPressed: _url.clear,
+                    ),
             ),
           ),
-          const SizedBox(height: 14),
-          if (_screenshot == null)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.add_photo_alternate_outlined),
-                label: const Text('Attach a screenshot'),
-                style: OutlinedButton.styleFrom(
-                    side: const BorderSide(width: 1.5)),
-                onPressed: _pickScreenshot,
+          if (screenshot != null) ...[
+            const SizedBox(height: 14),
+            if (_includeScreenshot)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(border: Border.all(width: 1)),
+                    child: Image.memory(screenshot,
+                        height: 160, fit: BoxFit.contain),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    icon: const Icon(Icons.close),
+                    label: const Text('Remove screenshot'),
+                    onPressed: () =>
+                        setState(() => _includeScreenshot = false),
+                  ),
+                ],
+              )
+            else
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: const Text('Include a screenshot of the page'),
+                  onPressed: () => setState(() => _includeScreenshot = true),
+                ),
               ),
-            )
-          else
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  decoration: BoxDecoration(border: Border.all(width: 1)),
-                  child: Image.memory(_screenshot!,
-                      height: 160, fit: BoxFit.contain),
-                ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  icon: const Icon(Icons.close),
-                  label: const Text('Remove'),
-                  onPressed: () => setState(() => _screenshot = null),
-                ),
-              ],
-            ),
+          ],
+          const SizedBox(height: 24),
+          OutlinedButton(
+            onPressed: _posting ? null : _post,
+            style: OutlinedButton.styleFrom(
+                side: const BorderSide(width: 2),
+                padding: const EdgeInsets.symmetric(vertical: 14)),
+            child: Text(_posting ? 'Posting…' : 'Post feedback',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w700)),
+          ),
         ],
       ),
     );

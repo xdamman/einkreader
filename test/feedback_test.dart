@@ -11,6 +11,7 @@ import 'package:einkreader/services/feedback_service.dart';
 import 'package:einkreader/services/nostr_service.dart';
 import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/theme.dart';
+import 'package:einkreader/widgets/markdown_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
@@ -246,18 +247,20 @@ void main() {
         'The table rendered as raw HTML.\n\nhttps://example.org/post');
   });
 
-  testWidgets('the new-feedback form: public warning, identity, prefilled '
-      'link, screenshot', (tester) async {
+  testWidgets('the new-feedback form: public note, identity with switch, '
+      'prefilled link with a clear cross, screenshot included by default, '
+      'post button below', (tester) async {
     await tester.runAsync(() async {
       await ProfileService.instance.createIdentity();
       ProfileService.instance.debugPublish = (_) async => 1;
       await ProfileService.instance.saveProfile(const Profile(name: 'Xavier'));
     });
     addTearDown(() => ProfileService.instance.debugPublish = null);
+    var switched = 0;
+    NewFeedbackScreen.debugSwitchProfile = (_) async => switched++;
+    addTearDown(() => NewFeedbackScreen.debugSwitchProfile = null);
     final shot = Uint8List.fromList(
         img.encodePng(img.Image(width: 4, height: 4)));
-    NewFeedbackScreen.debugPickImage = () async => shot;
-    addTearDown(() => NewFeedbackScreen.debugPickImage = null);
     final feedback = _NoUploadFeedback(relay);
     // Tablet-sized, like the e-ink device: the whole form fits.
     tester.view.physicalSize = const Size(1200, 1800);
@@ -271,7 +274,9 @@ void main() {
         body: Builder(
           builder: (context) => TextButton(
             onPressed: () async => posted = await openNewFeedback(context,
-                service: feedback, url: 'https://example.org/article'),
+                service: feedback,
+                url: 'https://example.org/article',
+                screenshot: shot),
             child: const Text('open'),
           ),
         ),
@@ -284,18 +289,17 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
     }
 
-    expect(find.textContaining('Feedback is public'), findsOneWidget);
+    expect(find.textContaining('Feedback is public so we can improve'),
+        findsOneWidget);
     expect(find.textContaining('personal information'), findsOneWidget);
     expect(find.text('Posting as Xavier'), findsOneWidget);
-    expect(find.textContaining('npub1'), findsOneWidget);
+    expect(find.textContaining('npub1'), findsNothing,
+        reason: 'the key is noise for most people');
+    expect(find.textContaining('home screen'), findsNothing);
     expect(find.text('https://example.org/article'), findsOneWidget,
         reason: 'the link is prefilled');
-
-    await tester.tap(find.text('Attach a screenshot'));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
-    expect(find.text('Remove'), findsOneWidget);
+    expect(find.text('Remove screenshot'), findsOneWidget,
+        reason: 'the screenshot is included by default');
 
     await tester.enterText(
         find.widgetWithText(TextField, 'Subject'), 'Parsing issue');
@@ -303,7 +307,36 @@ void main() {
         find.widgetWithText(
             TextField, 'What happened, or what would you like?'),
         'Images are missing.');
-    await tester.tap(find.text('Post publicly'));
+
+    // Switching profile keeps what was written.
+    await tester.tap(find.text('switch profile'));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    expect(switched, 1);
+    expect(find.text('Parsing issue'), findsOneWidget);
+    expect(find.text('Images are missing.'), findsOneWidget);
+
+    // Removing and restoring the screenshot, one tap each.
+    await tester.tap(find.text('Remove screenshot'));
+    await tester.pump();
+    await tester.tap(find.text('Include a screenshot of the page'));
+    await tester.pump();
+
+    // The cross clears the link in one tap.
+    await tester.tap(find.byTooltip('Remove the link'));
+    await tester.pump();
+    expect(find.text('https://example.org/article'), findsNothing);
+    await tester.enterText(find.widgetWithText(TextField, 'Link (optional)'),
+        'https://example.org/other');
+    await tester.pump();
+
+    // No action in the app bar: the post button sits below the form.
+    expect(
+        find.descendant(
+            of: find.byType(AppBar), matching: find.byType(TextButton)),
+        findsNothing);
+    await tester.tap(find.text('Post feedback'));
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
@@ -312,10 +345,50 @@ void main() {
     final event = relay.events.last;
     expect(event['tags'], anyElement(equals(['subject', 'Parsing issue'])));
     expect(event['tags'],
-        anyElement(equals(['r', 'https://example.org/article'])));
+        anyElement(equals(['r', 'https://example.org/other'])));
     expect(event['content'], contains('https://blossom.example/abc123.jpg'));
     expect(posted, isNotNull, reason: 'the form returns the posted note');
     // Let the "Feedback posted" snackbar time out.
     await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a removed screenshot is not uploaded', (tester) async {
+    await tester.runAsync(() async {
+      await ProfileService.instance.createIdentity();
+      ProfileService.instance.debugPublish = (_) async => 1;
+    });
+    addTearDown(() => ProfileService.instance.debugPublish = null);
+    final feedback = _NoUploadFeedback(relay);
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: NewFeedbackScreen(
+          service: feedback,
+          screenshot: Uint8List.fromList(
+              img.encodePng(img.Image(width: 4, height: 4)))),
+    ));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    await tester.tap(find.text('Remove screenshot'));
+    await tester.pump();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Subject'), 'No picture');
+    await tester.tap(find.text('Post feedback'));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(feedback.uploaded, isNull);
+    expect(relay.events.last['content'], isNot(contains('blossom')));
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  test('horizontal rules at the edges of an article are dropped', () {
+    expect(
+        MarkdownView.trimEdgeRules('* * *\n\nHello\n\n---\n\nWorld\n\n* * *\n'),
+        'Hello\n\n---\n\nWorld');
+    expect(MarkdownView.trimEdgeRules('Just text'), 'Just text');
   });
 }
