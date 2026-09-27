@@ -120,26 +120,41 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: ProfileScreen()));
     await tester.pumpAndSettle();
 
-    // Opt-in: short privacy copy plus a single name field. No Nostr jargon,
-    // no key talk.
+    // Opt-in: short privacy copy, the public address first, then the name.
+    // No Nostr jargon, no key talk.
     expect(find.textContaining('private and local-first'), findsOneWidget);
+    expect(find.text('Your public address'), findsOneWidget);
     expect(find.text('Your name'), findsOneWidget);
     expect(find.textContaining('nsec'), findsNothing);
     expect(find.textContaining('npub'), findsNothing);
     expect(await ProfileService.instance.enabled, isFalse);
+    final address = find.widgetWithText(TextField, 'Your public address');
+    final nameY = tester.getTopLeft(find.text('Your name')).dy;
+    expect(tester.getTopLeft(address).dy, lessThan(nameY),
+        reason: 'the address comes first');
 
+    // Too short: flagged right away, no create.
+    await tester.enterText(address, 'xav');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(find.textContaining('At least 5 characters'), findsWidgets);
+
+    // The name suggests the address, which is checked live and shows the
+    // matching email address.
+    await tester.enterText(address, '');
     await tester.enterText(
         find.widgetWithText(TextField, 'Your name'), 'Xavier');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
-    // The username is auto-suggested from the name, editable, with the
-    // domain shown as a suffix.
-    expect(find.text('@einkreader.app'), findsOneWidget);
-    expect(
-        tester
-            .widget<TextField>(find.widgetWithText(TextField, 'Username'))
-            .controller!
-            .text,
-        'xavier');
+    expect(tester.widget<TextField>(address).controller!.text, 'xavier');
+    expect(find.text('https://einkreader.app/'), findsOneWidget);
+    expect(find.text('✓ Available'), findsOneWidget);
+    expect(find.textContaining('xavier@einkreader.app', findRichText: true),
+        findsOneWidget);
     await tester.ensureVisible(find.text('Create profile'));
     await tester.tap(find.text('Create profile'), warnIfMissed: false);
     await tester.pumpAndSettle();

@@ -8,6 +8,7 @@ import '../services/app_log.dart';
 import '../services/archive_store.dart';
 import '../services/outbox_service.dart';
 import '../services/plugin_service.dart';
+import '../services/profile_service.dart';
 import '../services/share_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
@@ -79,6 +80,10 @@ class _HomeScreenState extends State<HomeScreen> {
   /// in the chip strip, even empty, so its address is easy to find. Null
   /// when the Email plugin is off.
   int? _inboxSourceId;
+
+  /// Whether a sync has anything to do: a source to refresh, or an Inbox
+  /// address to fetch email for. Without either the sync icon is hidden.
+  bool _hasSomethingToSync = false;
   Map<int, String> _sourceTitles = {};
 
   /// Sources currently being synced, shown with a spinner in the feed strip.
@@ -206,6 +211,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final inbox = await PluginService.instance.emailActive
           ? await _db.ensureEmailSource()
           : null;
+      final hasInboxAddress = inbox != null &&
+          await ProfileService.instance.enabled &&
+          await ProfileService.instance.nip05Address != null;
       final articles = await _db.getArticles();
       final highlights = await _db.getHighlights();
       final shares = await _db.getShares();
@@ -225,6 +233,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _sources = sources;
         _folders = folders;
         _inboxSourceId = inbox?.id;
+        _hasSomethingToSync = hasInboxAddress ||
+            sources.any((s) =>
+                s.type != SourceType.email &&
+                s.type != SourceType.savedLinks);
         _sourceTitles = {for (final s in sources) s.id!: s.title};
         _developerMode = developerMode;
         _everLoaded = true;
@@ -308,17 +320,19 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const FeedbackScreen())),
           ),
-          IconButton(
-            tooltip: 'Update all sources',
-            icon: syncing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync),
-            onPressed: syncing ? null : _sync,
-          ),
+          // Hidden when there is nothing to sync (no source yet).
+          if (_hasSomethingToSync || syncing)
+            IconButton(
+              tooltip: 'Update all sources',
+              icon: syncing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.sync),
+              onPressed: syncing ? null : _sync,
+            ),
           // Tap opens the active profile; long-press switches between
           // profiles or adds one (the last used profile is remembered).
           Builder(
@@ -686,6 +700,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (inboxId != null) inboxId,
     }.where((id) => folderOf[id] == null).map(filterFor).toList()
       ..sort(compareFilters);
+    // The Inbox leads, right after All (before folders); the rest stay
+    // alphabetical.
+    final inboxFilter =
+        topSources.where((f) => f.id == inboxId).firstOrNull;
+    if (inboxFilter != null) topSources.remove(inboxFilter);
 
     // A folder appears once any of its sources has articles; its counts
     // aggregate over its members.
@@ -798,6 +817,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SourceFilterBar(
+          inbox: inboxFilter,
           folders: folders,
           sources: topSources,
           selectedId: selectedId,
@@ -953,6 +973,8 @@ class _AuthorFilter {
 /// folder's sources; a Twitter source likewise reveals a row of the
 /// bookmarked accounts.
 class _SourceFilterBar extends StatelessWidget {
+  /// The Inbox chip, placed first after "All" (before folders).
+  final _SourceFilter? inbox;
   final List<_FolderFilter> folders;
   final List<_SourceFilter> sources;
   final int? selectedId;
@@ -971,6 +993,7 @@ class _SourceFilterBar extends StatelessWidget {
   final ValueChanged<String?> onAuthorSelected;
 
   const _SourceFilterBar({
+    this.inbox,
     required this.folders,
     required this.sources,
     required this.selectedId,
@@ -1028,6 +1051,15 @@ class _SourceFilterBar extends StatelessWidget {
               syncing: false,
               onTap: () => onSelected(null),
             ),
+            if (inbox != null)
+              _SourceChip(
+                label: inbox!.title,
+                count: inbox!.unread,
+                selected: selectedId == inbox!.id,
+                syncing: syncingSourceIds.contains(inbox!.id),
+                error: errorSourceIds.contains(inbox!.id),
+                onTap: () => onSelected(inbox!.id),
+              ),
             for (final folder in folders)
               _SourceChip(
                 label: folder.title,

@@ -173,7 +173,7 @@ void main() {
     // lists the destinations directly.
     await tester.tap(find.descendant(
         of: find.widgetWithText(ListTile, 'Gamma'),
-        matching: find.byTooltip('Source options')));
+        matching: find.byTooltip('Move to folder')));
     await settle(tester);
     await tester.tap(find.text('Move to "Press"'));
     await settle(tester);

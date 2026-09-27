@@ -69,8 +69,21 @@ class NostrService {
   static const defaultRelays = [
     'wss://relay.damus.io',
     'wss://nos.lol',
-    'wss://relay.nostr.band',
+    // Replaced relay.nostr.band, which stopped answering: every query then
+    // waited its full timeout.
+    'wss://relay.primal.net',
   ];
+
+  /// Relays that index profiles (kind 0): queried for profile lookups and
+  /// sent our own profile updates, so names and avatars resolve even when
+  /// someone's profile never reached the general relays.
+  static const profileRelays = [
+    'wss://purplepag.es',
+    'wss://relay.nos.social',
+  ];
+
+  Future<List<String>> _profileQueryRelays() async =>
+      {...await relays(), ...profileRelays}.toList();
 
   /// Relays known to implement NIP-50 full-text search (used only for
   /// profile search, independent of the user's relay list).
@@ -302,7 +315,8 @@ class NostrService {
     final events = await _query({
       'kinds': [0],
       'authors': authors,
-    });
+    }, onRelays: await _profileQueryRelays(),
+        timeout: const Duration(seconds: 5));
     final latest = <String, Map<String, dynamic>>{};
     for (final event in events) {
       final pubkey = event['pubkey'] as String?;
@@ -329,7 +343,8 @@ class NostrService {
       'kinds': [0],
       'authors': [pubkey],
       'limit': 1,
-    });
+    }, onRelays: await _profileQueryRelays(),
+        timeout: const Duration(seconds: 5));
     if (events.isEmpty) return null;
     events.sort((a, b) =>
         (b['created_at'] as int? ?? 0).compareTo(a['created_at'] as int? ?? 0));
@@ -540,8 +555,12 @@ class NostrService {
   /// touches keys.
   Future<int> publish(Map<String, dynamic> event,
       {Duration timeout = const Duration(seconds: 8)}) async {
+    // Profile updates also go to the profile-indexing relays.
+    final targets = event['kind'] == 0
+        ? await _profileQueryRelays()
+        : await relays();
     final results = await Future.wait(
-        (await relays()).map((relay) => _publishTo(relay, event, timeout)));
+        targets.map((relay) => _publishTo(relay, event, timeout)));
     return results.where((ok) => ok).length;
   }
 

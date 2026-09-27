@@ -27,7 +27,9 @@ Future<bool> reconnectTwitter({
   final clientId = prefs.getString('twitter_client_id') ?? '';
   if (clientId.isEmpty) {
     await navigator.push(
-        MaterialPageRoute(builder: (_) => const AddSourceScreen()));
+        MaterialPageRoute(
+            builder: (_) =>
+                const AddSourceScreen(kind: AddSourceKind.twitter)));
     return false;
   }
   try {

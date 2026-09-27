@@ -112,7 +112,7 @@ void main() {
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
-      home: const AddSourceScreen(),
+      home: const AddSourceScreen(kind: AddSourceKind.nostr),
     ));
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 50)));
@@ -120,7 +120,7 @@ void main() {
 
     await tester.scrollUntilVisible(find.text('Follow'), 200,
         scrollable: find.byType(Scrollable).first);
-    expect(find.text('Follow a Nostr profile'), findsOneWidget);
+    expect(find.text('Follow someone'), findsOneWidget);
     expect(find.text('npub, name@domain, or name'), findsOneWidget);
     for (final toggle in ['Notes', 'Long reads', 'Bookmarks']) {
       final tile = tester.widget<SwitchListTile>(find.ancestor(

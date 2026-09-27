@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#EFEBE4"/>
+  <circle cx="256" cy="256" r="236" fill="#F6E1D3"/>
+  <!-- speech bubble: </> -->
+  <rect x="318" y="62" width="128" height="74" rx="22" fill="#FFFFFF" stroke="#434345" stroke-width="7"/>
+  <path d="M340 132 l-8 26 l26 -22 z" fill="#FFFFFF" stroke="#434345" stroke-width="7" stroke-linejoin="round"/>
+  <rect x="336" y="126" width="30" height="12" fill="#FFFFFF"/>
+  <text x="382" y="112" text-anchor="middle" font-family="DejaVu Sans Mono, monospace" font-size="34" font-weight="bold" fill="#E2725B">&lt;/&gt;</text>
+  <!-- waving arm (left) -->
+  <path d="M150 300 q-44 -24 -52 -86" fill="none" stroke="#434345" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="96" cy="206" r="20" fill="#FFF8EC" stroke="#434345" stroke-width="7"/>
+  <path d="M74 176 q-8 -10 -4 -22 M92 170 q-2 -12 4 -22" fill="none" stroke="#434345" stroke-width="5" stroke-linecap="round"/>
+  <!-- arm holding a wrench (right) -->
+  <path d="M362 318 q40 10 56 -18" fill="none" stroke="#434345" stroke-width="16" stroke-linecap="round"/>
+  <g transform="rotate(-35 430 282)">
+    <rect x="418" y="250" width="22" height="84" rx="10" fill="#9BA3AF" stroke="#434345" stroke-width="6"/>
+    <path d="M408 256 a30 30 0 1 1 42 0 l-8 -16 h-26 z" fill="#9BA3AF" stroke="#434345" stroke-width="6" stroke-linejoin="round"/>
+  </g>
+  <circle cx="420" cy="298" r="18" fill="#FFF8EC" stroke="#434345" stroke-width="7"/>
+  <!-- the e-reader body -->
+  <rect x="146" y="128" width="220" height="286" rx="30" fill="#434345"/>
+  <rect x="166" y="150" width="180" height="222" rx="10" fill="#E1DDD6"/>
+  <rect x="236" y="386" width="40" height="12" rx="6" fill="#CECAC2"/>
+  <!-- face on the screen -->
+  <circle cx="220" cy="234" r="14" fill="#434345"/>
+  <circle cx="292" cy="234" r="14" fill="#434345"/>
+  <circle cx="225" cy="229" r="4.5" fill="#FFFFFF"/>
+  <circle cx="297" cy="229" r="4.5" fill="#FFFFFF"/>
+  <path d="M222 286 q34 30 68 0" fill="none" stroke="#434345" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="196" cy="276" r="12" fill="#E2725B" opacity="0.5"/>
+  <circle cx="316" cy="276" r="12" fill="#E2725B" opacity="0.5"/>
+  <!-- text lines under the face, like a page -->
+  <rect x="192" y="326" width="128" height="9" rx="4.5" fill="#8E8D8B"/>
+  <rect x="192" y="344" width="96" height="9" rx="4.5" fill="#8E8D8B"/>
+  <!-- little legs -->
+  <path d="M212 414 v40 h-18 M300 414 v40 h18" fill="none" stroke="#434345" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

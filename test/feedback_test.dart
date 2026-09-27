@@ -23,6 +23,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 /// An in-memory relay: stores published events and answers NIP-01 filters.
 class _FakeRelay extends NostrService {
   final events = <Map<String, dynamic>>[];
+  final filters = <Map<String, dynamic>>[];
 
   @override
   Future<int> publish(Map<String, dynamic> event,
@@ -34,6 +35,7 @@ class _FakeRelay extends NostrService {
   @override
   Future<List<Map<String, dynamic>>> query(Map<String, dynamic> filter,
       {Duration timeout = const Duration(seconds: 8)}) async {
+    filters.add(filter);
     bool tagged(Map<String, dynamic> e, String name, List values) =>
         (e['tags'] as List).any((t) =>
             (t as List).length >= 2 && t[0] == name && values.contains(t[1]));
@@ -85,6 +87,18 @@ class _NoUploadFeedback extends FeedbackService {
   }
 }
 
+/// Gives the database real time until loading (the app-bar spinner) ends,
+/// then lets animations settle.
+Future<void> settle(WidgetTester tester) async {
+  for (var i = 0; i < 20; i++) {
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    if (find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
+  }
+  await tester.pumpAndSettle();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final db = AppDatabase.instance;
@@ -103,6 +117,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     ProfileService.instance.debugResetActiveCache();
     NostrProfileCache.debugClear();
+    await db.clearNostrCache();
     relay = _FakeRelay();
     service = FeedbackService(nostr: relay);
   });
@@ -185,9 +200,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(
         theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(find.textContaining('Obsidian', findRichText: true), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
@@ -215,19 +228,13 @@ void main() {
         (await tester.runAsync(() => service.post('Love the reader')))!;
     await tester.pumpWidget(MaterialApp(
         theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     await tester.tap(find.byTooltip('React'));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(find.text('Other…'), findsOneWidget);
     await tester.tap(find.text('🔥'));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(find.text('🔥 1'), findsOneWidget);
     final reaction = relay.events.last;
@@ -323,9 +330,7 @@ void main() {
 
     // Switching profile keeps what was written.
     await tester.tap(find.text('switch profile'));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(switched, 1);
     expect(find.text('Parsing issue'), findsOneWidget);
     expect(find.text('Images are missing.'), findsOneWidget);
@@ -350,9 +355,7 @@ void main() {
             of: find.byType(AppBar), matching: find.byType(TextButton)),
         findsNothing);
     await tester.tap(find.text('Post feedback'));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(posted, isNotNull, reason: 'the form closes with the feedback');
     expect(find.text('Post feedback'), findsNothing);
     await tester.runAsync(() => posted!.sent);
@@ -392,9 +395,7 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'Subject'), 'No picture');
     await tester.tap(find.text('Post feedback'));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(feedback.uploaded, isNull);
     expect(relay.events.last['content'], isNot(contains('blossom')));
     await tester.pump(const Duration(seconds: 5));
@@ -434,9 +435,7 @@ void main() {
     });
     await tester.pumpWidget(MaterialApp(
         theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
+    await settle(tester);
     final preview = tester.widget<Text>(
         find.textContaining('Long feedback line.'));
     expect(preview.maxLines, 3);
@@ -513,5 +512,23 @@ void main() {
         MarkdownView.trimEdgeRules('* * *\n\nHello\n\n---\n\nWorld\n\n* * *\n'),
         'Hello\n\n---\n\nWorld');
     expect(MarkdownView.trimEdgeRules('Just text'), 'Just text');
+  });
+
+  test('feedback is cached: instant from disk, then only newer events',
+      () async {
+    await ProfileService.instance.createIdentity();
+    final note = await service.post('Cache me');
+    relay.filters.clear();
+
+    // From the local copy alone — no relay query at all.
+    final cached = await FeedbackService(nostr: relay).cachedFeedback();
+    expect(cached.notes.map((n) => n.id), [note.id]);
+    expect(relay.filters, isEmpty);
+
+    // A refresh asks only for what's newer than the cache.
+    await service.feedback();
+    expect(relay.filters, isNotEmpty);
+    expect(relay.filters.every((f) => f['since'] != null), isTrue,
+        reason: 'incremental: every query is bounded by the cache');
   });
 }

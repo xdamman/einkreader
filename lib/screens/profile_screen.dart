@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:isolate';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -46,6 +48,70 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _dirty = false;
   String? _usernameError;
 
+  /// Live availability of the address typed on the create form (null =
+  /// nothing typed yet or a check still running).
+  UsernameStatus? _usernameStatus;
+  bool _checkingUsername = false;
+  Timer? _usernameCheck;
+
+  void _onUsernameChanged(String value, {bool byUser = true}) {
+    // Typing takes over from the name's suggestion; clearing hands it back.
+    if (byUser) _usernameEdited = value.trim().isNotEmpty;
+    _usernameCheck?.cancel();
+    final name = value.trim();
+    setState(() {
+      _usernameError = null;
+      _usernameStatus = null;
+      _checkingUsername = name.isNotEmpty;
+    });
+    if (name.isEmpty) return;
+    // Wait for a pause in typing before asking the site.
+    _usernameCheck = Timer(const Duration(milliseconds: 450), () async {
+      final status = await _profileService.usernameStatus(name);
+      if (!mounted || _username.text.trim() != name) return;
+      setState(() {
+        _usernameStatus = status;
+        _checkingUsername = false;
+      });
+    });
+  }
+
+  /// The line under the address field: what's wrong, or that it's free.
+  ({String text, bool error})? get _usernameFeedback {
+    if (_usernameError != null) return (text: _usernameError!, error: true);
+    if (_username.text.trim().isEmpty) {
+      return (text: 'At least 5 characters: a–z, 0–9 and _', error: false);
+    }
+    if (_checkingUsername) return (text: 'Checking…', error: false);
+    return switch (_usernameStatus) {
+      UsernameStatus.invalid => (
+          text: 'At least 5 characters: a–z, 0–9 and _ only',
+          error: true
+        ),
+      UsernameStatus.reserved => (
+          text: 'This address is reserved — try another',
+          error: true
+        ),
+      UsernameStatus.taken => (
+          text: 'Already taken — try another',
+          error: true
+        ),
+      UsernameStatus.available => (text: '✓ Available', error: false),
+      UsernameStatus.unknown => (
+          text: "Couldn't check right now — it will be confirmed when you "
+              'create the profile',
+          error: false
+        ),
+      null => null,
+    };
+  }
+
+  bool get _usernameBlocked =>
+      _checkingUsername ||
+      _usernameStatus == UsernameStatus.invalid ||
+      _usernameStatus == UsernameStatus.reserved ||
+      _usernameStatus == UsernameStatus.taken;
+
   /// Import-on-create: offered when the previous profile has sources.
   String? _importFrom;
   List<Source> _importableSources = [];
@@ -68,13 +134,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Suggest a username from the name as they type, until they take over.
     _name.addListener(() {
       if (_enabled == false && !_usernameEdited) {
-        _username.text = ProfileService.suggestUsername(_name.text);
+        final suggested = ProfileService.suggestUsername(_name.text);
+        if (suggested != _username.text) {
+          _username.text = suggested;
+          _onUsernameChanged(suggested, byUser: false);
+        }
       }
     });
   }
 
   @override
   void dispose() {
+    _usernameCheck?.cancel();
     _name.dispose();
     _username.dispose();
     _about.dispose();
@@ -466,23 +537,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: TextStyle(fontSize: 15, height: 1.45),
               ),
               const SizedBox(height: 24),
-              TextField(
-                controller: _name,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Your name'),
-              ),
-              const SizedBox(height: 14),
+              // 1. Your public address, checked live as you type.
               TextField(
                 controller: _username,
+                autofocus: true,
                 autocorrect: false,
-                onChanged: (_) => _usernameEdited = true,
+                inputFormatters: [
+                  TextInputFormatter.withFunction((old, value) =>
+                      value.copyWith(text: value.text.toLowerCase())),
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-z0-9_]')),
+                  LengthLimitingTextInputFormatter(20),
+                ],
+                onChanged: _onUsernameChanged,
                 decoration: InputDecoration(
-                  labelText: 'Username',
-                  suffixText: '@einkreader.app',
-                  errorText: _usernameError,
-                  helperText: 'Your public address — people use it to tag '
-                      'and follow you',
+                  labelText: 'Your public address',
+                  prefixText: 'https://einkreader.app/',
+                  helperText: _usernameFeedback?.error == false
+                      ? _usernameFeedback!.text
+                      : null,
+                  errorText: _usernameFeedback?.error == true
+                      ? _usernameFeedback!.text
+                      : null,
                 ),
+              ),
+              if (ProfileService.usernameRule
+                  .hasMatch(_username.text.trim())) ...[
+                const SizedBox(height: 10),
+                Text.rich(
+                  TextSpan(children: [
+                    const TextSpan(
+                        text: 'You also get an email address to receive '
+                            'things to read: '),
+                    TextSpan(
+                        text: '${_username.text.trim()}@einkreader.app',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ]),
+                  style: const TextStyle(fontSize: 14, height: 1.4),
+                ),
+              ],
+              const SizedBox(height: 18),
+              // 2. The name people see.
+              TextField(
+                controller: _name,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Your name'),
                 onSubmitted: (_) => _create(),
               ),
               if (_importFrom != null &&
@@ -518,7 +616,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
               const SizedBox(height: 28),
               OutlinedButton(
-                onPressed: _creating ? null : _create,
+                onPressed: _creating || _usernameBlocked ? null : _create,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   side: const BorderSide(width: 2),

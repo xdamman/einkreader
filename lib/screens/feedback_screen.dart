@@ -31,32 +31,58 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   bool _canPost = false;
   String? _error;
 
+  /// A refresh from the relays is running (the app-bar icon spins).
+  bool _loading = false;
+
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// Shows what's stored locally at once, then asks the relays only for
+  /// newer events and updates the list.
   Future<void> _load() async {
-    setState(() => _error = null);
+    if (_loading) return;
+    setState(() {
+      _error = null;
+      _loading = true;
+    });
     try {
       final canPost = await _service.canPost;
       final me = await _service.myPubkey;
-      final result = await _service.feedback();
+      final cached = await _service.cachedFeedback();
+      await NostrProfileCache.load(cached.notes.map((n) => n.pubkey),
+          nostr: _service.nostr);
       if (!mounted) return;
       setState(() {
         _canPost = canPost;
         _me = me;
-        _notes = result.notes;
-        _replyCounts = result.replyCounts;
+        if (cached.notes.isNotEmpty || _notes == null) {
+          _notes = cached.notes;
+          _replyCounts = cached.replyCounts;
+        }
       });
-      // Names and avatars fill in as they arrive.
-      await NostrProfileCache.load(result.notes.map((n) => n.pubkey),
+      final fresh = await _service.feedback();
+      await NostrProfileCache.load(fresh.notes.map((n) => n.pubkey),
           nostr: _service.nostr);
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {
+        _notes = fresh.notes;
+        _replyCounts = fresh.replyCounts;
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = friendlyError(e, doing: 'loading feedback'));
+      final message = friendlyError(e, doing: 'loading feedback');
+      if (_notes?.isNotEmpty ?? false) {
+        // Keep showing what we have; just say the refresh failed.
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      } else {
+        setState(() => _error = message);
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -88,11 +114,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       appBar: AppBar(
         title: const Text('Feedback'),
         actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-            onPressed: _load,
-          ),
+          RefreshAction(loading: _loading, onPressed: _load),
         ],
       ),
       body: RefreshIndicator(
@@ -124,11 +146,9 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
             const Divider(height: 1),
             if (_error != null)
               Padding(padding: const EdgeInsets.all(24), child: Text(_error!))
-            else if (notes == null)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: CircularProgressIndicator()),
-              )
+            else if (notes == null || (notes.isEmpty && _loading))
+              // Loading is shown by the app-bar icon, not a big spinner.
+              const SizedBox.shrink()
             else if (notes.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(24),
@@ -191,20 +211,28 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
   }
 
   Future<void> _load() async {
+    setState(() => _loading = true);
     try {
       final canPost = await _service.canPost;
       final me = await _service.myPubkey;
-      final notes = await _service.thread(widget.root.id);
+      // Stored replies first (instant), then whatever is new.
+      final cached = await _service.cachedThread(widget.root.id);
+      await NostrProfileCache.load(cached.map((n) => n.pubkey),
+          nostr: _service.nostr);
       if (!mounted) return;
       setState(() {
         _canPost = canPost;
         _me = me;
+        if (cached.isNotEmpty) _notes = cached;
+      });
+      final notes = await _service.thread(widget.root.id);
+      await NostrProfileCache.load(notes.map((n) => n.pubkey),
+          nostr: _service.nostr);
+      if (!mounted) return;
+      setState(() {
         if (notes.isNotEmpty) _notes = notes;
         _loading = false;
       });
-      await NostrProfileCache.load(notes.map((n) => n.pubkey),
-          nostr: _service.nostr);
-      if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -241,7 +269,10 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Feedback thread')),
+      appBar: AppBar(
+        title: const Text('Feedback thread'),
+        actions: [RefreshAction(loading: _loading, onPressed: _load)],
+      ),
       body: Column(
         children: [
           Expanded(
@@ -280,11 +311,6 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
                   ),
                   const Divider(height: 1),
                 ],
-                if (_loading)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
               ],
             ),
           ),
@@ -675,8 +701,9 @@ Future<bool> ensureCanPost(
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
       title: const Text('Set up your profile first'),
       content: const Text(
-          'Feedback is posted publicly on Nostr under your einkreader '
-          'profile. It takes a few seconds to create one.'),
+          'Feedback is posted publicly under your einkreader profile, '
+          'with your name and picture. It takes a few seconds to '
+          'create one.'),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -1019,3 +1046,29 @@ String plainPreview(String markdown) => markdown
     .replaceAll(RegExp(r'\*{1,3}|`+|~~'), '')
     .replaceAll(RegExp(r'\s*\n+\s*'), ' ')
     .trim();
+
+
+/// The app-bar refresh button, doubling as the loading indicator: it spins
+/// while a refresh runs (same as the home screen's sync icon) instead of a
+/// large spinner in the middle of the page.
+class RefreshAction extends StatelessWidget {
+  final bool loading;
+  final VoidCallback onPressed;
+
+  const RefreshAction(
+      {super.key, required this.loading, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: loading ? 'Refreshing…' : 'Refresh',
+      icon: loading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2))
+          : const Icon(Icons.sync),
+      onPressed: loading ? null : onPressed,
+    );
+  }
+}

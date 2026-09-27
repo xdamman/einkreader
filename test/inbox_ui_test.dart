@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/screens/home_screen.dart';
+import 'package:einkreader/screens/sources_screen.dart';
 import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/theme.dart';
@@ -132,5 +133,70 @@ void main() {
     await settle(tester);
     expect(find.text('From amy@example.com #0'), findsOneWidget);
     expect(find.text('From zed@example.com #0'), findsNothing);
+  });
+
+  testWidgets('Inbox is the first chip after All', (tester) async {
+    await tester.runAsync(() => db.insertSource(Source(
+        type: SourceType.rss,
+        title: 'Aardvark Weekly',
+        url: 'https://aardvark.example',
+        createdAt: 0)));
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(() async {
+      // Articles so the RSS chips show up.
+      for (final s in await db.getSources()) {
+        await db.insertArticleIfNew(Article(
+            sourceId: s.id!, guid: 'g${s.id}', title: 'Story ${s.title}',
+            contentMarkdown: 'x', publishedAt: 1, createdAt: 1, fetched: 1));
+      }
+    });
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: const HomeScreen(key: ValueKey('o'))));
+    await settle(tester);
+    final all = tester.getTopLeft(find.text('All').first).dx;
+    final inbox = tester.getTopLeft(find.text('Inbox').first).dx;
+    final aardvark = tester.getTopLeft(find.text('Aardvark Weekly').first).dx;
+    expect(all, lessThan(inbox));
+    expect(inbox, lessThan(aardvark),
+        reason: 'Inbox leads even against alphabetical order');
+  });
+
+  testWidgets('no sources: the sync icon is hidden', (tester) async {
+    // A fresh, empty database: no source at all.
+    await tester.runAsync(() async {
+      await db.debugReset();
+      db.debugDatabasePath = p.join(
+          Directory.systemTemp.createTempSync('einkreader_nosrc').path,
+          'test.db');
+    });
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: const HomeScreen(key: ValueKey('n'))));
+    await settle(tester);
+    expect(find.byTooltip('Update all sources'), findsNothing);
+  });
+
+  testWidgets('with a source, the sync icon shows', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: const HomeScreen(key: ValueKey('s'))));
+    await settle(tester);
+    expect(find.byTooltip('Update all sources'), findsOneWidget);
+  });
+
+  testWidgets('sources list: Inbox on top, a trash icon, no unread box',
+      (tester) async {
+    await tester.runAsync(() => db.ensureEmailSource());
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: const SourcesScreen()));
+    await settle(tester);
+    final inboxY = tester.getTopLeft(find.text('Inbox')).dy;
+    final alphaY = tester.getTopLeft(find.text('Alpha')).dy;
+    expect(inboxY, lessThan(alphaY));
+    expect(find.byTooltip('Remove Alpha'), findsOneWidget);
+    expect(find.byTooltip('Remove Inbox'), findsNothing,
+        reason: 'the built-in Inbox cannot be removed');
+    expect(find.byIcon(Icons.more_vert), findsNothing,
+        reason: 'no folders: nothing to move to, so no menu');
   });
 }

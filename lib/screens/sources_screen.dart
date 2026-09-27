@@ -61,11 +61,16 @@ class _SourcesScreenState extends State<SourcesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Folders first (each with its sources indented), then top-level sources;
-    // everything alphabetical so the list keeps a stable, memorable layout.
+    // The Inbox first, then folders (each with its sources indented), then
+    // top-level sources; everything else alphabetical so the list keeps a
+    // stable, memorable layout.
     final sorted = [..._sources]..sort(
         (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
     final entries = <Widget>[];
+    for (final inbox in sorted.where((s) => s.type == SourceType.email)) {
+      entries.add(_sourceTile(inbox, indented: false));
+    }
+    sorted.removeWhere((s) => s.type == SourceType.email);
     for (final folder in _folders) {
       final members = sorted.where((s) => s.folderId == folder.id).toList();
       entries.add(_folderTile(folder, members));
@@ -194,7 +199,6 @@ class _SourcesScreenState extends State<SourcesScreen> {
   }
 
   Widget _sourceTile(Source source, {required bool indented}) {
-    final unread = _unread[source.id] ?? 0;
     final stats = _stats[source.id] ?? const SourceStats();
     final statsLine = [
       '${stats.downloaded} article${stats.downloaded == 1 ? '' : 's'}',
@@ -230,15 +234,18 @@ class _SourcesScreenState extends State<SourcesScreen> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (unread > 0)
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(border: Border.all()),
-              child: Text('$unread',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+          // Moving between folders (also possible by long-press drag) only
+          // when there is somewhere to move to.
+          if (_folders.any((f) => f.id != source.folderId) ||
+              source.folderId != null)
+            _sourceMenu(source),
+          // The built-in Inbox can't be removed (it would come right back).
+          if (source.type != SourceType.email)
+            IconButton(
+              tooltip: 'Remove ${source.title}',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => _confirmDelete(source),
             ),
-          _sourceMenu(source),
         ],
       ),
       onTap: () async {
@@ -274,14 +281,10 @@ class _SourcesScreenState extends State<SourcesScreen> {
   /// destinations directly, saving the "Move to folder…" hop.
   Widget _sourceMenu(Source source) {
     return PopupMenuButton<String>(
-      tooltip: 'Source options',
+      tooltip: 'Move to folder',
       icon: const Icon(Icons.more_vert),
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
       onSelected: (choice) async {
-        if (choice == 'remove') {
-          await _confirmDelete(source);
-          return;
-        }
         await _db.setSourceFolder(
             source.id!, choice == 'top' ? null : int.parse(choice));
         _load();
@@ -301,12 +304,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
             value: 'top',
             child: Text('Move to top level'),
           ),
-        if (_folders.isNotEmpty || source.folderId != null)
-          const PopupMenuDivider(),
-        const PopupMenuItem(
-          value: 'remove',
-          child: Text('Remove'),
-        ),
+
       ],
     );
   }

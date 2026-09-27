@@ -16,8 +16,25 @@ import '../services/sync_service.dart';
 /// website/domain — the feed is discovered from the page's `<link>` tags), a
 /// Twitter account (bookmarks feed via OAuth), or a Nostr npub (bookmarks and
 /// likes feeds).
+/// The kinds of source, each with its own add screen.
+enum AddSourceKind {
+  rss('RSS feed', 'A blog, newsletter or news site', Icons.rss_feed),
+  twitter('X (Twitter)', 'Your bookmarks', Icons.alternate_email),
+  nostr('Nostr', 'Follow people, or your own bookmarks and likes',
+      Icons.hub_outlined);
+
+  final String label;
+  final String description;
+  final IconData icon;
+  const AddSourceKind(this.label, this.description, this.icon);
+}
+
 class AddSourceScreen extends StatefulWidget {
-  const AddSourceScreen({super.key});
+  /// The kind of source to add; null shows the chooser (RSS / X / Nostr),
+  /// which opens a dedicated screen for the picked kind.
+  final AddSourceKind? kind;
+
+  const AddSourceScreen({super.key, this.kind});
 
   @override
   State<AddSourceScreen> createState() => _AddSourceScreenState();
@@ -351,15 +368,82 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   @override
   Widget build(BuildContext context) {
     const sectionStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
+    final kind = widget.kind;
+    if (kind == null) return _chooser();
     return Scaffold(
-      appBar: AppBar(title: const Text('Add source')),
+      appBar: AppBar(title: Text('Add ${kind.label}')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('RSS feed', style: sectionStyle),
-            const SizedBox(height: 8),
+            ...switch (kind) {
+              AddSourceKind.rss => _rssSection(sectionStyle),
+              AddSourceKind.twitter => _twitterSection(sectionStyle),
+              // Following people is the common case; your own lists after.
+              AddSourceKind.nostr => [
+                  ..._followSection(sectionStyle),
+                  const SizedBox(height: 32),
+                  const Divider(),
+                  const SizedBox(height: 24),
+                  ..._nostrOwnSection(sectionStyle),
+                ],
+            },
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// First level: just pick what kind of source to add.
+  Widget _chooser() {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Add source')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text('What would you like to add?',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 16),
+          for (final kind in AddSourceKind.values) ...[
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(width: 1.5),
+                padding: const EdgeInsets.all(16),
+                alignment: Alignment.centerLeft,
+              ),
+              onPressed: () async {
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => AddSourceScreen(kind: kind)));
+              },
+              child: Row(
+                children: [
+                  Icon(kind.icon, size: 28),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(kind.label,
+                            style: const TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.w700)),
+                        Text(kind.description,
+                            style: const TextStyle(fontSize: 14)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _rssSection(TextStyle sectionStyle) => [
             const Text(
               'Paste a feed URL, a website address or just a domain — the '
               'feed will be discovered automatically.',
@@ -392,11 +476,9 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               onPressed: _busy ? null : _add,
               child: Text(_busy ? 'Checking feed…' : 'Add feed'),
             ),
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Twitter / X', style: sectionStyle),
-            const SizedBox(height: 8),
+      ];
+
+  List<Widget> _twitterSection(TextStyle sectionStyle) => [
             const Text(
               'Creates a feed from your Bookmarks. You need a '
               'free OAuth 2.0 Client ID from developer.x.com with callback '
@@ -436,10 +518,10 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
                 child: Text(_twitterBusy ? 'Connecting…' : 'Connect Twitter'),
               ),
             ],
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Nostr', style: sectionStyle),
+      ];
+
+  List<Widget> _nostrOwnSection(TextStyle sectionStyle) => [
+            Text('Your bookmarks and likes', style: sectionStyle),
             const SizedBox(height: 8),
             const Text(
               'Creates two feeds from your public bookmark list and likes. '
@@ -460,10 +542,10 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               onPressed: _addNostr,
               child: const Text('Add Nostr sources'),
             ),
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
-            const Text('Follow a Nostr profile', style: sectionStyle),
+      ];
+
+  List<Widget> _followSection(TextStyle sectionStyle) => [
+            Text('Follow someone', style: sectionStyle),
             const SizedBox(height: 8),
             const Text(
               'Turn someone\'s Nostr presence into feeds. Enter their npub, '
@@ -507,9 +589,5 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               onPressed: _followBusy ? null : _follow,
               child: Text(_followBusy ? 'Looking up…' : 'Follow'),
             ),
-          ],
-        ),
-      ),
-    );
-  }
+      ];
 }

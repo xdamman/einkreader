@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -43,6 +44,9 @@ class ArticleScreen extends StatefulWidget {
 
 class _ArticleScreenState extends State<ArticleScreen> {
   final _db = AppDatabase.instance;
+
+  /// Tap target of the "Leave a feedback" link at the end of the article.
+  final _feedbackTap = TapGestureRecognizer();
 
   /// Wraps the whole screen, for the screenshot attached to feedback.
   final _screenKey = GlobalKey();
@@ -204,6 +208,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
   void dispose() {
     _saveProgress();
     _scroll.dispose();
+    _feedbackTap.dispose();
     super.dispose();
   }
 
@@ -836,27 +841,23 @@ class _ArticleScreenState extends State<ArticleScreen> {
                   Padding(
                     padding: const EdgeInsets.only(top: 28),
                     child: Center(
+                      // One text run (not an embedded widget) so the link
+                      // is exactly the size of the sentence around it.
                       child: Text.rich(
                         TextSpan(
                           text: 'How was your reading experience? ',
                           children: [
-                            WidgetSpan(
-                              alignment: PlaceholderAlignment.baseline,
-                              baseline: TextBaseline.alphabetic,
-                              child: GestureDetector(
-                                onTap: () => _leaveFeedback(article),
-                                child: const Text(
-                                  'Leave a feedback to improve einkreader',
-                                  style: TextStyle(
-                                      fontSize: 14,
-                                      decoration: TextDecoration.underline),
-                                ),
-                              ),
+                            TextSpan(
+                              text: 'Leave a feedback to improve einkreader',
+                              style: const TextStyle(
+                                  decoration: TextDecoration.underline),
+                              recognizer: _feedbackTap
+                                ..onTap = () => _leaveFeedback(article),
                             ),
                           ],
                         ),
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 14),
+                        style: const TextStyle(fontSize: 16, height: 1.4),
                       ),
                     ),
                   ),

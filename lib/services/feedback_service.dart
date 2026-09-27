@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../db/app_database.dart';
 import 'app_log.dart';
 import 'nostr_service.dart';
 import 'outbox_service.dart';
@@ -148,30 +149,26 @@ class FeedbackService {
       'npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7';
   static final officialHex = NostrService.decodeNpub(officialNpub);
 
-  /// Top-level feedback, newest first, with reactions and reply counts.
+  final AppDatabase _db = AppDatabase.instance;
+
+  /// Top-level feedback from the local cache only — instant, no network.
+  /// Newest first, with reactions and reply counts.
   Future<({List<FeedbackNote> notes, Map<String, int> replyCounts})>
-      feedback() async {
-    final events = await _nostr.query({
-      'kinds': [1],
-      '#p': [officialHex],
-      'limit': 200,
-    });
-    final all = events.map(FeedbackNote.fromEvent).toList();
-    final roots = all.where((n) => n.rootId == null).toList()
+      cachedFeedback() async {
+    await _loadAddressed();
+    final notes = (await _db.nostrEvents([1]))
+        .map(FeedbackNote.fromEvent)
+        .toList();
+    final roots = notes
+        .where((n) =>
+            n.rootId == null && n.pubkey.isNotEmpty && _addressedToUs(n))
+        .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    // Replies that also tag the official account arrive in the same query;
-    // count them, plus a cheap second query for the rest of each thread.
+    final rootIds = {for (final r in roots) r.id};
     final replyCounts = <String, int>{};
-    if (roots.isNotEmpty) {
-      final replies = await _nostr.query({
-        'kinds': [1],
-        '#e': [for (final r in roots) r.id],
-      });
-      final seen = <String>{};
-      for (final event in [...events, ...replies]) {
-        final note = FeedbackNote.fromEvent(event);
-        final root = note.rootId;
-        if (root == null || !seen.add(note.id)) continue;
+    for (final note in notes) {
+      final root = note.rootId;
+      if (root != null && rootIds.contains(root)) {
         replyCounts[root] = (replyCounts[root] ?? 0) + 1;
       }
     }
@@ -179,21 +176,70 @@ class FeedbackService {
     return (notes: roots, replyCounts: replyCounts);
   }
 
-  /// A feedback note and every reply under it, oldest first (root first).
-  Future<List<FeedbackNote>> thread(String rootId) async {
-    final results = await Future.wait([
-      _nostr.query({
-        'ids': [rootId],
-      }),
-      _nostr.query({
-        'kinds': [1],
-        '#e': [rootId],
-      }),
-    ]);
+  final Set<String> _addressed = {};
+
+  bool _addressedToUs(FeedbackNote note) => _addressed.contains(note.id);
+
+  /// Asks the relays only for what's newer than the cache (a few minutes
+  /// of overlap for clock skew), stores it, and returns the refreshed list.
+  Future<({List<FeedbackNote> notes, Map<String, int> replyCounts})>
+      feedback() async {
+    await _loadAddressed();
+    final latest = await _db.latestNostrEventAt([1, 7]);
+    final since = latest == null ? null : latest - 300;
+    final fresh = await _nostr.query({
+      'kinds': [1],
+      '#p': [officialHex],
+      'limit': 200,
+      if (since != null) 'since': since,
+    });
+    await _db.saveNostrEvents(fresh);
+    _addressed.addAll(_idsAddressedToUs(fresh));
+    final rootIds = (await cachedFeedback()).notes.map((n) => n.id).toList();
+    if (rootIds.isNotEmpty) {
+      final more = await _nostr.query({
+        'kinds': [1, 7],
+        '#e': rootIds,
+        if (since != null) 'since': since,
+      });
+      await _db.saveNostrEvents(more);
+      // Reactions to replies need the reply ids too.
+      final replyIds = (await _db.nostrEvents([1]))
+          .map(FeedbackNote.fromEvent)
+          .where((n) => n.rootId != null && rootIds.contains(n.rootId))
+          .map((n) => n.id)
+          .toList();
+      if (replyIds.isNotEmpty) {
+        await _db.saveNostrEvents(await _nostr.query({
+          'kinds': [7],
+          '#e': replyIds,
+          if (since != null) 'since': since,
+        }));
+      }
+    }
+    return cachedFeedback();
+  }
+
+  /// Which notes are feedback (tag the official account) — recomputed from
+  /// the cache once per service, then kept up to date as events arrive.
+  Future<void> _loadAddressed() async {
+    if (_addressed.isNotEmpty) return;
+    _addressed.addAll(_idsAddressedToUs(await _db.nostrEvents([1])));
+  }
+
+  static Iterable<String> _idsAddressedToUs(
+          Iterable<Map<String, dynamic>> events) =>
+      events
+          .where((e) => (e['tags'] as List? ?? const []).any((t) =>
+              (t as List).length >= 2 && t[0] == 'p' && t[1] == officialHex))
+          .map((e) => e['id'] as String);
+
+  /// A feedback thread from the cache only (root first, then replies).
+  Future<List<FeedbackNote>> cachedThread(String rootId) async {
     final byId = <String, FeedbackNote>{};
-    for (final event in [...results[0], ...results[1]]) {
+    for (final event in await _db.nostrEvents([1])) {
       final note = FeedbackNote.fromEvent(event);
-      byId[note.id] = note;
+      if (note.id == rootId || note.rootId == rootId) byId[note.id] = note;
     }
     final notes = byId.values.toList()
       ..sort((a, b) {
@@ -205,14 +251,46 @@ class FeedbackService {
     return notes;
   }
 
+  /// A feedback note and every reply under it, oldest first (root first):
+  /// fetches what's new for this thread, then reads the cache.
+  Future<List<FeedbackNote>> thread(String rootId) async {
+    final cached = await cachedThread(rootId);
+    final latest = cached.isEmpty
+        ? null
+        : cached
+            .map((n) => n.createdAt.millisecondsSinceEpoch ~/ 1000)
+            .reduce((a, b) => a > b ? a : b);
+    final since = latest == null ? null : latest - 300;
+    final results = await Future.wait([
+      if (cached.isEmpty)
+        _nostr.query({
+          'ids': [rootId],
+        }),
+      _nostr.query({
+        'kinds': [1],
+        '#e': [rootId],
+        if (since != null) 'since': since,
+      }),
+    ]);
+    for (final events in results) {
+      await _db.saveNostrEvents(events);
+    }
+    final ids = (await cachedThread(rootId)).map((n) => n.id).toList();
+    await _db.saveNostrEvents(await _nostr.query({
+      'kinds': [7],
+      '#e': ids,
+      if (since != null) 'since': since,
+    }));
+    return cachedThread(rootId);
+  }
+
   Future<void> _attachReactions(List<FeedbackNote> notes) async {
     if (notes.isEmpty) return;
-    final events = await _nostr.query({
-      'kinds': [7],
-      '#e': [for (final n in notes) n.id],
-    });
     final byId = {for (final n in notes) n.id: n};
-    for (final event in events) {
+    for (final note in notes) {
+      note.reactions.clear();
+    }
+    for (final event in await _db.nostrEvents([7])) {
       final tags = (event['tags'] as List? ?? const [])
           .map((t) => (t as List).map((e) => '$e').toList())
           .where((t) => t.length >= 2 && t[0] == 'e')
@@ -228,6 +306,12 @@ class FeedbackService {
           .putIfAbsent(emoji, () => <String>{})
           .add(event['pubkey'] as String);
     }
+  }
+
+  /// Keeps an event we signed ourselves in the cache, so it shows at once.
+  Future<void> _remember(Map<String, dynamic> event) async {
+    await _db.saveNostrEvents([event]);
+    _addressed.addAll(_idsAddressedToUs([event]));
   }
 
   /// Whether this install can sign (posting and reacting need a profile).
@@ -315,6 +399,7 @@ class FeedbackService {
       final note = FeedbackNote.fromEvent(event);
       final description = 'Feedback: "${draft.subject ?? draft.displayText}"';
       try {
+        await _remember(event);
         final accepted = await _nostr.publish(event);
         await AppLogService.instance.info(
             'Feedback: note ${event['id']} accepted by $accepted relay(s)');
@@ -388,6 +473,7 @@ class FeedbackService {
       ['p', note.pubkey],
       ['k', '1'],
     ]);
+    await _remember(event);
     final accepted = await _nostr.publish(event);
     if (accepted == 0) {
       throw Exception('No relay accepted the reaction');
@@ -404,6 +490,7 @@ class FeedbackService {
           ...tags,
           ['client', 'einkreader'],
         ]);
+    await _remember(event);
     final accepted = await _nostr.publish(event);
     await AppLogService.instance
         .info('Feedback: note ${event['id']} accepted by $accepted relay(s)');

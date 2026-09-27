@@ -38,6 +38,9 @@ class ProfileSummary {
 }
 
 /// The user's fields as edited in the profile modal.
+/// Live check of a wished-for einkreader.app address.
+enum UsernameStatus { invalid, reserved, available, taken, unknown }
+
 class Profile {
   final String name;
   final String about;
@@ -254,6 +257,37 @@ class ProfileService {
   /// Username rule, mirrored by the registration server: 5–20 chars,
   /// lowercase letters, digits and underscore.
   static final usernameRule = RegExp(r'^[a-z0-9_]{5,20}$');
+
+  /// Names the site keeps for itself (mirrors site/lib/registry.js).
+  static const reservedUsernames = {
+    'admin', 'root', 'einkreader', 'support', 'help', 'info', 'contact',
+    'www', 'mail', 'postmaster', 'abuse', 'security', 'nostr', 'reader',
+    'brand', 'branding', 'privacy', 'opensource',
+  };
+
+  /// Whether [name] can be this profile's einkreader.app address, checked
+  /// live against the site (its NIP-05 list). A name already pointing at
+  /// this profile's own key counts as available.
+  Future<UsernameStatus> usernameStatus(String name) async {
+    if (!usernameRule.hasMatch(name)) return UsernameStatus.invalid;
+    if (reservedUsernames.contains(name)) return UsernameStatus.reserved;
+    try {
+      final response = await (debugHttpClient ?? http.Client())
+          .get(Uri.https(
+              nip05Domain, '/.well-known/nostr.json', {'name': name}))
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return UsernameStatus.unknown;
+      final names = (jsonDecode(response.body)
+              as Map<String, dynamic>)['names'] as Map<String, dynamic>? ??
+          const {};
+      final owner = names[name] as String?;
+      if (owner == null) return UsernameStatus.available;
+      final mine = await enabled ? await publicKeyHex : null;
+      return owner == mine ? UsernameStatus.available : UsernameStatus.taken;
+    } catch (_) {
+      return UsernameStatus.unknown; // offline: confirmed at creation
+    }
+  }
 
   /// Test seam: publishes a signed event, returns accepting-relay count.
   @visibleForTesting

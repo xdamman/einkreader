@@ -33,7 +33,10 @@ export async function loadRegistry() {
   const { blobs } = await list({ prefix: BLOB_PATH });
   const blob = blobs.find((b) => b.pathname === BLOB_PATH);
   if (!blob) return {};
-  const res = await fetch(blob.url, { cache: 'no-store' });
+  // The blob CDN caches files (a month by default): read past it, or a
+  // fresh registration stays invisible and the next save could overwrite
+  // it from a stale copy.
+  const res = await fetch(`${blob.url}?v=${Date.now()}`, { cache: 'no-store' });
   if (!res.ok) return {};
   return await res.json();
 }
@@ -44,6 +47,7 @@ export async function saveRegistry(registry) {
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: 'application/json',
+    cacheControlMaxAge: 60,
   });
 }
 

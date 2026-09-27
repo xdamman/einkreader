@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
@@ -75,7 +77,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 13,
+      version: 14,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -229,7 +231,31 @@ class AppDatabase {
       // When each article was read, so the Read tab lists by reading time.
       await _addColumnIfMissing(db, 'articles', 'read_at', 'INTEGER');
     }
+    if (oldVersion < 14) {
+      // Local copy of the Nostr events and profiles behind Feedback, so it
+      // shows instantly and only asks relays for what's new.
+      await db.execute(_createNostrEventsSql);
+      await db.execute(_createNostrProfilesSql);
+    }
   }
+
+  static const _createNostrEventsSql = '''
+      CREATE TABLE IF NOT EXISTS nostr_events (
+        id TEXT PRIMARY KEY,
+        kind INTEGER NOT NULL,
+        pubkey TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        json TEXT NOT NULL
+      )
+    ''';
+
+  static const _createNostrProfilesSql = '''
+      CREATE TABLE IF NOT EXISTS nostr_profiles (
+        pubkey TEXT PRIMARY KEY,
+        json TEXT NOT NULL,
+        fetched_at INTEGER NOT NULL
+      )
+    ''';
 
   static const _createContactsSql = '''
       CREATE TABLE IF NOT EXISTS contacts (
@@ -331,6 +357,8 @@ class AppDatabase {
     await db.execute(_createOutboxSql);
     await db.execute(_createContactsSql);
     await db.execute(_createSharesSql);
+    await db.execute(_createNostrEventsSql);
+    await db.execute(_createNostrProfilesSql);
   }
 
   // ---------------------------------------------------------------- sources
@@ -1290,5 +1318,78 @@ class AppDatabase {
       articles: articles,
       sources: sources,
     );
+  }
+
+  // ------------------------------------------------------------ nostr cache
+
+  /// Stores raw Nostr events (deduplicated by id).
+  Future<void> saveNostrEvents(Iterable<Map<String, dynamic>> events) async {
+    final db = await database;
+    final batch = db.batch();
+    for (final e in events) {
+      final id = e['id'] as String?;
+      if (id == null) continue;
+      batch.insert(
+        'nostr_events',
+        {
+          'id': id,
+          'kind': e['kind'] as int? ?? 0,
+          'pubkey': e['pubkey'] as String? ?? '',
+          'created_at': e['created_at'] as int? ?? 0,
+          'json': jsonEncode(e),
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// Cached raw events of [kinds].
+  Future<List<Map<String, dynamic>>> nostrEvents(List<int> kinds) async {
+    final db = await database;
+    final rows = await db.query('nostr_events',
+        where: 'kind IN (${List.filled(kinds.length, '?').join(',')})',
+        whereArgs: kinds);
+    return [
+      for (final r in rows)
+        jsonDecode(r['json'] as String) as Map<String, dynamic>
+    ];
+  }
+
+  /// Newest cached created_at among [kinds] (null when none cached).
+  Future<int?> latestNostrEventAt(List<int> kinds) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+        'SELECT MAX(created_at) AS latest FROM nostr_events '
+        'WHERE kind IN (${List.filled(kinds.length, '?').join(',')})',
+        kinds);
+    return rows.first['latest'] as int?;
+  }
+
+  /// Stores kind-0 metadata JSON per pubkey.
+  Future<void> saveNostrProfiles(Map<String, String> jsonByPubkey) async {
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final batch = db.batch();
+    jsonByPubkey.forEach((pubkey, json) {
+      batch.insert('nostr_profiles',
+          {'pubkey': pubkey, 'json': json, 'fetched_at': now},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+    await batch.commit(noResult: true);
+  }
+
+  /// Drops the cached Nostr events and profiles (they refill from relays).
+  Future<void> clearNostrCache() async {
+    final db = await database;
+    await db.delete('nostr_events');
+    await db.delete('nostr_profiles');
+  }
+
+  /// Cached profile metadata JSON by pubkey.
+  Future<Map<String, String>> nostrProfiles() async {
+    final db = await database;
+    final rows = await db.query('nostr_profiles');
+    return {for (final r in rows) r['pubkey'] as String: r['json'] as String};
   }
 }

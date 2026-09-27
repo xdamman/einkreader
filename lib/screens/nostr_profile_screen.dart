@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,43 +17,95 @@ import '../widgets/markdown_view.dart';
 import 'feedback_screen.dart';
 import 'profile_screen.dart';
 
-/// Nostr profiles already fetched this session (hex pubkey → profile), so
-/// avatars and names don't refetch when moving between feedback screens.
+/// Nostr profiles by hex pubkey, kept in memory and in the local database:
+/// names and avatars show at once (even offline) and are refreshed from
+/// the relays in the background, once per session per person.
 class NostrProfileCache {
   NostrProfileCache._();
   static final Map<String, NostrProfile> _profiles = {};
+  static final Set<String> _refreshed = {};
+  static bool _storedLoaded = false;
 
   static NostrProfile? get(String pubkey) => _profiles[pubkey];
 
-  /// Fetches whichever of [pubkeys] aren't cached yet (one query).
+  /// Makes [pubkeys]' profiles available: stored ones immediately, missing
+  /// ones fetched (one query), and every one refreshed once per session.
+  /// Returns once the stored and missing ones are in.
   static Future<void> load(Iterable<String> pubkeys,
       {NostrService? nostr}) async {
-    final missing = pubkeys.where((p) => !_profiles.containsKey(p)).toSet();
-    if (missing.isEmpty) return;
+    final wanted = pubkeys.toSet();
+    await _loadStored();
+    final missing = wanted.where((p) => !_profiles.containsKey(p)).toSet();
+    final stale = wanted.difference(missing).difference(_refreshed);
+    if (missing.isNotEmpty) await _fetch(missing, nostr);
+    if (stale.isNotEmpty) unawaited(_fetch(stale, nostr));
+  }
+
+  static Future<void> _fetch(Set<String> pubkeys, NostrService? nostr) async {
+    _refreshed.addAll(pubkeys);
     try {
-      _profiles.addAll(await (nostr ?? NostrService()).fetchProfiles(missing));
+      final fetched =
+          await (nostr ?? NostrService()).fetchProfiles(pubkeys);
+      _profiles.addAll(fetched);
+      await AppDatabase.instance.saveNostrProfiles({
+        for (final p in fetched.values)
+          p.pubkey: jsonEncode({
+            'name': p.name,
+            'about': p.about,
+            'picture': p.picture,
+            'nip05': p.nip05,
+          }),
+      });
     } catch (_) {
-      // Offline or relays down: names fall back to short npubs.
+      // Offline or relays down: stored names (or "Anonymous") stay.
+      _refreshed.removeAll(pubkeys);
+    }
+  }
+
+  static Future<void> _loadStored() async {
+    if (_storedLoaded) return;
+    _storedLoaded = true;
+    try {
+      final stored = await AppDatabase.instance.nostrProfiles();
+      stored.forEach((pubkey, json) {
+        if (_profiles.containsKey(pubkey)) return;
+        final m = jsonDecode(json) as Map<String, dynamic>;
+        _profiles[pubkey] = NostrProfile(
+          pubkey: pubkey,
+          name: m['name'] as String? ?? '',
+          about: m['about'] as String? ?? '',
+          picture: m['picture'] as String? ?? '',
+          nip05: m['nip05'] as String? ?? '',
+        );
+      });
+    } catch (_) {
+      // No database (e.g. some tests): memory only.
     }
   }
 
   /// Adds a profile known locally (e.g. the reader's own, right after
   /// posting) without a relay round trip.
-  static void put(NostrProfile profile) => _profiles[profile.pubkey] = profile;
+  static void put(NostrProfile profile) {
+    _profiles[profile.pubkey] = profile;
+    _refreshed.add(profile.pubkey); // known-fresh: no background refetch
+  }
 
   @visibleForTesting
   static void debugPut(NostrProfile profile) => put(profile);
 
   @visibleForTesting
-  static void debugClear() => _profiles.clear();
+  static void debugClear() {
+    _profiles.clear();
+    _refreshed.clear();
+    _storedLoaded = false;
+  }
 }
 
-/// Display name for a pubkey: its profile name, else a shortened npub.
+/// Display name for a pubkey: its profile name, else "Anonymous" (never an
+/// npub — a key means nothing to a reader).
 String nostrDisplayName(String pubkey) {
   final name = NostrProfileCache.get(pubkey)?.name ?? '';
-  if (name.isNotEmpty) return name;
-  final npub = NostrService.npubEncode(pubkey);
-  return '${npub.substring(0, 10)}…${npub.substring(npub.length - 4)}';
+  return name.isNotEmpty ? name : 'Anonymous';
 }
 
 /// Round avatar: the profile picture, or the name's initial when there is
@@ -345,7 +398,22 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
     final profile = NostrProfileCache.get(widget.pubkey);
     final name = nostrDisplayName(widget.pubkey);
     return Scaffold(
-      appBar: AppBar(title: Text(name)),
+      appBar: AppBar(
+        title: Text(name),
+        actions: [
+          // Loading shows here, not as a big spinner in the page.
+          if (_notes == null && _error == null)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Center(
+                child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+            ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
         children: [
@@ -433,10 +501,7 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
           if (_error != null)
             Text(_error!)
           else if (_notes == null)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator()),
-            )
+            const SizedBox.shrink()
           else if (_otherNotes.isEmpty)
             const Text('No recent notes.')
           else
