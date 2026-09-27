@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import {
   bareAddress,
   buildItem,
+  pdfToMarkdown,
   emailToMarkdown,
   epubToMarkdown,
   firstLink,
@@ -73,6 +74,41 @@ const epub = await zip.generateAsync({ type: 'nodebuffer' });
 const epubMd = await epubToMarkdown(epub);
 assert.match(epubMd, /# Chapter 1/);
 assert.match(epubMd, /Twice\./);
+
+// -- PDF attachments become readable text ----------------------------------
+{
+  // A minimal one-page PDF with a line of text (offsets computed so the
+  // xref table is valid).
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] '
+        + '/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    null, // content stream, below
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  const stream = 'BT /F1 12 Tf 20 100 Td (Quarterly reading report) Tj ET';
+  objects[3] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+  objects.forEach((body, i) => {
+    offsets.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offsets) pdf += `${String(o).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`
+      + `startxref\n${xref}\n%%EOF\n`;
+  const text = await pdfToMarkdown(Buffer.from(pdf, 'latin1'));
+  assert.match(text, /Quarterly reading report/);
+  const item = buildItem({
+    subject: 'Report', from: 'a@b.co', markdown: 'See attached',
+    attachmentsMarkdown: [`## report.pdf\n\n${text}`], documents: 1,
+  });
+  assert.equal(item.documents, 1);
+  assert.match(item.markdown, /## report\.pdf/);
+}
 
 // -- a shared article: inline preview image dropped, link kept -------------
 const shared = emailToMarkdown({
