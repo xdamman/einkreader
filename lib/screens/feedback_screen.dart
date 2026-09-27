@@ -61,9 +61,17 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   }
 
   Future<void> _newFeedback() async {
-    final note = await openNewFeedback(context, service: _service);
-    if (note == null || !mounted) return;
-    setState(() => _notes = [note, ...?_notes]);
+    final posting = await openNewFeedback(context, service: _service);
+    if (posting == null || !mounted) return;
+    final draft = posting.draft;
+    setState(() => _notes = [draft, ...?_notes]);
+    // The draft becomes the real note (openable, reactable) once sent.
+    final sent = await posting.sent;
+    if (!mounted) return;
+    setState(() => _notes = [
+          for (final n in _notes ?? const <FeedbackNote>[])
+            n.id == draft.id ? sent.note : n
+        ]);
   }
 
   Future<void> _openThread(FeedbackNote note) async {
@@ -134,7 +142,8 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                   canPost: _canPost,
                   service: _service,
                   replyCount: _replyCounts[note.id] ?? 0,
-                  onTap: () => _openThread(note),
+                  compact: true,
+                  onTap: note.sending ? null : () => _openThread(note),
                   onReply: () => _openThread(note),
                   onChanged: () => setState(() {}),
                 ),
@@ -378,6 +387,10 @@ class FeedbackNoteTile extends StatelessWidget {
   final int? replyCount;
   final bool large;
 
+  /// In the list: the text is cut to a few lines and images are left out,
+  /// so more feedback fits on the screen; the thread shows it all.
+  final bool compact;
+
   /// Pubkey of the reply's parent, shown as "replying to …" when the note
   /// answers a reply rather than the thread's root.
   final String? replyingTo;
@@ -395,6 +408,7 @@ class FeedbackNoteTile extends StatelessWidget {
     required this.onChanged,
     this.replyCount,
     this.large = false,
+    this.compact = false,
     this.replyingTo,
     this.onTap,
   });
@@ -487,7 +501,7 @@ class FeedbackNoteTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             GestureDetector(
-              onTap: () => openNostrProfile(context, note.pubkey),
+              onTap: () => openNostrProfile(context, note.pubkey, me: me),
               child: NostrAvatar(pubkey: note.pubkey, size: large ? 48 : 40),
             ),
             const SizedBox(width: 12),
@@ -499,7 +513,7 @@ class FeedbackNoteTile extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       GestureDetector(
-                        onTap: () => openNostrProfile(context, note.pubkey),
+                        onTap: () => openNostrProfile(context, note.pubkey, me: me),
                         child: Text(name,
                             style: const TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
@@ -510,7 +524,7 @@ class FeedbackNoteTile extends StatelessWidget {
                   ),
                   if (replyingTo != null)
                     GestureDetector(
-                      onTap: () => openNostrProfile(context, replyingTo!),
+                      onTap: () => openNostrProfile(context, replyingTo!, me: me),
                       child: Text('replying to ${nostrDisplayName(replyingTo!)}',
                           style: const TextStyle(
                               fontSize: 13, fontStyle: FontStyle.italic)),
@@ -520,64 +534,92 @@ class FeedbackNoteTile extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 2),
                       child: Text(note.subject!,
+                          maxLines: compact ? 2 : null,
+                          overflow: compact ? TextOverflow.ellipsis : null,
                           style: TextStyle(
                               fontSize: large ? 20 : 17,
                               fontWeight: FontWeight.w700)),
                     ),
-                  if (note.displayText.isNotEmpty)
+                  if (compact) ...[
+                    if (note.displayText.isNotEmpty)
+                      Text(plainPreview(note.displayText),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 16, height: 1.4)),
+                    if (note.images.isNotEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Row(
+                          children: [
+                            Icon(Icons.image_outlined, size: 16),
+                            SizedBox(width: 4),
+                            Text('Screenshot', style: TextStyle(fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                  ] else if (note.displayText.isNotEmpty)
                     MarkdownView(
                         markdown: note.displayText,
                         fontSize: large ? 18 : 16),
-                  for (final image in note.images)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8, bottom: 4),
-                      child: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(maxHeight: large ? 480 : 240),
-                        child: Container(
-                          decoration:
-                              BoxDecoration(border: Border.all(width: 1)),
-                          child: Image.network(image,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => Padding(
-                                    padding: const EdgeInsets.all(8),
-                                    child: Text('[screenshot: $image]',
-                                        style:
-                                            const TextStyle(fontSize: 13)),
-                                  )),
+                  if (!compact)
+                    for (final image in note.images)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8, bottom: 4),
+                        child: ConstrainedBox(
+                          constraints:
+                              BoxConstraints(maxHeight: large ? 480 : 240),
+                          child: Container(
+                            decoration:
+                                BoxDecoration(border: Border.all(width: 1)),
+                            child: Image.network(image,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) => Padding(
+                                      padding: const EdgeInsets.all(8),
+                                      child: Text('[screenshot: $image]',
+                                          style:
+                                              const TextStyle(fontSize: 13)),
+                                    )),
+                          ),
                         ),
                       ),
+                  if (note.sending)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      child: Text('Sending…',
+                          style: TextStyle(
+                              fontSize: 13, fontStyle: FontStyle.italic)),
+                    )
+                  else
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        for (final entry in sortedReactions)
+                          _ReactionChip(
+                            emoji: entry.key,
+                            count: entry.value.length,
+                            mine: me != null && entry.value.contains(me),
+                            onTap: () => _react(context, entry.key),
+                          ),
+                        Builder(
+                          builder: (buttonContext) => IconButton(
+                            tooltip: 'React',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.add_reaction_outlined,
+                                size: 20),
+                            onPressed: () => _pickReaction(buttonContext),
+                          ),
+                        ),
+                        TextButton.icon(
+                          icon: const Icon(Icons.reply, size: 18),
+                          label: Text(replyCount == null || replyCount == 0
+                              ? 'Reply'
+                              : '$replyCount repl${replyCount == 1 ? 'y' : 'ies'}'),
+                          onPressed: onReply,
+                        ),
+                      ],
                     ),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      for (final entry in sortedReactions)
-                        _ReactionChip(
-                          emoji: entry.key,
-                          count: entry.value.length,
-                          mine: me != null && entry.value.contains(me),
-                          onTap: () => _react(context, entry.key),
-                        ),
-                      Builder(
-                        builder: (buttonContext) => IconButton(
-                          tooltip: 'React',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.add_reaction_outlined,
-                              size: 20),
-                          onPressed: () => _pickReaction(buttonContext),
-                        ),
-                      ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.reply, size: 18),
-                        label: Text(replyCount == null || replyCount == 0
-                            ? 'Reply'
-                            : '$replyCount repl${replyCount == 1 ? 'y' : 'ies'}'),
-                        onPressed: onReply,
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
@@ -698,9 +740,9 @@ Future<String?> composeNote(
 /// Opens the new-feedback form (after making sure the reader has a
 /// profile to post with). [url] prefills the link, e.g. the article the
 /// feedback is about; [screenshot] (the screen it was opened from) is
-/// attached by default and can be removed in one tap. Returns the posted
-/// note, or null.
-Future<FeedbackNote?> openNewFeedback(BuildContext context,
+/// attached by default and can be removed in one tap. Returns the
+/// feedback being sent (the form closes at once), or null.
+Future<SentFeedback?> openNewFeedback(BuildContext context,
     {FeedbackService? service,
     String? url,
     String? subject,
@@ -708,7 +750,7 @@ Future<FeedbackNote?> openNewFeedback(BuildContext context,
   final feedback = service ?? FeedbackService();
   if (!await ensureCanPost(context, feedback)) return null;
   if (!context.mounted) return null;
-  return Navigator.of(context).push<FeedbackNote>(MaterialPageRoute(
+  return Navigator.of(context).push<SentFeedback>(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (_) => NewFeedbackScreen(
         service: feedback,
@@ -790,23 +832,28 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      final shot = _includeScreenshot ? widget.screenshot : null;
-      final imageUrl =
-          shot == null ? null : await widget.service.uploadScreenshot(shot);
-      final note = await widget.service.post(_body.text,
-          subject: _subject.text, url: _url.text, imageUrl: imageUrl);
-      // Our own name and picture are already known: no relay round trip
-      // before the form closes.
+      // Signed locally: the form closes right away while the screenshot
+      // uploads and the relays answer in the background.
+      final posting = await widget.service.submit(_body.text,
+          subject: _subject.text,
+          url: _url.text,
+          screenshot: _includeScreenshot ? widget.screenshot : null);
+      // Our own name and picture are already known: no relay round trip.
       final me = await widget.service.identity();
       NostrProfileCache.put(NostrProfile(
-          pubkey: note.pubkey, name: me.name, picture: me.picture));
+          pubkey: posting.draft.pubkey, name: me.name, picture: me.picture));
       messenger.showSnackBar(
           const SnackBar(content: Text('Feedback posted — thank you!')));
-      navigator.pop(note);
+      posting.sent.then((sent) {
+        if (!sent.queued) return;
+        messenger.showSnackBar(const SnackBar(
+            content: Text('No connection — your feedback waits in the '
+                'outbox and goes out on the next sync')));
+      });
+      navigator.pop(posting);
     } catch (e) {
       messenger.showSnackBar(SnackBar(
           content: Text(friendlyError(e, doing: 'posting feedback'))));
-    } finally {
       if (mounted) setState(() => _posting = false);
     }
   }
@@ -962,3 +1009,13 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
     );
   }
 }
+
+/// A note's text as one plain paragraph for the list preview: markdown
+/// marks dropped, links reduced to their text, lines joined.
+String plainPreview(String markdown) => markdown
+    .replaceAllMapped(RegExp(r'!?\[([^\]]*)\]\([^)]*\)'), (m) => m[1]!)
+    .replaceAll(
+        RegExp(r'^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+', multiLine: true), '')
+    .replaceAll(RegExp(r'\*{1,3}|`+|~~'), '')
+    .replaceAll(RegExp(r'\s*\n+\s*'), ' ')
+    .trim();

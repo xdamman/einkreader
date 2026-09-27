@@ -9,6 +9,7 @@ import 'package:einkreader/screens/feedback_screen.dart';
 import 'package:einkreader/screens/nostr_profile_screen.dart';
 import 'package:einkreader/services/feedback_service.dart';
 import 'package:einkreader/services/nostr_service.dart';
+import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/markdown_view.dart';
@@ -62,6 +63,14 @@ class _FakeRelay extends NostrService {
   Future<Map<String, NostrProfile>> fetchProfiles(
           Iterable<String> hexPubkeys) async =>
       {};
+}
+
+/// No relay reachable: every publish is refused.
+class _OfflineRelay extends _FakeRelay {
+  @override
+  Future<int> publish(Map<String, dynamic> event,
+          {Duration timeout = const Duration(seconds: 8)}) async =>
+      0;
 }
 
 /// Uploads nowhere: returns a fixed URL for the screenshot.
@@ -158,7 +167,11 @@ void main() {
         pubkey: author, name: 'Ada', about: 'Reads on paper.'));
     NostrProfileScreen.debugLoadNotes = (_) async =>
         const [NostrItem(id: 'x', content: 'an older note by Ada')];
-    addTearDown(() => NostrProfileScreen.debugLoadNotes = null);
+    NostrProfileScreen.debugLoadActivity = (_) async => const [];
+    addTearDown(() {
+      NostrProfileScreen.debugLoadNotes = null;
+      NostrProfileScreen.debugLoadActivity = null;
+    });
     relay.events.add({
       'id': 'f1',
       'pubkey': author,
@@ -267,7 +280,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    FeedbackNote? posted;
+    SentFeedback? posted;
     await tester.pumpWidget(MaterialApp(
       theme: buildEinkTheme(),
       home: Scaffold(
@@ -340,6 +353,9 @@ void main() {
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
+    expect(posted, isNotNull, reason: 'the form closes with the feedback');
+    expect(find.text('Post feedback'), findsNothing);
+    await tester.runAsync(() => posted!.sent);
 
     expect(feedback.uploaded, shot);
     final event = relay.events.last;
@@ -347,7 +363,6 @@ void main() {
     expect(event['tags'],
         anyElement(equals(['r', 'https://example.org/other'])));
     expect(event['content'], contains('https://blossom.example/abc123.jpg'));
-    expect(posted, isNotNull, reason: 'the form returns the posted note');
     // Let the "Feedback posted" snackbar time out.
     await tester.pump(const Duration(seconds: 5));
   });
@@ -383,6 +398,114 @@ void main() {
     expect(feedback.uploaded, isNull);
     expect(relay.events.last['content'], isNot(contains('blossom')));
     await tester.pump(const Duration(seconds: 5));
+  });
+
+  test('new feedback is shown at once and queued in the outbox when offline',
+      () async {
+    await ProfileService.instance.createIdentity();
+    final offline = FeedbackService(nostr: _OfflineRelay());
+    final posting =
+        await offline.submit('Posting should be instant', subject: 'Speed');
+    expect(posting.draft.sending, isTrue);
+    expect(posting.draft.subject, 'Speed');
+    expect(posting.draft.pubkey, await offline.myPubkey);
+
+    final sent = await posting.sent;
+    expect(sent.queued, isTrue);
+    expect(sent.note.sending, isFalse);
+    final queued = await OutboxService.instance.items();
+    expect(queued, hasLength(1));
+    expect(queued.single.kind, 'nostr');
+    expect(queued.single.payload, contains(sent.note.id));
+    await OutboxService.instance.delete(queued.single.id!);
+  });
+
+  testWidgets('the list keeps each feedback to a few lines', (tester) async {
+    relay.events.add({
+      'id': 'long',
+      'pubkey':
+          '2222222222222222222222222222222222222222222222222222222222222222',
+      'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'kind': 1,
+      'tags': [
+        ['p', FeedbackService.officialHex]
+      ],
+      'content': List.filled(40, '**Long** feedback line.').join('\n'),
+    });
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    final preview = tester.widget<Text>(
+        find.textContaining('Long feedback line.'));
+    expect(preview.maxLines, 3);
+    expect(preview.data, isNot(contains('**')));
+    expect(find.byType(MarkdownView), findsNothing,
+        reason: 'the full text shows in the thread');
+  });
+
+  test('list previews are plain text', () {
+    expect(plainPreview('# Title\n\nSee [this](https://x.org) **now**'),
+        'Title See this now');
+  });
+
+  testWidgets('a profile shows their shared highlights and feedback',
+      (tester) async {
+    const author =
+        '3333333333333333333333333333333333333333333333333333333333333333';
+    NostrProfileCache.debugPut(const NostrProfile(
+        pubkey: author, name: 'Grace', nip05: 'grace_h@einkreader.app'));
+    NostrProfileScreen.debugLoadNotes = (_) async =>
+        const [NostrItem(id: 'fb', content: 'Bigger margins please')];
+    NostrProfileScreen.debugLoadActivity = (_) async => [
+          {
+            'id': 'hl',
+            'pubkey': author,
+            'created_at': 1700000000,
+            'kind': 9802,
+            'tags': [
+              ['title', 'On Reading'],
+              ['comment', 'So true'],
+            ],
+            'content': 'Reading is thinking with a borrowed mind.',
+          },
+          {
+            'id': 'fb',
+            'pubkey': author,
+            'created_at': 1700000100,
+            'kind': 1,
+            'tags': [
+              ['p', FeedbackService.officialHex],
+              ['subject', 'Margins'],
+            ],
+            'content': 'Margins\n\nBigger margins please',
+          },
+        ];
+    addTearDown(() {
+      NostrProfileScreen.debugLoadNotes = null;
+      NostrProfileScreen.debugLoadActivity = null;
+    });
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(),
+        home: const NostrProfileScreen(pubkey: author)));
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+    expect(find.text('SHARED HIGHLIGHTS · 1'), findsOneWidget);
+    expect(find.text('Reading is thinking with a borrowed mind.'),
+        findsOneWidget);
+    expect(find.text('So true'), findsOneWidget);
+    expect(find.text('FEEDBACK · 1'), findsOneWidget);
+    expect(find.text('Margins'), findsOneWidget);
+    expect(find.text('No recent notes.'), findsOneWidget,
+        reason: 'feedback is not repeated among the notes');
+    expect(find.text('Public page'), findsOneWidget);
   });
 
   test('horizontal rules at the edges of an article are dropped', () {

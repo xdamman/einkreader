@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_log.dart';
 import 'nostr_service.dart';
+import 'outbox_service.dart';
 import 'profile_service.dart';
 
 /// One public note (kind 1) in the feedback space, with what the reader
@@ -41,8 +42,14 @@ class FeedbackNote {
     this.replyToId,
     this.subject,
     this.images = const [],
+    this.sending = false,
     Map<String, Set<String>>? reactions,
   }) : reactions = reactions ?? {};
+
+  /// A just-written note still on its way (screenshot uploading, relays
+  /// not answered yet): shown in the list, not yet something to open,
+  /// reply to or react to.
+  final bool sending;
 
   static final _imageUrl = RegExp(
       r'https?://\S+\.(?:png|jpe?g|gif|webp)(?:\?\S*)?',
@@ -108,6 +115,16 @@ class FeedbackNote {
       replyToId: reply ?? root,
     );
   }
+}
+
+/// A feedback being posted: the local [draft] to show right away, and
+/// [sent], the signed note once it's out (`queued` when it waits in the
+/// outbox).
+class SentFeedback {
+  final FeedbackNote draft;
+  final Future<({FeedbackNote note, bool queued})> sent;
+
+  const SentFeedback({required this.draft, required this.sent});
 }
 
 /// In-app feedback, held entirely on Nostr: public notes addressed to the
@@ -254,30 +271,102 @@ class FeedbackService {
     return img.encodeJpg(resized, quality: 85);
   }
 
-  /// Posts a new top-level feedback note addressed to the official account.
-  /// The subject (NIP-14 tag, also the first line so every client shows
-  /// it), link and screenshot (NIP-92 imeta, also its URL in the text) are
-  /// optional.
-  Future<FeedbackNote> post(String body,
+  /// Posts new feedback without making the reader wait on the network:
+  /// [SentFeedback.draft] is a local copy to show at once, and
+  /// [SentFeedback.sent] completes once the screenshot is uploaded and the
+  /// signed note is out, or queued in the outbox when no relay could be
+  /// reached (the outbox retries it on the next sync). A screenshot whose
+  /// upload fails is left out rather than holding the feedback back.
+  Future<SentFeedback> submit(String body,
+      {String? subject, String? url, Uint8List? screenshot}) async {
+    final local = FeedbackNote.fromEvent({
+      'id': 'sending-${DateTime.now().microsecondsSinceEpoch}',
+      'pubkey': await _profile.publicKeyHex,
+      'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'content': _content(body, subject: subject, url: url),
+      'tags': _tags(subject: subject, url: url),
+    });
+    final draft = FeedbackNote(
+        id: local.id,
+        pubkey: local.pubkey,
+        content: local.content,
+        createdAt: local.createdAt,
+        subject: local.subject,
+        sending: true);
+
+    Future<({FeedbackNote note, bool queued})> send() async {
+      String? imageUrl;
+      if (screenshot != null) {
+        try {
+          imageUrl = await uploadScreenshot(screenshot);
+        } catch (e) {
+          await AppLogService.instance
+              .warn('Feedback: screenshot upload failed, posting without: $e');
+        }
+      }
+      final event = await _profile.signEvent(
+          kind: 1,
+          content:
+              _content(body, subject: subject, url: url, imageUrl: imageUrl),
+          tags: [
+            ..._tags(subject: subject, url: url, imageUrl: imageUrl),
+            ['client', 'einkreader'],
+          ]);
+      final note = FeedbackNote.fromEvent(event);
+      final description = 'Feedback: "${draft.subject ?? draft.displayText}"';
+      try {
+        final accepted = await _nostr.publish(event);
+        await AppLogService.instance.info(
+            'Feedback: note ${event['id']} accepted by $accepted relay(s)');
+        if (accepted > 0) return (note: note, queued: false);
+        await OutboxService.instance.enqueueNostrEvent(event,
+            description: description, error: 'No relay accepted the note');
+      } catch (e) {
+        await OutboxService.instance
+            .enqueueNostrEvent(event, description: description, error: '$e');
+      }
+      return (note: note, queued: true);
+    }
+
+    return SentFeedback(draft: draft, sent: send());
+  }
+
+  /// The note's text: the subject first (NIP-14 tag, also the first line
+  /// so every client shows it), then the body, link and screenshot URL.
+  static String _content(String body,
       {String? subject, String? url, String? imageUrl}) {
     final s = subject?.trim() ?? '';
     final link = url?.trim() ?? '';
-    final content = [
+    return [
       if (s.isNotEmpty) s,
       body.trim(),
       if (link.isNotEmpty) link,
       if (imageUrl != null) imageUrl,
     ].where((part) => part.isNotEmpty).join('\n\n');
-    return _publish(
-      content: content,
-      tags: [
-        ['p', officialHex],
-        if (s.isNotEmpty) ['subject', s],
-        if (link.isNotEmpty) ['r', link],
-        if (imageUrl != null) ['imeta', 'url $imageUrl', 'm image/jpeg'],
-      ],
-    );
   }
+
+  static List<List<String>> _tags(
+      {String? subject, String? url, String? imageUrl}) {
+    final s = subject?.trim() ?? '';
+    final link = url?.trim() ?? '';
+    return [
+      ['p', officialHex],
+      if (s.isNotEmpty) ['subject', s],
+      if (link.isNotEmpty) ['r', link],
+      if (imageUrl != null) ['imeta', 'url $imageUrl', 'm image/jpeg'],
+    ];
+  }
+
+  /// Posts a new top-level feedback note addressed to the official account.
+  /// The subject (NIP-14 tag, also the first line so every client shows
+  /// it), link and screenshot (NIP-92 imeta, also its URL in the text) are
+  /// optional.
+  Future<FeedbackNote> post(String body,
+      {String? subject, String? url, String? imageUrl}) =>
+      _publish(
+        content: _content(body, subject: subject, url: url, imageUrl: imageUrl),
+        tags: _tags(subject: subject, url: url, imageUrl: imageUrl),
+      );
 
   /// Replies inside a thread (NIP-10 marked e-tags), notifying the author
   /// of the note answered and the official account.

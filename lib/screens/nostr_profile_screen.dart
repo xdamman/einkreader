@@ -5,10 +5,16 @@ import 'package:flutter/services.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../services/errors.dart';
+import '../services/feedback_service.dart';
 import '../services/nostr_service.dart';
+import '../services/profile_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/markdown_view.dart';
+import 'feedback_screen.dart';
+import 'profile_screen.dart';
 
 /// Nostr profiles already fetched this session (hex pubkey → profile), so
 /// avatars and names don't refetch when moving between feedback screens.
@@ -87,13 +93,18 @@ class NostrAvatar extends StatelessWidget {
 }
 
 /// Opens [pubkey]'s profile natively (not in a browser or another app).
-Future<void> openNostrProfile(BuildContext context, String pubkey) =>
+/// The reader's own ([me]) opens their own profile screen.
+Future<void> openNostrProfile(BuildContext context, String pubkey,
+        {String? me}) =>
     Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => NostrProfileScreen(pubkey: pubkey)));
+        builder: (_) => pubkey == me
+            ? const ProfileScreen()
+            : NostrProfileScreen(pubkey: pubkey)));
 
-/// Anyone's Nostr profile, read-only: picture, name, bio, npub, their
-/// recent notes, and a Follow button that adds their notes and long reads
-/// as sources.
+/// Anyone's Nostr profile, read-only — the app's view of their public
+/// page: picture, name, bio, npub, the highlights they shared, the
+/// feedback they posted about einkreader, their recent notes, and a Follow
+/// button that adds their notes and long reads as sources.
 class NostrProfileScreen extends StatefulWidget {
   final String pubkey; // hex
 
@@ -106,6 +117,12 @@ class NostrProfileScreen extends StatefulWidget {
   @visibleForTesting
   static Future<List<NostrItem>> Function(String npub)? debugLoadNotes;
 
+  /// Test seam: the author's shared highlights (kind 9802) and feedback
+  /// notes, as raw events, instead of querying relays.
+  @visibleForTesting
+  static Future<List<Map<String, dynamic>>> Function(String pubkey)?
+      debugLoadActivity;
+
   @override
   State<NostrProfileScreen> createState() => _NostrProfileScreenState();
 }
@@ -114,6 +131,8 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
   final _db = AppDatabase.instance;
   late final String _npub = NostrService.npubEncode(widget.pubkey);
   List<NostrItem>? _notes;
+  List<Map<String, dynamic>> _highlights = [];
+  List<FeedbackNote> _feedback = [];
   bool _following = false;
   bool _followBusy = false;
   String? _error;
@@ -134,6 +153,9 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
           (s.type == SourceType.nostrNotes ||
               s.type == SourceType.nostrLongReads));
     });
+    // Highlights and feedback fill in alongside the notes; a failure there
+    // only leaves those sections out.
+    unawaited(_loadActivity());
     try {
       final notes = await (widget.loadNotes ??
           NostrProfileScreen.debugLoadNotes ??
@@ -145,6 +167,150 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
       setState(() => _error = friendlyError(e, doing: 'loading notes'));
     }
   }
+
+  Future<void> _loadActivity() async {
+    try {
+      final events = await (NostrProfileScreen.debugLoadActivity ??
+          (pubkey) async {
+            final nostr = NostrService();
+            final results = await Future.wait([
+              nostr.fetchHighlightEvents(pubkey),
+              nostr.query({
+                'kinds': [1],
+                'authors': [pubkey],
+                '#p': [FeedbackService.officialHex],
+                'limit': 50,
+              }),
+            ]);
+            return [...results[0], ...results[1]];
+          })(widget.pubkey);
+      final highlights = events
+          .where((e) => e['kind'] == 9802 && e['pubkey'] == widget.pubkey)
+          .toList()
+        ..sort((a, b) => ((b['created_at'] as int?) ?? 0)
+            .compareTo((a['created_at'] as int?) ?? 0));
+      final feedback = events
+          .where((e) => e['kind'] == 1 && e['pubkey'] == widget.pubkey)
+          .map(FeedbackNote.fromEvent)
+          .where((n) => n.rootId == null)
+          .toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      if (!mounted) return;
+      setState(() {
+        _highlights = highlights;
+        _feedback = feedback;
+      });
+    } catch (_) {
+      // Offline or relays down: the notes section says so already.
+    }
+  }
+
+  /// Recent notes minus the feedback, which has its own section.
+  List<NostrItem> get _otherNotes {
+    final feedbackIds = {for (final n in _feedback) n.id};
+    return [
+      for (final n in _notes ?? const <NostrItem>[])
+        if (!feedbackIds.contains(n.id)) n
+    ];
+  }
+
+  /// Their page on the einkreader site, when they registered a name there.
+  static Uri? _publicPage(NostrProfile? profile) {
+    const suffix = '@${ProfileService.nip05Domain}';
+    final nip05 = profile?.nip05.toLowerCase() ?? '';
+    if (!nip05.endsWith(suffix)) return null;
+    final name = nip05.substring(0, nip05.length - suffix.length);
+    return name.isEmpty
+        ? null
+        : Uri.https(ProfileService.nip05Domain, '/$name');
+  }
+
+  static String? _tag(Map<String, dynamic> event, String name) {
+    for (final tag in (event['tags'] as List? ?? const [])) {
+      final t = (tag as List).map((e) => '$e').toList();
+      if (t.length >= 2 && t[0] == name && t[1].trim().isNotEmpty) {
+        return t[1].trim();
+      }
+    }
+    return null;
+  }
+
+  Widget _heading(String text) => Padding(
+        padding: const EdgeInsets.only(top: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(text,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2)),
+            const Divider(height: 16),
+          ],
+        ),
+      );
+
+  Widget _highlightTile(Map<String, dynamic> event) {
+    final title = _tag(event, 'title');
+    final comment = _tag(event, 'comment');
+    final created = DateTime.fromMillisecondsSinceEpoch(
+        ((event['created_at'] as int?) ?? 0) * 1000);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (title != null)
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          Container(
+            margin: const EdgeInsets.only(top: 6),
+            padding: const EdgeInsets.only(left: 12),
+            decoration: const BoxDecoration(
+                border: Border(left: BorderSide(width: 3))),
+            child: Text((event['content'] as String?) ?? '',
+                maxLines: 6,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 16, fontStyle: FontStyle.italic, height: 1.4)),
+          ),
+          if (comment != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(comment, style: const TextStyle(fontSize: 15)),
+            ),
+          Text(relativeTime(created), style: const TextStyle(fontSize: 13)),
+        ],
+      ),
+    );
+  }
+
+  Widget _feedbackTile(FeedbackNote note) => InkWell(
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => FeedbackThreadScreen(root: note))),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (note.subject != null)
+                Text(note.subject!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w700)),
+              if (note.displayText.isNotEmpty)
+                Text(plainPreview(note.displayText),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 15, height: 1.4)),
+              Text(relativeTime(note.createdAt),
+                  style: const TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+      );
 
   Future<void> _follow() async {
     setState(() => _followBusy = true);
@@ -229,27 +395,41 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              icon: Icon(_following ? Icons.check : Icons.add),
-              label: Text(_following
-                  ? 'Following'
-                  : _followBusy
-                      ? 'Following…'
-                      : 'Follow'),
-              style: OutlinedButton.styleFrom(
-                  side: const BorderSide(width: 1.5)),
-              onPressed: _following || _followBusy ? null : _follow,
-            ),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                icon: Icon(_following ? Icons.check : Icons.add),
+                label: Text(_following
+                    ? 'Following'
+                    : _followBusy
+                        ? 'Following…'
+                        : 'Follow'),
+                style: OutlinedButton.styleFrom(
+                    side: const BorderSide(width: 1.5)),
+                onPressed: _following || _followBusy ? null : _follow,
+              ),
+              if (_publicPage(profile) case final page?)
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.public),
+                  label: const Text('Public page'),
+                  style: OutlinedButton.styleFrom(
+                      side: const BorderSide(width: 1.5)),
+                  onPressed: () =>
+                      launchUrl(page, mode: LaunchMode.externalApplication),
+                ),
+            ],
           ),
-          const SizedBox(height: 24),
-          const Text('RECENT NOTES',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2)),
-          const Divider(height: 16),
+          if (_highlights.isNotEmpty) ...[
+            _heading('SHARED HIGHLIGHTS · ${_highlights.length}'),
+            for (final event in _highlights) _highlightTile(event),
+          ],
+          if (_feedback.isNotEmpty) ...[
+            _heading('FEEDBACK · ${_feedback.length}'),
+            for (final note in _feedback) _feedbackTile(note),
+          ],
+          _heading('RECENT NOTES'),
           if (_error != null)
             Text(_error!)
           else if (_notes == null)
@@ -257,10 +437,10 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
               padding: EdgeInsets.all(24),
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (_notes!.isEmpty)
+          else if (_otherNotes.isEmpty)
             const Text('No recent notes.')
           else
-            for (final note in _notes!) ...[
+            for (final note in _otherNotes) ...[
               if (note.createdAt != null)
                 Text(relativeTime(note.createdAt!),
                     style: const TextStyle(fontSize: 13)),
