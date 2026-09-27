@@ -1,0 +1,20 @@
+# systemd user service for the einkreader feedback bot.
+# Install:  ln -sf "$PWD/infra/feedback-bot/einkreader-feedback.service" \
+#             ~/.config/systemd/user/ && systemctl --user daemon-reload && \
+#           systemctl --user enable --now einkreader-feedback
+# (Starts at boot without a login because lingering is enabled.)
+[Unit]
+Description=einkreader feedback bot (Nostr feedback -> Claude Code -> release)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/github/xdamman/einkreader
+ExecStart=/usr/bin/python3 %h/github/xdamman/einkreader/infra/feedback-bot/bot.py
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
