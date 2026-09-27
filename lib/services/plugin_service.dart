@@ -14,7 +14,9 @@ class PluginService {
   Future<bool> get twitterOn async =>
       (await _prefs).getBool(_kTwitterOn) ?? false;
 
-  Future<bool> get emailOn async => (await _prefs).getBool(_kEmailOn) ?? false;
+  // On by default: the Inbox (name@einkreader.app) should just work once
+  // a profile exists, not wait for a switch to be found.
+  Future<bool> get emailOn async => (await _prefs).getBool(_kEmailOn) ?? true;
 
   Future<void> setTwitterOn(bool on) async =>
       (await _prefs).setBool(_kTwitterOn, on);

@@ -388,30 +388,46 @@ class ProfileService {
     return name == null ? null : '$name@$nip05Domain';
   }
 
-  /// The one email address allowed to send content to name@einkreader.app
-  /// (empty = the email-to-feed feature is off).
-  Future<String> get allowedSender async =>
-      (await SharedPreferences.getInstance())
-          .getString(await _k(_kAllowedSender)) ??
-      '';
+  /// The email addresses allowed to send content straight to
+  /// name@einkreader.app (lowercase, one per line in storage). Mail from
+  /// anyone else waits in the Inbox as a request to accept or delete.
+  Future<List<String>> get allowedSenders async {
+    final raw = (await SharedPreferences.getInstance())
+            .getString(await _k(_kAllowedSender)) ??
+        '';
+    return raw
+        .split('\n')
+        .map((s) => s.trim().toLowerCase())
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .toList();
+  }
 
-  /// Stores the allowed sender and pushes it to the registration server
-  /// (via a re-registration of the same name — idempotent). When offline the
-  /// server update rides the pending-username retry at the next save.
-  Future<void> setAllowedSender(String sender) async {
+  /// Stores the accepted senders and pushes them to the registration
+  /// server (a re-registration of the same name — idempotent). Returns
+  /// false when the server couldn't be reached; the list is still saved
+  /// locally and rides the next registration retry.
+  Future<bool> setAllowedSenders(List<String> senders) async {
     final prefs = await SharedPreferences.getInstance();
-    final normalized = sender.trim().toLowerCase();
-    if (normalized == (await allowedSender)) return;
-    await prefs.setString(await _k(_kAllowedSender), normalized);
+    final normalized = senders
+        .map((s) => s.trim().toLowerCase())
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .toList();
+    await prefs.setString(await _k(_kAllowedSender), normalized.join('\n'));
     final name = await username ?? await pendingUsername;
-    if (name != null) {
-      try {
-        await registerUsername(name);
-      } on UsernameTakenException {
-        // Can't happen for our own name; ignore defensively.
-      }
+    if (name == null) return false;
+    try {
+      return await registerUsername(name);
+    } on UsernameTakenException {
+      // Can't happen for our own name; ignore defensively.
+      return false;
     }
   }
+
+  /// Adds one accepted sender (e.g. accepting an Inbox request).
+  Future<bool> addAllowedSender(String sender) async =>
+      setAllowedSenders([...await allowedSenders, sender]);
 
   /// Authorization header for the inbox API: a fresh signed proof-of-key.
   Future<String> inboxAuthHeader() async {
@@ -431,7 +447,7 @@ class ProfileService {
     }
     final prefs = await SharedPreferences.getInstance();
     final event = await signEvent(kind: 27235, content: name);
-    final sender = await allowedSender;
+    final senders = await allowedSenders;
     try {
       final response = await (debugHttpClient ?? http.Client())
           .post(
@@ -441,7 +457,7 @@ class ProfileService {
               'name': name,
               'pubkey': await publicKeyHex,
               'event': event,
-              if (sender.isNotEmpty) 'sender': sender,
+              'senders': senders,
             }),
           )
           .timeout(const Duration(seconds: 15));

@@ -75,21 +75,40 @@ export function verifyAuthEvent(event, { name, nowSeconds, maxAgeSeconds = 600 }
   return ok ? null : 'bad signature';
 }
 
-// Registry values are objects { pubkey, sender? } where sender is the one
-// email address allowed to mail content to name@einkreader.app. Old entries
-// may be bare pubkey strings; pubkeyOf reads both shapes.
+// Registry values are objects { pubkey, senders? } where senders are the
+// email addresses allowed to mail content to name@einkreader.app (older
+// entries have a single `sender`; the oldest are bare pubkey strings).
+// pubkeyOf / sendersOf read every shape.
 export function pubkeyOf(entry) {
   return typeof entry === 'string' ? entry : entry?.pubkey;
 }
 
-export function senderOf(entry) {
-  return typeof entry === 'object' ? entry?.sender : undefined;
+export function sendersOf(entry) {
+  if (typeof entry !== 'object' || entry == null) return [];
+  const list = Array.isArray(entry.senders) ? entry.senders : [];
+  return [...new Set([...list, ...(entry.sender ? [entry.sender] : [])])]
+    .map((s) => String(s).toLowerCase());
+}
+
+const EMAIL_RULE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/// Normalizes the senders a registration carries (an array `senders`, or
+/// the older single `sender`). Returns null when any address is invalid.
+export function normalizeSenders({ senders, sender }) {
+  const raw = Array.isArray(senders) ? senders : sender != null ? [sender] : [];
+  const out = [];
+  for (const s of raw) {
+    if (typeof s !== 'string' || !EMAIL_RULE.test(s.trim())) return null;
+    out.push(s.trim().toLowerCase());
+  }
+  return [...new Set(out)].slice(0, 50);
 }
 
 // Applies a registration to the registry object (pure; no I/O).
 // Returns { status, body }. A pubkey re-registering replaces its old name;
-// re-registering the same name updates the allowed sender.
-export function applyRegistration(registry, { name, pubkey, sender }) {
+// re-registering the same name updates the allowed senders ([senders]
+// undefined keeps them as they are).
+export function applyRegistration(registry, { name, pubkey, senders }) {
   const existing = pubkeyOf(registry[name]);
   if (existing && existing !== pubkey) {
     return { status: 409, body: { error: 'Username is taken' } };
@@ -99,9 +118,10 @@ export function applyRegistration(registry, { name, pubkey, sender }) {
       delete registry[otherName];
     }
   }
+  const keep = senders === undefined ? sendersOf(registry[name]) : senders;
   registry[name] = {
     pubkey,
-    ...(sender ? { sender: String(sender).toLowerCase() } : {}),
+    ...(keep.length ? { senders: keep } : {}),
   };
   return { status: 200, body: { ok: true, nip05: `${name}@einkreader.app` } };
 }

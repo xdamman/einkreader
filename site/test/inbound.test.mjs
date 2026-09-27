@@ -10,7 +10,7 @@ import {
   usernameFromRecipients,
   verifySvixSignature,
 } from '../lib/inbound.js';
-import { applyRegistration, entryForPubkey, pubkeyOf, senderOf }
+import { applyRegistration, entryForPubkey, normalizeSenders, pubkeyOf, sendersOf }
   from '../lib/registry.js';
 import JSZip from 'jszip';
 
@@ -74,16 +74,43 @@ const epubMd = await epubToMarkdown(epub);
 assert.match(epubMd, /# Chapter 1/);
 assert.match(epubMd, /Twice\./);
 
-// -- registry entries carry the allowed sender -----------------------------
+// -- a shared article: inline preview image dropped, link kept -------------
+const shared = emailToMarkdown({
+  html: '<a href="https://news.example/story"><img src="data:image/jpeg;base64,'
+      + 'A'.repeat(5000) + '"></a><p>Worth a read</p>'
+      + '<p><a href="https://news.example/story">https://news.example/story</a></p>',
+});
+assert.ok(!shared.includes('base64'), 'no inline base64 image');
+assert.ok(!/\[\s*\]\(/.test(shared), 'no empty link wrapper');
+assert.match(shared, /Worth a read/);
+assert.equal(firstLink(shared), 'https://news.example/story');
+
+// -- registry entries carry the accepted senders ----------------------------
 const registry = {};
-applyRegistration(registry,
-    { name: 'xavier', pubkey: 'a'.repeat(64), sender: 'Me@Example.com' });
+applyRegistration(registry, {
+  name: 'xavier',
+  pubkey: 'a'.repeat(64),
+  senders: normalizeSenders({ senders: ['Me@Example.com', 'work@corp.io'] }),
+});
 assert.equal(pubkeyOf(registry.xavier), 'a'.repeat(64));
-assert.equal(senderOf(registry.xavier), 'me@example.com');
+assert.deepEqual(sendersOf(registry.xavier), ['me@example.com', 'work@corp.io']);
+// Re-registering without senders keeps them (e.g. a profile save).
+applyRegistration(registry,
+    { name: 'xavier', pubkey: 'a'.repeat(64), senders: undefined });
+assert.deepEqual(sendersOf(registry.xavier), ['me@example.com', 'work@corp.io']);
+// An empty list clears them.
+applyRegistration(registry,
+    { name: 'xavier', pubkey: 'a'.repeat(64), senders: [] });
+assert.deepEqual(sendersOf(registry.xavier), []);
+// The older single `sender` still reads, and still normalizes.
+registry.old = { pubkey: 'c'.repeat(64), sender: 'solo@example.com' };
+assert.deepEqual(sendersOf(registry.old), ['solo@example.com']);
+assert.deepEqual(normalizeSenders({ sender: 'A@B.co' }), ['a@b.co']);
+assert.equal(normalizeSenders({ senders: ['not an email'] }), null);
 // Old-shape (bare string) entries still resolve.
 registry.legacy = 'b'.repeat(64);
 assert.equal(pubkeyOf(registry.legacy), 'b'.repeat(64));
-assert.equal(senderOf(registry.legacy), undefined);
+assert.deepEqual(sendersOf(registry.legacy), []);
 assert.equal(entryForPubkey(registry, 'a'.repeat(64)).name, 'xavier');
 
 console.log('inbound tests passed');

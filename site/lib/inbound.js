@@ -9,16 +9,28 @@ const turndown = new TurndownService({
 });
 turndown.remove(['script', 'style']);
 
-/// Email HTML (or plain text) to Markdown.
+/// Email HTML (or plain text) to Markdown. Images embedded inline in the
+/// body (data: or cid: URIs — a mail app's preview of a shared article)
+/// are dropped: they'd store megabytes of base64 in the item, and real
+/// image attachments are stored and linked separately anyway.
 export function emailToMarkdown({ html, text }) {
   if (html && html.trim()) {
     try {
-      return turndown.turndown(html).trim();
+      return cleanInlineImages(turndown.turndown(html));
     } catch {
       // fall through to text
     }
   }
   return (text ?? '').trim();
+}
+
+function cleanInlineImages(markdown) {
+  return markdown
+    .replace(/!\[[^\]]*\]\((?:data|cid):[^)]*\)/g, '')
+    // A link left wrapping nothing: "[\n\n](url)".
+    .replace(/\[\s*\]\([^)]*\)/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /// First http(s) link in a markdown/text body, if any.
@@ -69,7 +81,8 @@ export function verifySvixSignature(secret, headers, payload) {
 }
 
 /// Assembles the stored inbox item from converted parts (pure).
-export function buildItem({ subject, from, markdown, attachmentsMarkdown }) {
+export function buildItem(
+    { subject, from, markdown, attachmentsMarkdown, documents = 0 }) {
   const body = [markdown, ...attachmentsMarkdown]
     .filter((part) => part && part.trim())
     .join('\n\n---\n\n');
@@ -78,6 +91,9 @@ export function buildItem({ subject, from, markdown, attachmentsMarkdown }) {
     from,
     markdown: body,
     url: firstLink(markdown),
+    // PDF/EPUB attachments converted into the body: the email is then
+    // content in itself, not just a link to read.
+    documents,
     receivedAt: Date.now(),
   };
 }

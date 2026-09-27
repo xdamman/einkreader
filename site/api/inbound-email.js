@@ -1,8 +1,11 @@
 // Resend inbound webhook: an email sent to username@einkreader.app becomes
-// a reading-feed item — but ONLY when the sender matches the username's
-// whitelisted address. Attachments: images are stored and referenced inline;
-// PDF and EPUB attachments are converted to text and appended.
-import { put } from '@vercel/blob';
+// a reading-feed item. Mail from one of the username's accepted senders
+// goes straight to their inbox; mail from anyone else is kept as a request
+// (at most MAX_REQUESTS waiting) that the reader accepts or deletes in the
+// app — never silently dropped. Attachments: images are stored and
+// referenced inline; PDF and EPUB attachments are converted to text.
+
+import { list, put } from '@vercel/blob';
 import {
   bareAddress,
   buildItem,
@@ -12,7 +15,7 @@ import {
   usernameFromRecipients,
   verifySvixSignature,
 } from '../lib/inbound.js';
-import { loadRegistry, pubkeyOf, senderOf } from '../lib/registry.js';
+import { loadRegistry, pubkeyOf, sendersOf } from '../lib/registry.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -23,6 +26,7 @@ async function rawBody(req) {
 }
 
 const MAX_ATTACHMENT = 15 * 1024 * 1024;
+const MAX_REQUESTS = 20;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -52,12 +56,18 @@ export default async function handler(req, res) {
   const registry = await loadRegistry();
   const entry = registry[username];
   if (!entry) return res.status(200).json({ dropped: 'unknown user' });
-  const allowed = senderOf(entry);
   const from = bareAddress(email?.from);
-  if (!allowed || !from || from !== allowed) {
-    return res.status(200).json({ dropped: 'sender not whitelisted' });
-  }
+  if (!from) return res.status(200).json({ dropped: 'no sender' });
   const pubkey = pubkeyOf(entry);
+  const accepted = sendersOf(entry).includes(from);
+  if (!accepted) {
+    // A request from a new sender: kept for the reader to accept, but
+    // capped so a stranger can't flood the mailbox.
+    const { blobs } = await list({ prefix: `inbox/${pubkey}/request-` });
+    if (blobs.length >= MAX_REQUESTS) {
+      return res.status(200).json({ dropped: 'too many pending requests' });
+    }
+  }
 
   // The webhook is a notification only: the body and attachment contents
   // live behind Resend's API.
@@ -76,6 +86,7 @@ export default async function handler(req, res) {
 
   const markdown = emailToMarkdown({ html: full?.html, text: full?.text });
   const attachmentsMarkdown = [];
+  let documents = 0;
   for (const meta of email?.attachments ?? []) {
     try {
       const detail = await (await fetch(
@@ -99,13 +110,19 @@ export default async function handler(req, res) {
         attachmentsMarkdown.push(`![${filename}](${stored.url})`);
       } else if (type === 'application/pdf' || /\.pdf$/i.test(filename)) {
         const text = await pdfToMarkdown(buffer);
-        if (text) attachmentsMarkdown.push(`## ${filename}\n\n${text}`);
+        if (text) {
+          attachmentsMarkdown.push(`## ${filename}\n\n${text}`);
+          documents++;
+        }
       } else if (
         type === 'application/epub+zip' ||
         /\.epub$/i.test(filename)
       ) {
         const text = await epubToMarkdown(buffer);
-        if (text) attachmentsMarkdown.push(`## ${filename}\n\n${text}`);
+        if (text) {
+          attachmentsMarkdown.push(`## ${filename}\n\n${text}`);
+          documents++;
+        }
       }
     } catch {
       // A bad attachment never blocks the email itself.
@@ -117,11 +134,13 @@ export default async function handler(req, res) {
     from,
     markdown,
     attachmentsMarkdown,
+    documents,
   });
+  if (!accepted) item.request = true;
   await put(
-    `inbox/${pubkey}/${Date.now()}.json`,
+    `inbox/${pubkey}/${accepted ? '' : 'request-'}${Date.now()}.json`,
     JSON.stringify(item),
     { access: 'public', contentType: 'application/json' },
   );
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: true, request: !accepted });
 }

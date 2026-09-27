@@ -43,16 +43,37 @@ void main() {
     await PluginService.instance.setEmailOn(true);
   });
 
-  test('registerUsername carries the allowed sender', () async {
+  test('registerUsername carries the accepted senders', () async {
     Map<String, dynamic>? body;
     ProfileService.instance.debugHttpClient = MockClient((request) async {
       body = jsonDecode(request.body) as Map<String, dynamic>;
       return http.Response(jsonEncode({'ok': true}), 200);
     });
-    await ProfileService.instance.setAllowedSender('Me@Example.COM');
-    expect(body!['sender'], 'me@example.com',
-        reason: 'sender change re-registers with the normalized address');
+    await ProfileService.instance
+        .setAllowedSenders(['Me@Example.COM', 'friend@example.org']);
+    expect(body!['senders'], ['me@example.com', 'friend@example.org'],
+        reason: 'a change re-registers with the normalized addresses');
+    await ProfileService.instance.addAllowedSender('friend@example.org');
+    expect(await ProfileService.instance.allowedSenders,
+        ['me@example.com', 'friend@example.org'],
+        reason: 'no duplicates');
     ProfileService.instance.debugHttpClient = null;
+  });
+
+  test("the sender's note: link lines and link cards removed, words kept",
+      () {
+    const link = 'https://news.example/story';
+    expect(SyncService.emailNote('Check this: $link', link), 'Check this:');
+    // A mail app's shared-article card: nothing of the sender's own.
+    expect(
+        SyncService.emailNote(
+            '[\n\n[Is Belgium heading back?]($link)\n\n'
+                    '[news.example]($link)\n\n]($link)\n\n---\n\n'
+                    '![photo.jpg](https://blob/photo.jpg)',
+            link),
+        isEmpty);
+    expect(SyncService.emailNote('I loved [this piece]($link) a lot', link),
+        'I loved this piece a lot');
   });
 
   test('inbox items become Email articles; processed ones are acked',
@@ -144,5 +165,75 @@ void main() {
     // still listed the items.
     await sync.syncAll();
     expect(await db.getArticles(sourceId: source.id), hasLength(2));
+  });
+
+  test('mail from a new sender waits as a request until accepted',
+      () async {
+    final deleted = <String>[];
+    final client = MockClient((request) async {
+      final url = request.url.toString();
+      if (url == 'https://einkreader.app/api/inbox' &&
+          request.method == 'GET') {
+        return http.Response(
+            jsonEncode({
+              'items': [
+                {'id': 'inbox/pk/request-3.json', 'url': 'https://blob/3.json'},
+                {'id': 'inbox/pk/request-4.json', 'url': 'https://blob/4.json'},
+              ]
+                  .where((i) => !deleted.contains(i['id']))
+                  .toList()
+            }),
+            200);
+      }
+      if (url == 'https://blob/3.json' || url == 'https://blob/4.json') {
+        final n = url.contains('3') ? '3' : '4';
+        return http.Response(
+            jsonEncode({
+              'subject': 'To read $n',
+              'from': 'stranger$n@example.net',
+              'markdown': 'https://example.com/story$n',
+              'url': 'https://example.com/story$n',
+              'receivedAt': 1700000002000,
+              'request': true,
+            }),
+            200);
+      }
+      if (url == 'https://einkreader.app/api/inbox' &&
+          request.method == 'DELETE') {
+        deleted.addAll(
+            (jsonDecode(request.body)['ids'] as List).cast<String>());
+        return http.Response('{}', 200);
+      }
+      return http.Response('nope', 404);
+    });
+    ProfileService.instance.debugHttpClient = MockClient(
+        (request) async => http.Response(jsonEncode({'ok': true}), 200));
+    addTearDown(() => ProfileService.instance.debugHttpClient = null);
+    final sync = SyncService.forTest(
+      http: client,
+      twitter: TwitterService(
+          accessToken: () async => 't',
+          client: MockClient((r) async => http.Response('{}', 200))),
+    )..autoSyncOnLaunch = false;
+
+    await sync.syncAll();
+    expect(sync.emailRequests.map((r) => r.from),
+        ['stranger3@example.net', 'stranger4@example.net']);
+    Future<List<String>> titles() async =>
+        (await db.getArticles()).map((a) => a.title).toList();
+    expect(await titles(), isNot(contains('To read 3')),
+        reason: 'not in the Inbox until accepted');
+    expect(deleted, isEmpty, reason: 'requests are kept server-side');
+
+    await sync.acceptEmailRequest(sync.emailRequests.first);
+    expect(await titles(), contains('To read 3'));
+    expect(await ProfileService.instance.allowedSenders,
+        contains('stranger3@example.net'));
+    expect(deleted, ['inbox/pk/request-3.json']);
+
+    await sync.deleteEmailRequest(sync.emailRequests.single);
+    expect(sync.emailRequests, isEmpty);
+    expect(deleted, contains('inbox/pk/request-4.json'));
+    expect(await titles(), isNot(contains('To read 4')));
   });
 }

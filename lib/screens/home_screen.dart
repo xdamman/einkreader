@@ -7,11 +7,13 @@ import '../models.dart';
 import '../services/app_log.dart';
 import '../services/archive_store.dart';
 import '../services/outbox_service.dart';
+import '../services/plugin_service.dart';
 import '../services/share_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/article_feed.dart';
 import '../widgets/clipboard_link_prompt.dart';
 import '../widgets/highlight_list.dart';
+import '../widgets/inbox_header.dart';
 import '../widgets/resume_reading.dart';
 import '../widgets/profile_switcher.dart';
 import '../widgets/reconnect_twitter.dart';
@@ -72,6 +74,11 @@ class _HomeScreenState extends State<HomeScreen> {
   int? _highlightsSourceId;
   List<Source> _sources = [];
   List<Folder> _folders = [];
+
+  /// The built-in Inbox (content emailed to name@einkreader.app): always
+  /// in the chip strip, even empty, so its address is easy to find. Null
+  /// when the Email plugin is off.
+  int? _inboxSourceId;
   Map<int, String> _sourceTitles = {};
 
   /// Sources currently being synced, shown with a spinner in the feed strip.
@@ -196,6 +203,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _loading = true;
     try {
+      final inbox = await PluginService.instance.emailActive
+          ? await _db.ensureEmailSource()
+          : null;
       final articles = await _db.getArticles();
       final highlights = await _db.getHighlights();
       final shares = await _db.getShares();
@@ -214,6 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _shares = shares;
         _sources = sources;
         _folders = folders;
+        _inboxSourceId = inbox?.id;
         _sourceTitles = {for (final s in sources) s.id!: s.title};
         _developerMode = developerMode;
         _everLoaded = true;
@@ -645,9 +656,6 @@ class _HomeScreenState extends State<HomeScreen> {
   /// centered call-to-action replaces the feed.
   Widget _buildFeed() {
     if (!_everLoaded) return const SizedBox.shrink();
-    if (_sourceTitles.isEmpty) {
-      return _EmptySourcesView(onAdd: _openAddSource);
-    }
     final total = <int, int>{};
     final unread = <int, int>{};
     for (final article in _articles) {
@@ -655,6 +663,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (article.read == 0) {
         unread[article.sourceId] = (unread[article.sourceId] ?? 0) + 1;
       }
+    }
+    // The always-present Inbox alone doesn't count as "has sources".
+    final inboxId = _inboxSourceId;
+    if (_sourceTitles.keys.every((id) => id == inboxId) &&
+        !total.containsKey(inboxId)) {
+      return _EmptySourcesView(onAdd: _openAddSource);
     }
     int compareFilters(_SourceFilter a, _SourceFilter b) =>
         a.title.toLowerCase().compareTo(b.title.toLowerCase());
@@ -667,10 +681,10 @@ class _HomeScreenState extends State<HomeScreen> {
         );
 
     final folderOf = {for (final s in _sources) s.id!: s.folderId};
-    final topSources = total.keys
-        .where((id) => folderOf[id] == null)
-        .map(filterFor)
-        .toList()
+    final topSources = {
+      ...total.keys,
+      if (inboxId != null) inboxId,
+    }.where((id) => folderOf[id] == null).map(filterFor).toList()
       ..sort(compareFilters);
 
     // A folder appears once any of its sources has articles; its counts
@@ -695,7 +709,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Fall back to "All" if the selection no longer has any articles.
     final selectedId =
-        total.containsKey(_feedSourceId) ? _feedSourceId : null;
+        total.containsKey(_feedSourceId) || _feedSourceId == inboxId
+            ? _feedSourceId
+            : null;
     final selectedFolderId =
         folders.any((f) => f.id == _feedFolderId) ? _feedFolderId : null;
     var articles = selectedFolderId != null
@@ -712,8 +728,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final selectedSource = selectedId == null
         ? null
         : _sources.where((s) => s.id == selectedId).firstOrNull;
+    // The Inbox likewise gets a row of senders.
+    final isInbox = selectedSource?.type == SourceType.email;
     if (selectedSource != null &&
-        selectedSource.type == SourceType.twitterBookmarks) {
+        (selectedSource.type == SourceType.twitterBookmarks || isInbox)) {
       final byAuthor = <String, ({int unread, int total})>{};
       for (final article in articles) {
         final author = article.author;
@@ -737,14 +755,21 @@ class _HomeScreenState extends State<HomeScreen> {
         entries =
             entries.where((e) => e.value.total >= 2).toList();
       }
+      // Twitter accounts are alphabetical; Inbox senders come by how much
+      // they sent (most first), ties alphabetical.
+      entries.sort((a, b) {
+        if (isInbox && a.value.total != b.value.total) {
+          return b.value.total.compareTo(a.value.total);
+        }
+        return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+      });
       authorRow = [
         for (final entry in entries)
           _AuthorFilter(
               name: entry.key,
               label: entry.key,
               unread: entry.value.unread)
-      ]..sort((a, b) =>
-          a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+      ];
       if (othersSet.isNotEmpty) {
         authorRow.add(_AuthorFilter(
           name: _othersAuthor,
@@ -810,6 +835,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? () => _reconnectTwitter(selectedSource)
                 : null,
           ),
+        if (isInbox) InboxHeader(onChanged: _load),
         if (currentReads.isNotEmpty)
           ResumeReadingSection(
             articles: currentReads,
@@ -820,9 +846,10 @@ class _HomeScreenState extends State<HomeScreen> {
           child: ArticleFeed(
             articles: articles,
             sourceTitles: _sourceTitles,
-            emptyMessage:
-                'No articles yet.\n\nPull to sync, or manage sources '
-                'in Settings.',
+            emptyMessage: isInbox
+                ? 'Nothing in your Inbox yet.'
+                : 'No articles yet.\n\nPull to sync, or manage sources '
+                    'in Settings.',
             onChanged: _load,
           ),
         ),

@@ -789,13 +789,19 @@ class AppDatabase {
 
   /// The built-in source holding emails sent to name@einkreader.app,
   /// created on first use.
+  /// The built-in Inbox: content emailed to name@einkreader.app. (Named
+  /// "Email" before it became a visible, always-present category.)
   Future<Source> ensureEmailSource() async {
     final url = _localUrl('local:email');
     final existing = await getSourceByTypeAndUrl(SourceType.email, url);
-    if (existing != null) return existing;
+    if (existing != null) {
+      if (existing.title != 'Email') return existing;
+      await updateSourceTitle(existing.id!, 'Inbox');
+      return (await getSourceByTypeAndUrl(SourceType.email, url))!;
+    }
     return insertSource(Source(
       type: SourceType.email,
-      title: 'Email',
+      title: 'Inbox',
       url: url,
       createdAt: DateTime.now().millisecondsSinceEpoch,
     ));

@@ -47,6 +47,18 @@ class SyncProgress {
       this.done = false});
 }
 
+/// An email from a sender the reader hasn't accepted yet.
+class EmailRequest {
+  final String id; // inbox item id (server path)
+  final String from;
+  final Map<String, dynamic> item;
+
+  const EmailRequest({required this.id, required this.from, required this.item});
+
+  String get subject => (item['subject'] as String?) ?? 'Email';
+  String? get url => item['url'] as String?;
+}
+
 /// Refreshes every source and downloads full article content so everything
 /// can be read offline afterwards.
 class SyncService {
@@ -759,18 +771,19 @@ class SyncService {
     return inserted;
   }
 
+  /// Emails from senders not (yet) accepted: they wait in the Inbox for
+  /// the reader to accept the sender or delete them. Refreshed each sync.
+  List<EmailRequest> emailRequests = [];
+
   /// Pulls emails sent to the user's name@einkreader.app address (already
-  /// converted to Markdown server-side, whitelisted sender only) and turns
-  /// each into an article under the built-in Email source. Like a tweet, an
-  /// email that is mostly a link gets the linked page downloaded with the
-  /// email kept as intro; a substantial email (or one with attachments) IS
-  /// the content, its images localized for offline reading. Processed items
-  /// are acknowledged (deleted server-side). Never breaks a sync.
+  /// converted to Markdown server-side) and turns each into an article
+  /// under the built-in Inbox source. Mail from an accepted sender is
+  /// ingested and acknowledged (deleted server-side); mail from anyone else
+  /// becomes an [EmailRequest]. Never breaks a sync.
   Future<int> _fetchInboxEmails() async {
     try {
       final profile = ProfileService.instance;
       if (!await profile.enabled || await profile.username == null) return 0;
-      // Inbound email is the Email plugin.
       if (!await PluginService.instance.emailActive) return 0;
       final auth = await profile.inboxAuthHeader();
       final listResponse = await _http.get(
@@ -781,10 +794,8 @@ class SyncService {
       final items = ((jsonDecode(listResponse.body)
                   as Map<String, dynamic>)['items'] as List?) ??
           const [];
-      if (items.isEmpty) return 0;
-
-      final source = await _db.ensureEmailSource();
-      final now = DateTime.now().millisecondsSinceEpoch;
+      final accepted = (await profile.allowedSenders).toSet();
+      final requests = <EmailRequest>[];
       var inserted = 0;
       final processedIds = <String>[];
       for (final raw in items.cast<Map<String, dynamic>>()) {
@@ -796,61 +807,27 @@ class SyncService {
               .get(Uri.parse(url))
               .timeout(const Duration(seconds: 20));
           if (itemResponse.statusCode != 200) continue;
-          final item =
-              jsonDecode(itemResponse.body) as Map<String, dynamic>;
-          final markdown = (item['markdown'] as String?) ?? '';
-          final link = item['url'] as String?;
-          // A short link-bearing email without attachments reads like a
-          // tweet: fetch the page, keep the email as the intro.
-          final linkOnly = link != null &&
-              markdown.length < 600 &&
-              !markdown.contains('![');
-          String? content;
-          if (!linkOnly) {
-            content = await _archive.localizeMarkdown(
-              markdown,
-              relDir: _relDirFor(
-                  source, item['receivedAt'] as int?, now),
-              maxDimension: _maxImageDimension,
-            );
+          final item = jsonDecode(itemResponse.body) as Map<String, dynamic>;
+          final from = ((item['from'] as String?) ?? '').toLowerCase();
+          if (item['request'] == true && !accepted.contains(from)) {
+            requests.add(EmailRequest(id: id, from: from, item: item));
+            continue;
           }
-          final article = Article(
-            sourceId: source.id!,
-            guid: id,
-            title: (item['subject'] as String?) ?? 'Email',
-            author: item['from'] as String?,
-            url: link,
-            publishedAt: item['receivedAt'] as int?,
-            summary: markdown,
-            contentMarkdown: content,
-            fetched: linkOnly ? 0 : 1,
-            createdAt: now,
-          );
-          if (await _db.insertArticleIfNew(article)) {
-            inserted++;
-            if (content != null) {
-              await _archive.writeArticle(
-                  source: source, article: article, markdown: content);
-            }
-          }
+          if (await _ingestEmail(item, id)) inserted++;
           processedIds.add(id);
         } catch (e) {
           await AppLogService.instance
               .warn('Email: could not process inbox item $id: $e');
         }
       }
+      emailRequests = requests;
       if (processedIds.isNotEmpty) {
-        await _http.delete(
-          Uri.https(ProfileService.nip05Domain, '/api/inbox'),
-          headers: {
-            'Authorization': auth,
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({'ids': processedIds}),
-        ).timeout(const Duration(seconds: 20));
+        await _ackInbox(processedIds, auth);
         await AppLogService.instance.info(
             'Email: ingested $inserted of ${processedIds.length} '
             'inbox item(s)');
+      }
+      if (processedIds.isNotEmpty || requests.isNotEmpty) {
         progress.add(SyncProgress('', running: _syncing, reload: true));
       }
       return inserted;
@@ -858,6 +835,113 @@ class SyncService {
       await AppLogService.instance.warn('Email: inbox fetch failed: $e');
       return 0;
     }
+  }
+
+  /// Accepts a request's sender (future mail from them skips the review)
+  /// and adds the email to the Inbox right away.
+  Future<void> acceptEmailRequest(EmailRequest request) async {
+    final profile = ProfileService.instance;
+    await profile.addAllowedSender(request.from);
+    await _ingestEmail(request.item, request.id);
+    await _ackInbox([request.id], await profile.inboxAuthHeader());
+    emailRequests =
+        emailRequests.where((r) => r.id != request.id).toList();
+    await _fetchPendingContent();
+    progress.add(SyncProgress('', running: _syncing, reload: true));
+  }
+
+  /// Deletes a request without accepting its sender.
+  Future<void> deleteEmailRequest(EmailRequest request) async {
+    await _ackInbox(
+        [request.id], await ProfileService.instance.inboxAuthHeader());
+    emailRequests =
+        emailRequests.where((r) => r.id != request.id).toList();
+    progress.add(SyncProgress('', running: _syncing, reload: true));
+  }
+
+  Future<void> _ackInbox(List<String> ids, String auth) async {
+    await _http.delete(
+      Uri.https(ProfileService.nip05Domain, '/api/inbox'),
+      headers: {'Authorization': auth, 'Content-Type': 'application/json'},
+      body: jsonEncode({'ids': ids}),
+    ).timeout(const Duration(seconds: 20));
+  }
+
+  /// Turns one inbox item into an article. Like a tweet: an email that is
+  /// a link plus (at most) a short note gets the linked page downloaded,
+  /// the note quoted above it; an email carrying documents (PDF/EPUB) or a
+  /// long text IS the content, its images localized for offline reading.
+  /// Returns true when a new article was inserted.
+  Future<bool> _ingestEmail(Map<String, dynamic> item, String id) async {
+    final source = await _db.ensureEmailSource();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final markdown = (item['markdown'] as String?) ?? '';
+    final link = item['url'] as String?;
+    final documents = (item['documents'] as num?)?.toInt() ?? 0;
+    final note = emailNote(markdown, link);
+    final linkOnly = link != null && documents == 0 && note.length < 600;
+    String? content;
+    if (!linkOnly) {
+      content = await _archive.localizeMarkdown(
+        markdown,
+        relDir: _relDirFor(source, item['receivedAt'] as int?, now),
+        maxDimension: _maxImageDimension,
+      );
+    }
+    final article = Article(
+      sourceId: source.id!,
+      guid: id,
+      title: (item['subject'] as String?) ?? 'Email',
+      author: item['from'] as String?,
+      url: link,
+      publishedAt: item['receivedAt'] as int?,
+      // The sender's note becomes the quoted intro above the page.
+      summary: linkOnly ? (note.isEmpty ? null : note) : markdown,
+      contentMarkdown: content,
+      fetched: linkOnly ? 0 : 1,
+      createdAt: now,
+    );
+    final isNew = await _db.insertArticleIfNew(article);
+    if (isNew && content != null) {
+      await _archive.writeArticle(
+          source: source, article: article, markdown: content);
+    }
+    return isNew;
+  }
+
+  /// The sender's own words in an email that shares [link]: the body
+  /// without images, without lines that are just the link (or a link card
+  /// pointing at it — title, domain) and without leftover punctuation.
+  static String emailNote(String markdown, String? link) {
+    final punctuationOnly = RegExp(r'^[\[\]()\-—–*_>#|:.,\s]*$');
+    final lines = <String>[];
+    for (final raw in markdown.split('\n')) {
+      var line = raw.trim();
+      if (line.startsWith('![')) continue;
+      if (link != null && line.contains(link)) {
+        final linkPattern = RegExp(
+            r'\[([^\]]*)\]\(' + RegExp.escape(link) + r'\)');
+        // The line without the link at all: nothing left means it was only
+        // the link, or a link card (title, domain) pointing at it.
+        final rest = line
+            .replaceAll(linkPattern, '')
+            .replaceAll(link, '')
+            .trim();
+        if (punctuationOnly.hasMatch(rest)) continue;
+        // Otherwise keep the words: "Check this: <link>" → "Check this:",
+        // "I loved [this piece](link)" → "I loved this piece".
+        line = line
+            .replaceAllMapped(linkPattern, (m) => m.group(1)!)
+            .replaceAll(link, '')
+            .trim();
+      }
+      if (punctuationOnly.hasMatch(line)) {
+        lines.add('');
+        continue;
+      }
+      lines.add(line);
+    }
+    return lines.join('\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
   }
 
   /// Downloads and extracts content for all articles still missing it.
@@ -981,7 +1065,10 @@ class SyncService {
         if (tweetMarkdown == null &&
             (article.title.endsWith('…') ||
                 article.title == article.url ||
-                source?.type == SourceType.savedLinks)) {
+                source?.type == SourceType.savedLinks ||
+                // A link emailed to the Inbox: the subject ("To read",
+                // "Fwd: …") says less than the page's own title.
+                source?.type == SourceType.email)) {
           final pageTitle =
               await Isolate.run(() => ArticleExtractor.extractTitle(body));
           if (pageTitle != null) {
