@@ -7,7 +7,8 @@ import {
   applyRegistration,
   loadRegistry,
   normalizeSenders,
-  saveRegistry,
+  deleteEntry,
+  saveEntry,
   verifyAuthEvent,
 } from '../lib/registry.js';
 
@@ -46,8 +47,16 @@ export default async function handler(req, res) {
   if (invalid) return res.status(401).json({ error: invalid });
 
   const registry = await loadRegistry();
+  const before = new Set(Object.keys(registry));
   const { status, body } =
       applyRegistration(registry, { name, pubkey, senders });
-  if (status === 200) await saveRegistry(registry);
+  if (status === 200) {
+    // Persist only what this registration changed: its own name, and any
+    // previous name of the same key it replaced.
+    await saveEntry(name, registry[name]);
+    for (const old of before) {
+      if (!(old in registry)) await deleteEntry(old);
+    }
+  }
   return res.status(status).json(body);
 }

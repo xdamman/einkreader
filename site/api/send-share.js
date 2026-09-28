@@ -2,7 +2,7 @@
 // One-tap email shares (Email plugin): sends from the user's own
 // name@einkreader.app address via Resend, Reply-To their whitelisted
 // personal address. Auth: signed kind-27235 event with content "send-share".
-import { entryForPubkey, loadRegistry, senderOf, verifyAuthEvent }
+import { entryForPubkey, loadRegistry, sendersOf, verifyAuthEvent }
   from '../lib/registry.js';
 
 export default async function handler(req, res) {
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'sending not configured' });
-  const replyTo = senderOf(owner.entry);
+  const replyTo = sendersOf(owner.entry)[0];
   const send = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {

@@ -8,8 +8,8 @@
 import { del, list } from '@vercel/blob';
 import {
   entryForPubkey,
+  deleteEntry,
   loadRegistry,
-  saveRegistry,
   verifyAuthEvent,
 } from '../lib/registry.js';
 
@@ -40,10 +40,7 @@ export default async function handler(req, res) {
 
   const registry = await loadRegistry();
   const own = entryForPubkey(registry, pubkey);
-  if (own) {
-    delete registry[own.name];
-    await saveRegistry(registry);
-  }
+  if (own) await deleteEntry(own.name);
   let removed = 0;
   let cursor;
   do {

@@ -1,9 +1,9 @@
 // Username registry for name@einkreader.app NIP-05 addresses.
-// Stored as one JSON blob { name: pubkeyHex } in Vercel Blob.
+// Stored in Vercel Blob, one blob per name (see saveEntry).
 import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
-import { list, put } from '@vercel/blob';
+import { del, list, put } from '@vercel/blob';
 
 // Mirrors the app's client-side rule: 5–20 chars, lowercase letters,
 // digits and underscore only.
@@ -25,30 +25,84 @@ export const RESERVED = new Set([
   'brand', 'branding', 'privacy', 'opensource',
 ]);
 
-const BLOB_PATH = 'nostr-registry.json';
+// Storage: one blob per change, `registry/<name>/<timestamp>.json`, holding
+// that name's entry. Blobs are never overwritten: an overwritten blob can be
+// served stale for up to a minute, which made a read-modify-write of a
+// single registry file drop or resurrect entries. list() reflects writes
+// and deletes immediately, and a new path is always read fresh.
+const PREFIX = 'registry/';
+// The original single-file registry, migrated on first read.
+const LEGACY_PATH = 'nostr-registry.json';
 
-export async function loadRegistry() {
-  // Exact-pathname match: list() is prefix-based and would also return a
-  // stray suffixed blob (e.g. from a manual CLI upload).
-  const { blobs } = await list({ prefix: BLOB_PATH });
-  const blob = blobs.find((b) => b.pathname === BLOB_PATH);
-  if (!blob) return {};
-  // The blob CDN caches files (a month by default): read past it, or a
-  // fresh registration stays invisible and the next save could overwrite
-  // it from a stale copy.
-  const res = await fetch(`${blob.url}?v=${Date.now()}`, { cache: 'no-store' });
-  if (!res.ok) return {};
-  return await res.json();
+async function listEntryBlobs() {
+  const blobs = [];
+  let cursor;
+  do {
+    const page = await list({ prefix: PREFIX, cursor });
+    blobs.push(...page.blobs);
+    cursor = page.hasMore ? page.cursor : undefined;
+  } while (cursor);
+  return blobs;
 }
 
-export async function saveRegistry(registry) {
-  await put(BLOB_PATH, JSON.stringify(registry, null, 2), {
+/// name → its blobs, newest first.
+function groupByName(blobs) {
+  const byName = {};
+  for (const blob of blobs) {
+    const [, name, file] = blob.pathname.split('/');
+    if (!name || !file) continue;
+    (byName[name] ??= []).push({ blob, at: Number(file.split('.')[0]) || 0 });
+  }
+  for (const list of Object.values(byName)) list.sort((a, b) => b.at - a.at);
+  return byName;
+}
+
+async function migrateLegacy() {
+  const { blobs } = await list({ prefix: LEGACY_PATH });
+  const legacy = blobs.find((b) => b.pathname === LEGACY_PATH);
+  if (!legacy) return;
+  const res = await fetch(`${legacy.url}?v=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) return;
+  const registry = await res.json();
+  for (const [name, entry] of Object.entries(registry)) {
+    await saveEntry(name, entry);
+  }
+}
+
+export async function loadRegistry() {
+  let blobs = await listEntryBlobs();
+  if (blobs.length === 0) {
+    await migrateLegacy();
+    blobs = await listEntryBlobs();
+  }
+  const byName = groupByName(blobs);
+  const registry = {};
+  await Promise.all(Object.entries(byName).map(async ([name, versions]) => {
+    const res = await fetch(versions[0].blob.url, { cache: 'no-store' });
+    if (res.ok) registry[name] = await res.json();
+  }));
+  return registry;
+}
+
+/// Writes [name]'s entry as a new blob, then drops its older versions.
+export async function saveEntry(name, entry) {
+  await put(`${PREFIX}${name}/${Date.now()}.json`, JSON.stringify(entry), {
     access: 'public',
     addRandomSuffix: false,
-    allowOverwrite: true,
     contentType: 'application/json',
-    cacheControlMaxAge: 60,
   });
+  const versions = groupByName(
+      await listEntryBlobs().then((all) =>
+          all.filter((b) => b.pathname.startsWith(`${PREFIX}${name}/`))))[name] ?? [];
+  const old = versions.slice(1).map((v) => v.blob.url);
+  if (old.length) await del(old);
+}
+
+/// Removes [name] entirely (all versions).
+export async function deleteEntry(name) {
+  const own = (await listEntryBlobs())
+      .filter((b) => b.pathname.startsWith(`${PREFIX}${name}/`));
+  if (own.length) await del(own.map((b) => b.url));
 }
 
 // NIP-01 event id: sha256 of the canonical serialization.
