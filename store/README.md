@@ -1,54 +1,66 @@
-# Publishing einkreader to Google Play
+# Publishing einkreader on Google Play
 
-Everything in this folder is generated or paste-ready. The one thing that
-must happen in a browser is the Play Console itself (developer account,
-one-time $25).
+Everything here is generated or paste-ready. What only you can do happens
+in the Play Console and in two GitHub secrets.
 
-## Assets in this folder
+## At a glance
 
-| File | Use in Play Console |
+| Thing | Value |
 | --- | --- |
-| `icon_512.png` | App icon (512×512) |
-| `feature_graphic.png` | Feature graphic (1024×500) |
-| `screenshots/phone/*.png` | Phone screenshots (1170×2532) |
-| `screenshots/tablet/*.png` | 7"/10" tablet screenshots (1200×1600) |
-| `listing.md` | Title, descriptions, data safety, rating answers |
-| `../site/public/demo.mp4` | Optional promo video (upload to YouTube, link it) |
+| Package name | `com.xlcollective.einkreader` (the `play` build flavor) |
+| What to upload | `einkreader-vX.Y.Z-play.aab`, attached to every GitHub release |
+| Target API | 36 (Android 16) — required since Aug 31, 2026 |
+| Privacy policy | https://einkreader.app/privacy.html |
+| Delete-account URL | https://einkreader.app/delete-account |
+| Listing, data safety, rating | `listing.md` |
+| Icon, feature graphic, screenshots | this folder (`python3 tool/store_assets.py` refreshes them) |
 
-Regenerate assets after UI changes:
+The sideloaded APK on GitHub (`com.xdamman.einkreader`) is unchanged and
+keeps self-updating. The Play app is a separate app: both can be
+installed side by side (each with its own library).
 
-    flutter test test/screenshots/screenshot_test.dart test/screenshots/store_assets_test.dart \
-      --update-goldens --dart-define=screenshots=true
-    tool/make_demo_video.sh   # rebuilds site/public/demo.mp4
+## 1. One-time GitHub setup
 
-## One-time setup (you)
+1. **X client id for Play users** (so they just tap "Connect"):
+   `gh secret set TWITTER_CLIENT_ID` and paste the OAuth 2.0 Client ID
+   of the project's X developer app (Settings → the one you use today).
+   It's a public id, not a secret — but every Play user's X API usage is
+   billed to that developer account (X bills per post read).
+2. Nothing else: the existing `ANDROID_KEYSTORE_*` secrets sign the
+   bundle; Play uses that key as the **upload key**.
 
-1. Play Console → create developer account (personal, $25 once).
-2. Create app: "einkreader", App, Free, category News & Magazines.
-3. Store listing: paste from `listing.md`, upload assets above.
-4. Privacy policy URL: https://einkreader.app/privacy.html
-5. Data safety + content rating: answers drafted in `listing.md`.
+## 2. One-time Play Console setup
 
-## Build & upload (per release)
+1. App: einkreader · App · Free · category News & Magazines.
+2. **Store listing**: paste from `listing.md`; upload `icon_512.png`,
+   `feature_graphic.png`, `screenshots/phone/*` and `screenshots/tablet/*`.
+3. **App content**: privacy policy URL; data safety (table in
+   `listing.md`); content rating (Everyone); target audience 18+ (or
+   13+); no ads; news app declaration: No; account deletion URL.
+4. **Play App Signing**: accept Google-managed signing on first upload.
+5. **Personal developer account?** New personal accounts must run a
+   **closed test with at least 12 testers for 14 days** before
+   Production is unlocked. Create a Closed testing track, add testers
+   (Google Group or emails), upload the bundle there first.
 
-Play requires an **App Bundle (.aab)**, not the APK we ship on GitHub.
-Same code, same keystore:
+## 3. Every release
 
-    flutter build appbundle --release
-    # → build/app/outputs/bundle/release/app-release.aab
+1. Tag as usual (`git tag vX.Y.Z && git push origin vX.Y.Z`).
+2. When the GitHub release is built, download
+   `einkreader-vX.Y.Z-play.aab` from it.
+3. Play Console → the track → Create release → upload the `.aab` → paste
+   release notes (template in `listing.md`) → review → roll out.
 
-Upload to Production (or start with Internal testing). On first upload,
-enroll in **Play App Signing** (Google re-signs for devices; our keystore
-becomes the upload key — keep it safe either way).
+versionCode comes from `pubspec.yaml` (`+N`), so every tag gets a new,
+higher code automatically.
 
-Note: Play review typically takes a few days for a first release. The
-GitHub APK channel keeps working unchanged; in-app self-update should be
-disabled in a later Play-specific build variant (Play policy discourages
-self-updating apps) — flagged as a TODO before wide Play rollout.
+## Differences in the Play build
 
-## After approval
+- No in-app self-update (Play updates the app) and no
+  REQUEST_INSTALL_PACKAGES permission.
+- No custom archive folder (needs "All files access", which Play
+  rejects): the library lives in app storage.
+- X sign-in uses the project's client id instead of asking for one.
 
-- Add the Play link to einkreader.app next to the APK button.
-- Plugin subscriptions: create the subscription (10/mo, 50/yr base plans)
-  and the 100/5yr one-time product under Monetize; then we wire Play
-  Billing + server verification and retire free early access.
+CI fails the release if either forbidden permission ever appears in the
+Play bundle, or if its package name isn't `com.xlcollective.einkreader`.

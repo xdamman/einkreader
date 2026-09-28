@@ -800,11 +800,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         color: Colors.grey)),
                 ..._sharedHighlightTiles(),
               ],
+              // Account deletion (Play policy: in the app, and at
+              // einkreader.app/delete-account).
+              const SizedBox(height: 40),
+              Center(
+                child: TextButton.icon(
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text('Delete profile'),
+                  onPressed: _confirmDeleteAccount,
+                ),
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _confirmDeleteAccount() async {
+    final address = _address;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        title: const Text('Delete your profile?'),
+        content: Text(
+          '${address ?? 'Your address'} stops working and '
+          'can be taken by someone else, and the emails waiting in your '
+          'inbox are deleted. Your library on this device (articles, '
+          'highlights, notes) stays.\n\n'
+          'Highlights and feedback you already shared publicly may remain '
+          'on the Nostr relays that received them.\n\n'
+          'This can\'t be undone.',
+          style: const TextStyle(fontSize: 15, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete profile')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _profileService.deleteAccount();
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Your profile was deleted')));
+      await _load();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(friendlyError(e, doing: 'deleting your profile'))));
+    }
   }
 
   /// The shared stream, mirroring the public page: story title in the

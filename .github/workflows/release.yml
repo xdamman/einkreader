@@ -133,21 +133,56 @@ jobs:
             exit 1
           fi
 
-      - name: Stage APK with a versioned name
+      # The Google Play bundle: `play` flavor (com.xlcollective.einkreader,
+      # target API 36, no self-update / all-files access), with the
+      # project's X client id baked in so Play users just tap "Connect".
+      # Signed with the same key, which Play uses as the upload key.
+      - name: Build Play Store bundle (.aab)
+        env:
+          TWITTER_CLIENT_ID: ${{ secrets.TWITTER_CLIENT_ID }}
+        run: |
+          if [ -z "$TWITTER_CLIENT_ID" ]; then
+            echo "::warning::TWITTER_CLIENT_ID secret not set — the Play build asks users for their own X client id."
+          fi
+          flutter build appbundle --release --flavor play \
+            --dart-define=TWITTER_CLIENT_ID="$TWITTER_CLIENT_ID"
+
+      # Play rejects these two permissions; they must only be in the
+      # sideload build. Inspect the bundle's merged manifest.
+      - name: Verify Play bundle has no sideload-only permissions
+        run: |
+          aab=build/app/outputs/bundle/playRelease/app-play-release.aab
+          unzip -p "$aab" base/manifest/AndroidManifest.xml > /tmp/play-manifest.pb
+          for perm in REQUEST_INSTALL_PACKAGES MANAGE_EXTERNAL_STORAGE; do
+            if grep -aq "$perm" /tmp/play-manifest.pb; then
+              echo "::error::Play bundle contains $perm — Play rejects it. See lib/services/build_config.dart"
+              exit 1
+            fi
+          done
+          grep -aq "com.xlcollective.einkreader" /tmp/play-manifest.pb || {
+            echo "::error::Play bundle is not com.xlcollective.einkreader"; exit 1; }
+
+      - name: Stage APK and Play bundle with versioned names
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-github-release.apk \
             "dist/einkreader-${{ github.ref_name }}.apk"
+          cp build/app/outputs/bundle/playRelease/app-play-release.aab \
+            "dist/einkreader-${{ github.ref_name }}-play.aab"
 
       - uses: actions/upload-artifact@v4
         with:
           name: einkreader-apk
-          path: dist/*.apk
+          path: |
+            dist/*.apk
+            dist/*.aab
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/*.aab
           generate_release_notes: true
           fail_on_unmatched_files: true

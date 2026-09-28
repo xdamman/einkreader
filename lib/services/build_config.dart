@@ -13,3 +13,12 @@ const bool kSelfUpdateSupported = appFlavor != 'play';
 /// which the Play Store rejects for apps that aren't file managers — so the
 /// option ships only in sideload builds, like self-update.
 const bool kCustomStorageSupported = appFlavor != 'play';
+
+/// The project's own X (Twitter) OAuth 2.0 Client ID, baked into Play Store
+/// builds (`--dart-define=TWITTER_CLIENT_ID=…`, from a CI secret) so people
+/// just tap "Connect" instead of creating a developer app. Empty in other
+/// builds, which keep the bring-your-own Client ID field. It's a public
+/// PKCE client id, not a secret — but every connected user's API usage is
+/// billed to the project's X developer account.
+const String kBuiltInTwitterClientId =
+    String.fromEnvironment('TWITTER_CLIENT_ID');

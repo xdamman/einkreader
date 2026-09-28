@@ -91,8 +91,11 @@ android {
         }
     }
 
-    // Distribution channels. Same app id; they differ only in whether the
-    // in-app self-update ships. The `github` (sideload) flavor adds the
+    // Distribution channels. The `github` (sideload) flavor keeps the
+    // original app id so existing installs keep self-updating; `play` is a
+    // separate app on the Play Store (com.xlcollective.einkreader, set in the
+    // Play Console — permanent once the first bundle is uploaded). The
+    // `github` (sideload) flavor adds the
     // REQUEST_INSTALL_PACKAGES permission via src/github/AndroidManifest.xml;
     // `play` omits it so a Play Store build stays clean. Build with
     // `flutter build apk --flavor github` (or `--flavor play`). The flavor name
@@ -100,7 +103,14 @@ android {
     flavorDimensions += "distribution"
     productFlavors {
         create("github") { dimension = "distribution" }
-        create("play") { dimension = "distribution" }
+        create("play") {
+            dimension = "distribution"
+            applicationId = "com.xlcollective.einkreader"
+            // Play requires new apps and updates to target API 36 (Android
+            // 16) since Aug 31, 2026. The sideload build stays on 34 for the
+            // e-ink firmwares that reject newer targets (see defaultConfig).
+            targetSdk = 36
+        }
     }
 }
 

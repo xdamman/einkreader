@@ -10,6 +10,7 @@ import '../models.dart';
 import '../services/app_log.dart';
 import '../services/feed_parser.dart';
 import '../services/nostr_service.dart';
+import '../services/build_config.dart';
 import '../services/sync_service.dart';
 
 /// Adds a source, whichever kind: an RSS/Atom feed (a feed URL directly or a
@@ -194,7 +195,10 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   }
 
   Future<void> _connectTwitter() async {
-    final clientId = _clientIdController.text.trim();
+    // Play builds carry the project's own client id; others bring theirs.
+    final clientId = kBuiltInTwitterClientId.isNotEmpty
+        ? kBuiltInTwitterClientId
+        : _clientIdController.text.trim();
     if (clientId.isEmpty) {
       _toast('Enter your Twitter OAuth 2.0 Client ID first');
       return;
@@ -479,11 +483,14 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
       ];
 
   List<Widget> _twitterSection(TextStyle sectionStyle) => [
-            const Text(
-              'Creates a feed from your Bookmarks. You need a '
-              'free OAuth 2.0 Client ID from developer.x.com with callback '
-              'URL einkreader://callback (see README).',
-              style: TextStyle(fontSize: 14),
+            Text(
+              kBuiltInTwitterClientId.isNotEmpty
+                  ? 'Creates a feed from your X bookmarks. Connect your '
+                      'account and sign in on X.'
+                  : 'Creates a feed from your Bookmarks. You need a '
+                      'free OAuth 2.0 Client ID from developer.x.com with '
+                      'callback URL einkreader://callback (see README).',
+              style: const TextStyle(fontSize: 14),
             ),
             const SizedBox(height: 12),
             if (_twitterConnected) ...[
@@ -505,14 +512,16 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
                 style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
               ),
             ] else ...[
-              TextField(
-                controller: _clientIdController,
-                autocorrect: false,
-                decoration: const InputDecoration(
-                  labelText: 'OAuth 2.0 Client ID',
+              if (kBuiltInTwitterClientId.isEmpty) ...[
+                TextField(
+                  controller: _clientIdController,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'OAuth 2.0 Client ID',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
+                const SizedBox(height: 12),
+              ],
               OutlinedButton(
                 onPressed: _twitterBusy ? null : _connectTwitter,
                 child: Text(_twitterBusy ? 'Connecting…' : 'Connect Twitter'),

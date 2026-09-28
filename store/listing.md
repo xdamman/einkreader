@@ -53,14 +53,15 @@ Local and private by default. If you want an audience, create a free
 public profile: a name@einkreader.app address people can follow, and a
 page at einkreader.app/you showing the highlights you chose to share.
 Share a quote with your comment, copy a link to it, or send it by
-email — you decide, every time.
+email — you decide, every time. Suggest improvements and report bugs
+right from the app, in public, with the community.
 
 SOURCES
 • RSS and Atom feeds, organized in folders
-• Twitter/X bookmarks (with your own free API key), whole threads included
+• X (Twitter) bookmarks — sign in with X, whole threads included
 • Nostr profiles: notes, long reads and bookmarks
 • Any link, via Android share or paste — saved to read later
-• Email anything to your @einkreader.app address (optional plugin)
+• Email links and PDFs to your own @einkreader.app address
 
 MADE FOR E-INK
 Designed on and for devices like the iFLYTEK AINOTE and Boox tablets:
@@ -83,18 +84,35 @@ einkreader.app — the RSS reader made for your e-ink device.
 - Email: xdamman@opencollective.com
 - Privacy policy URL (required): **https://einkreader.app/privacy.html**
 
-## Data safety questionnaire (draft answers)
+## Account deletion (required: the app lets people create an account)
 
-- Data collected: none by default.
-  - Optional features: email address (the whitelisted sender, if the
-    user enables the Email plugin) — stored to provide the feature, not
-    shared, deletable on request. User-created public content (username,
-    shared highlights) — published at the user's explicit request.
-- Data shared with third parties: none. (Content the user publishes to
-  Nostr relays is user-initiated sharing, not data sale/transfer.)
-- Encryption in transit: yes (HTTPS/WSS).
-- Deletion: local data deleted with the app; server-side data on request.
-- No ads, no analytics SDKs, no advertising ID.
+- Delete account URL: **https://einkreader.app/delete-account**
+- In the app: Profile → Delete profile (immediate).
+- Deleted: the username (name@einkreader.app), inbox emails and their
+  attachments, accepted senders; the profile key on the device.
+- Kept: nothing server-side. (The local library stays on the device;
+  publicly shared Nostr notes may remain on third-party relays.)
+
+## Data safety questionnaire (answers)
+
+Does the app collect or share user data? **Yes** — only for optional
+features the user turns on. No ads, no analytics, no advertising ID.
+
+| Data type | Collected? | Why | Optional? |
+| --- | --- | --- | --- |
+| Personal info → Name | Yes (profile name) | Public profile | Optional |
+| Personal info → Email address | Yes (accepted senders for the inbox) | App functionality | Optional |
+| Personal info → User IDs | Yes (username, Nostr public key) | Account management | Optional |
+| Messages → Emails | Yes (mail sent to name@einkreader.app, held until the app fetches it) | App functionality | Optional |
+| Photos | Yes (profile picture, feedback screenshots — uploaded to a public media host) | App functionality | Optional |
+| App activity → Other user-generated content | Yes (highlights/feedback the user chooses to publish) | App functionality | Optional |
+
+- Shared with third parties: content the user explicitly publishes goes
+  to public Nostr relays and the public media host (blossom.primal.net).
+  X (Twitter) is contacted directly from the device with the user's own
+  sign-in; tokens never leave the device.
+- Encrypted in transit: **Yes** (HTTPS / WSS).
+- Users can request deletion: **Yes** — in the app and at the URL above.
 
 ## Content rating questionnaire (guidance)
 
@@ -108,6 +126,7 @@ to (like a browser/reader). Expected rating: Everyone / PEGI 3.
 • A reading pipeline: Feed → To Read → Read → Highlights → Shared
 • Instant highlighting; tap a highlight to note or share it
 • Universal search across sources, articles and highlights
-• Free name@einkreader.app address and public highlights page
+• Free name@einkreader.app address: email yourself links and PDFs
+• Sign in with X to read your bookmarks
 • Offline-first: everything syncs, nothing needs a connection
 ```

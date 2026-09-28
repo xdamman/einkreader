@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../screens/add_source_screen.dart';
+import '../services/build_config.dart';
 import '../services/errors.dart';
 import '../services/outbox_service.dart';
 import '../services/sync_service.dart';
@@ -24,7 +25,9 @@ Future<bool> reconnectTwitter({
   required NavigatorState navigator,
 }) async {
   final prefs = await SharedPreferences.getInstance();
-  final clientId = prefs.getString('twitter_client_id') ?? '';
+  final stored = prefs.getString('twitter_client_id') ?? '';
+  final clientId =
+      kBuiltInTwitterClientId.isNotEmpty ? kBuiltInTwitterClientId : stored;
   if (clientId.isEmpty) {
     await navigator.push(
         MaterialPageRoute(

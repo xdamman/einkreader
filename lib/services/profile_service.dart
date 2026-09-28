@@ -463,6 +463,38 @@ class ProfileService {
   Future<bool> addAllowedSender(String sender) async =>
       setAllowedSenders([...await allowedSenders, sender]);
 
+  /// Deletes this profile's account: the server frees the username (the
+  /// @einkreader.app address stops resolving and receiving mail) and
+  /// deletes the inbox stored for it, authorized by a signed proof-of-key;
+  /// then the profile's key and details are removed from this device. The
+  /// local library (articles, highlights) is untouched. Throws when the
+  /// server can't be reached — nothing is removed locally then, so the
+  /// account is never left half-deleted.
+  Future<void> deleteAccount() async {
+    final event = await signEvent(kind: 27235, content: 'delete-account');
+    final response = await (debugHttpClient ?? http.Client())
+        .delete(
+          Uri.https(nip05Domain, '/api/account'),
+          headers: {
+            'Authorization':
+                'Nostr ${base64Encode(utf8.encode(jsonEncode(event)))}',
+          },
+        )
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode != 200) {
+      throw Exception('Account deletion failed (HTTP ${response.statusCode})');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in [
+      _kSecret, _kName, _kAbout, _kPicture, _kLinks, _kUsername,
+      _kUsernamePending, _kAllowedSender,
+    ]) {
+      await prefs.remove(await _k(key));
+    }
+    await AppLogService.instance
+        .info('Profile: account deleted (${response.body})');
+  }
+
   /// Authorization header for the inbox API: a fresh signed proof-of-key.
   Future<String> inboxAuthHeader() async {
     final event = await signEvent(kind: 27235, content: 'inbox');

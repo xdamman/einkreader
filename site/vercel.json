@@ -5,6 +5,10 @@
       "destination": "/brand.html"
     },
     {
+      "source": "/delete-account",
+      "destination": "/delete-account.html"
+    },
+    {
       "source": "/.well-known/nostr.json",
       "destination": "/api/nostr-json"
     },

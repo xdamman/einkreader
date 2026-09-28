@@ -429,4 +429,38 @@ void main() {
     expect(url, '${ProfileService.blossomServer}/$hash.jpg');
     service.debugHttpClient = null;
   });
+
+  test('delete account: signed server call, then the profile is gone',
+      () async {
+    final service = ProfileService.instance;
+    service.debugHttpClient = MockClient(
+        (request) async => http.Response(jsonEncode({'ok': true}), 200));
+    await service.createIdentity();
+    await service.registerUsername('deleteme');
+    expect(await service.enabled, isTrue);
+
+    // Offline / server error: nothing is removed locally.
+    service.debugHttpClient =
+        MockClient((request) async => http.Response('down', 503));
+    await expectLater(service.deleteAccount(), throwsException);
+    expect(await service.enabled, isTrue);
+    expect(await service.username, 'deleteme');
+
+    http.Request? sent;
+    service.debugHttpClient = MockClient((request) async {
+      sent = request;
+      return http.Response(jsonEncode({'deleted': true}), 200);
+    });
+    await service.deleteAccount();
+    expect(sent!.method, 'DELETE');
+    expect(sent!.url.toString(), 'https://einkreader.app/api/account');
+    final auth = jsonDecode(utf8.decode(base64Decode(
+            sent!.headers['Authorization']!.substring('Nostr '.length))))
+        as Map<String, dynamic>;
+    expect(auth['kind'], 27235);
+    expect(auth['content'], 'delete-account');
+    expect(await service.enabled, isFalse);
+    expect(await service.username, isNull);
+    service.debugHttpClient = null;
+  });
 }
