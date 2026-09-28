@@ -63,6 +63,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Sentinel for the collapsed "Others" author chip.
   static const _othersAuthor = '__others__';
+
+  /// Sentinel for the Inbox's "Other senders" chip: emails from senders
+  /// not accepted yet, waiting for Accept / Delete.
+  static const _requestsAuthor = '__requests__';
   List<Article> _articles = [];
   List<Highlight> _highlights = [];
   List<Share> _shares = [];
@@ -797,8 +801,19 @@ class _HomeScreenState extends State<HomeScreen> {
               0, (sum, name) => sum + (byAuthor[name]?.unread ?? 0)),
         ));
       }
+      final requests = SyncService.instance.emailRequests;
+      if (isInbox && requests.isNotEmpty) {
+        authorRow.add(_AuthorFilter(
+          name: _requestsAuthor,
+          label: 'Other senders',
+          unread: requests.length,
+        ));
+      }
       final selectedAuthor = _feedAuthor;
-      if (selectedAuthor == _othersAuthor && othersSet.isNotEmpty) {
+      if (selectedAuthor == _requestsAuthor && isInbox && requests.isNotEmpty) {
+        // Requests aren't articles yet: the header lists them.
+        articles = const [];
+      } else if (selectedAuthor == _othersAuthor && othersSet.isNotEmpty) {
         articles =
             articles.where((a) => othersSet.contains(a.author)).toList();
       } else if (selectedAuthor != null &&
@@ -855,7 +870,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? () => _reconnectTwitter(selectedSource)
                 : null,
           ),
-        if (isInbox) InboxHeader(onChanged: _load),
+        if (isInbox)
+          InboxHeader(
+            // A new header when switching views, so it reloads.
+            key: ValueKey('inbox-${_feedAuthor == _requestsAuthor}'),
+            onChanged: _load,
+            showRequests: _feedAuthor == _requestsAuthor &&
+                SyncService.instance.emailRequests.isNotEmpty,
+          ),
         if (currentReads.isNotEmpty)
           ResumeReadingSection(
             articles: currentReads,
@@ -867,7 +889,10 @@ class _HomeScreenState extends State<HomeScreen> {
             articles: articles,
             sourceTitles: _sourceTitles,
             emptyMessage: isInbox
-                ? 'Nothing in your Inbox yet.'
+                ? (_feedAuthor == _requestsAuthor &&
+                        SyncService.instance.emailRequests.isNotEmpty
+                    ? ''
+                    : 'Nothing in your Inbox yet.')
                 : 'No articles yet.\n\nPull to sync, or manage sources '
                     'in Settings.',
             onChanged: _load,

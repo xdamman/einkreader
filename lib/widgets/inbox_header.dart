@@ -14,7 +14,13 @@ class InboxHeader extends StatefulWidget {
   /// Called after something changed the feed (a request accepted).
   final VoidCallback onChanged;
 
-  const InboxHeader({super.key, required this.onChanged});
+  /// True when the "Other senders" filter is selected: the header lists
+  /// the emails from senders not yet accepted (Accept / Delete) and the
+  /// accepted-senders manager, instead of the address line.
+  final bool showRequests;
+
+  const InboxHeader(
+      {super.key, required this.onChanged, this.showRequests = false});
 
   @override
   State<InboxHeader> createState() => _InboxHeaderState();
@@ -191,7 +197,7 @@ class _InboxHeaderState extends State<InboxHeader> {
               onPressed: _openProfile,
               child: const Text('Create an einkreader profile'),
             ),
-          ] else ...[
+          ] else if (!widget.showRequests) ...[
             Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
@@ -216,24 +222,24 @@ class _InboxHeaderState extends State<InboxHeader> {
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  _senders.isEmpty
-                      ? 'Emails from new senders wait here for you to accept.'
-                      : 'Accepted senders: ${_senders.join(', ')}',
-                  style: const TextStyle(fontSize: 13),
-                ),
-                TextButton(
-                  onPressed: _manageSenders,
-                  child: const Text('Manage'),
-                ),
-              ],
+          ],
+          if (widget.showRequests) ...[
+            const Text(
+              'Emails from people you haven\'t accepted yet. Accept a sender '
+              'to receive what they send straight in your Inbox.',
+              style: TextStyle(fontSize: 14, height: 1.4),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: _manageSenders,
+                child: Text(_senders.isEmpty
+                    ? 'Manage accepted senders'
+                    : 'Manage accepted senders (${_senders.length})'),
+              ),
             ),
           ],
-          for (final request in requests) ...[
+          for (final request in widget.showRequests ? requests : const <EmailRequest>[]) ...[
             const Divider(height: 16),
             Text.rich(
               TextSpan(children: [

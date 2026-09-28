@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -10,8 +11,8 @@ import '../widgets/profile_switcher.dart';
 import 'nostr_profile_screen.dart';
 import 'profile_screen.dart';
 
-/// Public feedback about the app: Nostr notes addressed to einkreader's
-/// official account, newest first. Anyone's notes show; posting, replying
+/// Public feedback about the app (Nostr notes addressed to einkreader's
+/// official account), newest first. Anyone's notes show; posting, replying
 /// and reacting use the reader's own profile key.
 class FeedbackScreen extends StatefulWidget {
   /// Test seam: a fake service stands in for the relays.
@@ -34,10 +35,20 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   /// A refresh from the relays is running (the app-bar icon spins).
   bool _loading = false;
 
+  /// Newest feedback keeps arriving while the screen is open.
+  Timer? _poll;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _poll = Timer.periodic(const Duration(minutes: 1), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
   }
 
   /// Shows what's stored locally at once, then asks the relays only for
@@ -63,7 +74,14 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
           _replyCounts = cached.replyCounts;
         }
       });
-      final fresh = await _service.feedback();
+      var fresh = await _service.feedback();
+      // Right after opening, relays can be slow to answer and come back
+      // empty: try again a couple of times before saying there's nothing.
+      for (var attempt = 1; fresh.notes.isEmpty && attempt <= 2; attempt++) {
+        await Future<void>.delayed(Duration(seconds: 3 * attempt));
+        if (!mounted) return;
+        fresh = await _service.feedback();
+      }
       await NostrProfileCache.load(fresh.notes.map((n) => n.pubkey),
           nostr: _service.nostr);
       if (!mounted) return;
@@ -128,7 +146,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Public notes to einkreader on Nostr. Report a bug, '
+                    'Public feedback about einkreader. Report a bug, '
                     'suggest an idea, or reply to others.',
                     style: TextStyle(fontSize: 15, height: 1.4),
                   ),
@@ -597,14 +615,18 @@ class FeedbackNoteTile extends StatelessWidget {
                           child: Container(
                             decoration:
                                 BoxDecoration(border: Border.all(width: 1)),
-                            child: Image.network(image,
-                                fit: BoxFit.contain,
-                                errorBuilder: (_, __, ___) => Padding(
-                                      padding: const EdgeInsets.all(8),
-                                      child: Text('[screenshot: $image]',
-                                          style:
-                                              const TextStyle(fontSize: 13)),
-                                    )),
+                            child: GestureDetector(
+                              onTap: () => showImageViewer(
+                                  context, Image.network(image)),
+                              child: Image.network(image,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => Padding(
+                                        padding: const EdgeInsets.all(8),
+                                        child: Text('[screenshot: $image]',
+                                            style: const TextStyle(
+                                                fontSize: 13)),
+                                      )),
+                            ),
                           ),
                         ),
                       ),
@@ -816,7 +838,9 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
   late final _subject = TextEditingController(text: widget.subject ?? '');
   final _body = TextEditingController();
   late final _url = TextEditingController(text: widget.url ?? '');
-  late bool _includeScreenshot = widget.screenshot != null;
+  /// Off by default: the page is captured just in case, and attached only
+  /// when the reader asks (instantly — it's already there).
+  bool _includeScreenshot = false;
   ({String name, String? address, String npub, String picture})? _identity;
   bool _posting = false;
 
@@ -997,10 +1021,15 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    decoration: BoxDecoration(border: Border.all(width: 1)),
-                    child: Image.memory(screenshot,
-                        height: 160, fit: BoxFit.contain),
+                  GestureDetector(
+                    onTap: () => showImageViewer(
+                        context, Image.memory(screenshot)),
+                    child: Container(
+                      decoration:
+                          BoxDecoration(border: Border.all(width: 1)),
+                      child: Image.memory(screenshot,
+                          height: 160, fit: BoxFit.contain),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   TextButton.icon(
@@ -1071,4 +1100,39 @@ class RefreshAction extends StatelessWidget {
       onPressed: loading ? null : onPressed,
     );
   }
+}
+
+
+/// Shows an image (a feedback screenshot) almost full screen, zoomable;
+/// tap anywhere or the close button to dismiss.
+Future<void> showImageViewer(BuildContext context, Image image) {
+  return showDialog<void>(
+    context: context,
+    barrierColor: Colors.black87,
+    builder: (dialogContext) => Dialog(
+      insetPadding: const EdgeInsets.all(12),
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+      child: Stack(
+        children: [
+          GestureDetector(
+            onTap: () => Navigator.pop(dialogContext),
+            child: InteractiveViewer(
+              maxScale: 5,
+              child: Center(child: image),
+            ),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              tooltip: 'Close image',
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(dialogContext),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

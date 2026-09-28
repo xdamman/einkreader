@@ -118,11 +118,21 @@ void main() {
     expect(find.text('xavier@einkreader.app'), findsOneWidget);
     expect(find.textContaining('Send any link you want to read later'),
         findsOneWidget);
+    // One compact header line: no list of accepted senders, no requests.
+    expect(find.textContaining('Accepted senders'), findsNothing);
+    expect(find.text('Accept sender'), findsNothing);
+
+    // Requests live under their own "Other senders" filter.
+    await tester.tap(find.text('Other senders'));
+    await settle(tester);
     expect(find.textContaining('stranger@example.net', findRichText: true),
         findsOneWidget);
     expect(find.textContaining('wants to send you', findRichText: true),
         findsOneWidget);
     expect(find.text('Accept sender'), findsOneWidget);
+    expect(find.textContaining('Manage accepted senders'), findsOneWidget);
+    await tester.tap(find.text('All').last);
+    await settle(tester);
 
     // The sender row: most items first, even against alphabetical order.
     final zedX = tester.getTopLeft(find.text('zed@example.com').first).dx;

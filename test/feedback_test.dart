@@ -25,6 +25,9 @@ class _FakeRelay extends NostrService {
   final events = <Map<String, dynamic>>[];
   final filters = <Map<String, dynamic>>[];
 
+  /// Queries that come back empty first (a cold, slow relay).
+  int emptyAnswers = 0;
+
   @override
   Future<int> publish(Map<String, dynamic> event,
       {Duration timeout = const Duration(seconds: 8)}) async {
@@ -36,6 +39,10 @@ class _FakeRelay extends NostrService {
   Future<List<Map<String, dynamic>>> query(Map<String, dynamic> filter,
       {Duration timeout = const Duration(seconds: 8)}) async {
     filters.add(filter);
+    if (emptyAnswers > 0) {
+      emptyAnswers--;
+      return [];
+    }
     bool tagged(Map<String, dynamic> e, String name, List values) =>
         (e['tags'] as List).any((t) =>
             (t as List).length >= 2 && t[0] == name && values.contains(t[1]));
@@ -268,7 +275,7 @@ void main() {
   });
 
   testWidgets('the new-feedback form: public note, identity with switch, '
-      'prefilled link with a clear cross, screenshot included by default, '
+      'prefilled link with a clear cross, screenshot offered (not included) '
       'post button below', (tester) async {
     await tester.runAsync(() async {
       await ProfileService.instance.createIdentity();
@@ -318,8 +325,9 @@ void main() {
     expect(find.textContaining('home screen'), findsNothing);
     expect(find.text('https://example.org/article'), findsOneWidget,
         reason: 'the link is prefilled');
-    expect(find.text('Remove screenshot'), findsOneWidget,
-        reason: 'the screenshot is included by default');
+    expect(find.text('Remove screenshot'), findsNothing,
+        reason: 'no screenshot unless asked for');
+    expect(find.text('Include a screenshot of the page'), findsOneWidget);
 
     await tester.enterText(
         find.widgetWithText(TextField, 'Subject'), 'Parsing issue');
@@ -335,11 +343,17 @@ void main() {
     expect(find.text('Parsing issue'), findsOneWidget);
     expect(find.text('Images are missing.'), findsOneWidget);
 
-    // Removing and restoring the screenshot, one tap each.
-    await tester.tap(find.text('Remove screenshot'));
-    await tester.pump();
+    // One tap attaches the (already captured) screenshot instantly.
     await tester.tap(find.text('Include a screenshot of the page'));
     await tester.pump();
+    expect(find.text('Remove screenshot'), findsOneWidget);
+    // Tapping the preview opens it almost full screen; tap closes it.
+    await tester.tap(find.byType(Image).last);
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    await tester.tap(find.byTooltip('Close image'));
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsNothing);
 
     // The cross clears the link in one tap.
     await tester.tap(find.byTooltip('Remove the link'));
@@ -370,7 +384,8 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
-  testWidgets('a removed screenshot is not uploaded', (tester) async {
+  testWidgets('without asking for it, no screenshot is uploaded',
+      (tester) async {
     await tester.runAsync(() async {
       await ProfileService.instance.createIdentity();
       ProfileService.instance.debugPublish = (_) async => 1;
@@ -389,8 +404,6 @@ void main() {
     ));
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
-    await tester.tap(find.text('Remove screenshot'));
     await tester.pump();
     await tester.enterText(
         find.widgetWithText(TextField, 'Subject'), 'No picture');
@@ -525,10 +538,61 @@ void main() {
     expect(cached.notes.map((n) => n.id), [note.id]);
     expect(relay.filters, isEmpty);
 
-    // A refresh asks only for what's newer than the cache.
+    // The first refresh is a full sync; later ones ask only for what's
+    // newer than the last sync.
+    await service.feedback();
+    relay.filters.clear();
     await service.feedback();
     expect(relay.filters, isNotEmpty);
     expect(relay.filters.every((f) => f['since'] != null), isTrue,
         reason: 'incremental: every query is bounded by the cache');
+  });
+
+  test("posting before the first load doesn't hide older feedback",
+      () async {
+    // Someone else's feedback from yesterday, on the relays.
+    relay.events.add({
+      'id': 'older',
+      'pubkey': '3333333333333333333333333333333333333333333333333333333333333333',
+      'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000 - 86400,
+      'kind': 1,
+      'tags': [
+        ['p', FeedbackService.officialHex]
+      ],
+      'content': 'Older feedback by someone else',
+    });
+    await ProfileService.instance.createIdentity();
+    // Our own post lands in the cache first (newest event stored)…
+    await service.post('My fresh feedback');
+    // …yet the first list load still fetches everything.
+    final list = await service.feedback();
+    expect(list.notes.map((n) => n.id), contains('older'));
+  });
+
+  testWidgets('the list loads by itself, even when relays answer late',
+      (tester) async {
+    relay.events.add({
+      'id': 'late',
+      'pubkey': '4444444444444444444444444444444444444444444444444444444444444444',
+      'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000 - 60,
+      'kind': 1,
+      'tags': [
+        ['p', FeedbackService.officialHex]
+      ],
+      'content': 'Arrived on the second try',
+    });
+    relay.emptyAnswers = 1; // the first query comes back empty
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
+    for (var i = 0; i < 6; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(seconds: 1));
+    }
+    await settle(tester);
+    expect(find.textContaining('Arrived on the second try', findRichText: true),
+        findsOneWidget,
+        reason: 'retried automatically — no reload tap needed');
+    expect(find.text('No feedback yet — be the first.'), findsNothing);
   });
 }

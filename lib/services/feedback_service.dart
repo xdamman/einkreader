@@ -185,8 +185,13 @@ class FeedbackService {
   Future<({List<FeedbackNote> notes, Map<String, int> replyCounts})>
       feedback() async {
     await _loadAddressed();
-    final latest = await _db.latestNostrEventAt([1, 7]);
-    final since = latest == null ? null : latest - 300;
+    // Bounded by the last successful sync — not by the newest stored event:
+    // our own posts are stored the moment they're signed, which would hide
+    // everything older that we never fetched. A day of overlap is cheap.
+    final prefs = await SharedPreferences.getInstance();
+    final syncedAt = prefs.getInt(_kSyncedAt);
+    final since = syncedAt == null ? null : syncedAt - 86400;
+    final startedAt = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final fresh = await _nostr.query({
       'kinds': [1],
       '#p': [officialHex],
@@ -195,6 +200,12 @@ class FeedbackService {
     });
     await _db.saveNostrEvents(fresh);
     _addressed.addAll(_idsAddressedToUs(fresh));
+    // An empty answer on a first sync is more likely unreachable relays
+    // than no feedback at all: don't mark it synced, so the next refresh
+    // asks for everything again.
+    if (fresh.isNotEmpty || syncedAt != null) {
+      await prefs.setInt(_kSyncedAt, startedAt);
+    }
     final rootIds = (await cachedFeedback()).notes.map((n) => n.id).toList();
     if (rootIds.isNotEmpty) {
       final more = await _nostr.query({
@@ -219,6 +230,8 @@ class FeedbackService {
     }
     return cachedFeedback();
   }
+
+  static const _kSyncedAt = 'feedback_synced_at';
 
   /// Which notes are feedback (tag the official account) — recomputed from
   /// the cache once per service, then kept up to date as events arrive.
