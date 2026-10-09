@@ -137,6 +137,32 @@ jobs:
       # target API 36, no self-update / all-files access), with the
       # project's X client id baked in so Play users just tap "Connect".
       # Signed with the same key, which Play uses as the upload key.
+      # Play refuses bundles signed with a debug certificate, and the
+      # sideload key above is one: the Play bundle is signed with its own
+      # upload key (Play App Signing re-signs what reaches devices).
+      - name: Configure Play upload key
+        env:
+          KEYSTORE_B64: ${{ secrets.PLAY_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PLAY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PLAY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PLAY_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              echo "::error::PLAY_KEYSTORE_BASE64 secret is not set — Play rejects bundles signed with the debug key. See store/README.md"
+              exit 1
+            fi
+            echo "No Play upload key; the bundle will be debug-signed (not uploadable)."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 --decode > android/app/play-upload.jks
+          cat > android/play-key.properties <<EOF
+          storeFile=play-upload.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
       - name: Build Play Store bundle (.aab)
         env:
           TWITTER_CLIENT_ID: ${{ secrets.TWITTER_CLIENT_ID }}
@@ -161,6 +187,22 @@ jobs:
           done
           grep -aq "com.xlcollective.einkreader" /tmp/play-manifest.pb || {
             echo "::error::Play bundle is not com.xlcollective.einkreader"; exit 1; }
+
+      # Never upload-blocked again: the bundle must carry the Play upload
+      # key, not a debug certificate.
+      - name: Verify Play bundle is signed with the upload key
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          EXPECTED_UPLOAD_SHA256: 57:5D:C6:72:01:08:53:9A:99:F1:27:78:22:56:01:E0:3C:09:D2:2F:A9:6B:54:25:D9:AD:4B:42:95:DC:A2:3C
+        run: |
+          aab=build/app/outputs/bundle/playRelease/app-play-release.aab
+          keytool -printcert -jarfile "$aab" | tee /tmp/play-cert.txt
+          if grep -q "CN=Android Debug" /tmp/play-cert.txt; then
+            echo "::error::Play bundle is signed with a debug certificate — Play rejects it"; exit 1
+          fi
+          if ! grep -q "SHA256: $EXPECTED_UPLOAD_SHA256" /tmp/play-cert.txt; then
+            echo "::error::Play bundle is not signed with the einkreader upload key ($EXPECTED_UPLOAD_SHA256)"; exit 1
+          fi
 
       - name: Stage APK and Play bundle with versioned names
         run: |

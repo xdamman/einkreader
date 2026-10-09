@@ -50,3 +50,4 @@ app.*.map.json
 /android/app/release
 test/screenshots/demo/
 test/screenshots/failures/
+/android/play-key.properties

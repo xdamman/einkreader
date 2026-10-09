@@ -19,6 +19,18 @@ val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) load(FileInputStream(keystorePropertiesFile))
 }
 
+// The Google Play upload key, from android/play-key.properties (written by CI
+// from the PLAY_* secrets). Play refuses bundles signed with a debug
+// certificate, and the sideload key above IS a debug keystore — so the `play`
+// flavor signs with its own upload key. (Play App Signing re-signs what
+// reaches devices; this key only proves uploads come from us.)
+val playKeystorePropertiesFile = rootProject.file("play-key.properties")
+val playKeystoreProperties = Properties().apply {
+    if (playKeystorePropertiesFile.exists()) {
+        load(FileInputStream(playKeystorePropertiesFile))
+    }
+}
+
 android {
     namespace = "com.xdamman.einkreader"
     compileSdk = flutter.compileSdkVersion
@@ -67,6 +79,14 @@ android {
             enableV2Signing = true
             enableV3Signing = true
         }
+        if (playKeystorePropertiesFile.exists()) {
+            create("play") {
+                storeFile = file(playKeystoreProperties["storeFile"] as String)
+                storePassword = playKeystoreProperties["storePassword"] as String
+                keyAlias = playKeystoreProperties["keyAlias"] as String
+                keyPassword = playKeystoreProperties["keyPassword"] as String
+            }
+        }
         if (keystorePropertiesFile.exists()) {
             create("release") {
                 storeFile = file(keystoreProperties["storeFile"] as String)
@@ -80,14 +100,12 @@ android {
         }
     }
 
+    // Signing is chosen per flavor (below), not per build type: a build
+    // type's signing config would override the flavor's, and the `play`
+    // flavor must never ship with the sideload (debug) key.
     buildTypes {
         release {
-            // Use the stable release key (from android/key.properties) when present,
-            // otherwise the debug key so `flutter run --release` works locally.
-            signingConfig = if (keystorePropertiesFile.exists())
-                signingConfigs.getByName("release")
-            else
-                signingConfigs.getByName("debug")
+            signingConfig = null
         }
     }
 
@@ -102,7 +120,15 @@ android {
     // is exposed to Dart as FLUTTER_APP_FLAVOR (see build_config.dart).
     flavorDimensions += "distribution"
     productFlavors {
-        create("github") { dimension = "distribution" }
+        create("github") {
+            dimension = "distribution"
+            // The stable sideload key (android/key.properties) when present,
+            // otherwise the local debug key so `flutter run --release` works.
+            signingConfig = if (keystorePropertiesFile.exists())
+                signingConfigs.getByName("release")
+            else
+                signingConfigs.getByName("debug")
+        }
         create("play") {
             dimension = "distribution"
             applicationId = "com.xlcollective.einkreader"
@@ -110,6 +136,13 @@ android {
             // 16) since Aug 31, 2026. The sideload build stays on 34 for the
             // e-ink firmwares that reject newer targets (see defaultConfig).
             targetSdk = 36
+            // The Play upload key when present (CI); locally falls back to
+            // the debug key — fine for testing, rejected by Play (and CI
+            // fails a release bundle signed that way).
+            signingConfig = if (playKeystorePropertiesFile.exists())
+                signingConfigs.getByName("play")
+            else
+                signingConfigs.getByName("debug")
         }
     }
 }
