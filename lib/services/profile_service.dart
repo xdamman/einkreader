@@ -262,7 +262,11 @@ class ProfileService {
   static const reservedUsernames = {
     'admin', 'root', 'einkreader', 'support', 'help', 'info', 'contact',
     'www', 'mail', 'postmaster', 'abuse', 'security', 'nostr', 'reader',
-    'brand', 'branding', 'privacy', 'opensource',
+    'brand', 'branding', 'privacy', 'opensource', 'tos', 'terms',
+    'termsofservice', 'terms_of_service', 'legal', 'delete', 'account',
+    'accounts', 'deleteaccount', 'delete_account', 'about', 'login',
+    'logout', 'signup', 'register', 'settings', 'feedback', 'inbox',
+    'download', 'official', 'team', 'staff', 'moderator', 'status',
   };
 
   /// Whether [name] can be this profile's einkreader.app address, checked

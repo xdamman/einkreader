@@ -21,8 +21,13 @@ export const OFFICIAL_NIP05 = {
 export const RESERVED = new Set([
   'admin', 'root', 'einkreader', 'support', 'help', 'info', 'contact',
   'www', 'mail', 'postmaster', 'abuse', 'security', 'nostr', 'reader',
-  // Site pages whose paths would otherwise match a username.
-  'brand', 'branding', 'privacy', 'opensource',
+  // Site pages whose paths would otherwise match a username, and names
+  // that would look official.
+  'brand', 'branding', 'privacy', 'opensource', 'tos', 'terms',
+  'termsofservice', 'terms_of_service', 'legal', 'delete', 'account',
+  'accounts', 'deleteaccount', 'delete_account', 'about', 'login', 'logout',
+  'signup', 'register', 'settings', 'feedback', 'inbox', 'download',
+  'official', 'team', 'staff', 'moderator', 'status',
 ]);
 
 // Storage: one blob per change, `registry/<name>/<timestamp>.json`, holding

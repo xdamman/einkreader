@@ -10,7 +10,7 @@ in the Play Console and in two GitHub secrets.
 | Package name | `com.xlcollective.einkreader` (the `play` build flavor) |
 | What to upload | `einkreader-vX.Y.Z-play.aab`, attached to every GitHub release |
 | Target API | 36 (Android 16) — required since Aug 31, 2026 |
-| Privacy policy | https://einkreader.app/privacy.html |
+| Privacy policy | https://einkreader.app/privacy |
 | Delete-account URL | https://einkreader.app/delete-account |
 | Listing, data safety, rating | `listing.md` |
 | Icon, feature graphic, screenshots | this folder (`python3 tool/store_assets.py` refreshes them) |

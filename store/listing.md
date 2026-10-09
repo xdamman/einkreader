@@ -82,7 +82,7 @@ einkreader.app — the RSS reader made for your e-ink device.
 
 - Website: https://einkreader.app
 - Email: xdamman@opencollective.com
-- Privacy policy URL (required): **https://einkreader.app/privacy.html**
+- Privacy policy URL (required): **https://einkreader.app/privacy**
 
 ## Account deletion (required: the app lets people create an account)
 
