@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
@@ -79,6 +80,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _restoring = false;
   bool get _backupBusy => _backingUp || _restoring;
 
+  /// 0..1 while backing up or restoring (zipping runs in the background).
+  double? _backupProgress;
+  LastBackup? _lastBackup;
+
   /// Where the offline archive currently lives, and whether that is a
   /// user-chosen folder (as opposed to the default app directory).
   String? _archiveDir;
@@ -98,8 +103,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final archiveDir = await ArchiveStore.instance.baseDir();
     final twitterOn = await PluginService.instance.twitterOn;
     final emailOn = await PluginService.instance.emailOn;
+    final lastBackup = await _backupService.lastBackup();
     if (!mounted) return;
     setState(() {
+      _lastBackup = lastBackup;
       _developerMode = developerMode;
       _archiveDir = archiveDir;
       _customArchiveDir = prefs.getString(ArchiveStore.dirPrefKey) != null;
@@ -157,17 +164,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _backup() async {
-    setState(() => _backingUp = true);
+    setState(() {
+      _backingUp = true;
+      _backupProgress = 0;
+    });
     try {
       final file = await _backupService.createBackup(
-          nowMs: DateTime.now().millisecondsSinceEpoch);
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+          onProgress: _onBackupProgress);
       if (!mounted) return;
-      await Share.shareXFiles([XFile(file.path)],
+      setState(() => _backupProgress = 1);
+      final result = await Share.shareXFiles([XFile(file.path)],
           subject: 'einkreader backup', text: 'einkreader library backup');
+      // Only a share the user backed out of doesn't count as a backup.
+      if (result.status != ShareResultStatus.dismissed) {
+        await _backupService.recordBackup(file);
+        final last = await _backupService.lastBackup();
+        if (mounted) setState(() => _lastBackup = last);
+      }
     } catch (e) {
       if (mounted) _toast(friendlyError(e, doing: 'creating the backup'));
     } finally {
-      if (mounted) setState(() => _backingUp = false);
+      if (mounted) {
+        setState(() {
+          _backingUp = false;
+          _backupProgress = null;
+        });
+      }
     }
   }
 
@@ -200,16 +223,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true) return;
 
-    setState(() => _restoring = true);
+    setState(() {
+      _restoring = true;
+      _backupProgress = 0;
+    });
     try {
-      await _backupService.restoreBackup(File(path));
+      await _backupService.restoreBackup(File(path),
+          onProgress: _onBackupProgress);
       if (!mounted) return;
       await _load();
       _toast('Backup restored');
     } catch (e) {
       if (mounted) _toast(friendlyError(e, doing: 'restoring the backup'));
     } finally {
-      if (mounted) setState(() => _restoring = false);
+      if (mounted) {
+        setState(() {
+          _restoring = false;
+          _backupProgress = null;
+        });
+      }
+    }
+  }
+
+  /// Progress arrives in whole-percent steps; repaint only every 5% so the
+  /// e-ink screen doesn't flash constantly.
+  void _onBackupProgress(double value) {
+    if (!mounted) return;
+    final pct = (value * 100).round();
+    final shown = ((_backupProgress ?? 0) * 100).round();
+    if (pct == 100 || pct - shown >= 5) {
+      setState(() => _backupProgress = value);
     }
   }
 
@@ -635,10 +678,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'restore it after reinstalling.',
           style: TextStyle(fontSize: 14),
         ),
+        const SizedBox(height: 8),
+        Text(SettingsScreenLabels.lastBackup(_lastBackup),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
         OutlinedButton.icon(
           icon: const Icon(Icons.backup_outlined),
-          label: Text(_backingUp ? 'Preparing…' : 'Back up now'),
+          label: Text(_backingUp ? 'Backing up…' : 'Back up now'),
           onPressed: _backupBusy ? null : _backup,
         ),
         const SizedBox(height: 8),
@@ -647,6 +693,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           label: Text(_restoring ? 'Restoring…' : 'Restore from backup'),
           onPressed: _backupBusy ? null : _restore,
         ),
+        if (_backupProgress != null) ...[
+          const SizedBox(height: 16),
+          LinearProgressIndicator(
+            value: _backupProgress,
+            minHeight: 8,
+            color: Colors.black,
+            backgroundColor: Colors.black12,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _backupProgress! >= 1 && _backingUp
+                ? 'Backup ready, choose where to save it.'
+                : '${_backingUp ? 'Backing up' : 'Restoring'}… '
+                    '${(_backupProgress! * 100).round()}%',
+            style: const TextStyle(fontSize: 14),
+          ),
+        ],
       ];
 
   List<Widget> _developerSection() => [
@@ -713,5 +776,34 @@ class _PluginCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Text helpers for the settings screen, public so they can be tested.
+class SettingsScreenLabels {
+  static String _size(int bytes) {
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).ceil()} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+  }
+
+  /// "Last backup: today at 14:05 (12.3 MB)".
+  static String lastBackup(LastBackup? last, {DateTime? now}) {
+    if (last == null) return 'No backup yet.';
+    now ??= DateTime.now();
+    final at = last.at;
+    final time = DateFormat.Hm().format(at);
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(at.year, at.month, at.day);
+    final daysAgo = today.difference(day).inDays;
+    final when = switch (daysAgo) {
+      0 => 'today at $time',
+      1 => 'yesterday at $time',
+      _ => '${DateFormat('d MMM yyyy').format(at)} at $time',
+    };
+    final size = last.bytes > 0 ? ' (${_size(last.bytes)})' : '';
+    return 'Last backup: $when$size';
   }
 }

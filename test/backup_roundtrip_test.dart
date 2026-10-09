@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/services/archive_store.dart';
+import 'package:einkreader/screens/settings_screen.dart';
 import 'package:einkreader/services/backup_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -52,8 +53,14 @@ void main() {
     archived.writeAsStringSync('archived content');
 
     final backup = BackupService();
-    final zip = await backup.createBackup(nowMs: 1234, outputDir: tmp);
+    final progress = <double>[];
+    final zip = await backup.createBackup(
+        nowMs: 1234, outputDir: tmp, onProgress: progress.add);
     expect(zip.existsSync(), isTrue);
+    // Zipped in a background isolate, reporting progress up to done.
+    expect(progress, isNotEmpty);
+    expect(progress.last, 1.0);
+    expect(progress, orderedEquals([...progress]..sort()));
 
     // Wipe everything: delete all sources (cascades) and the archive dir.
     for (final s in await db.getSources()) {
@@ -62,7 +69,9 @@ void main() {
     Directory(archiveBase).deleteSync(recursive: true);
     expect(await db.getSources(), isEmpty);
 
-    await backup.restoreBackup(zip);
+    final restoreProgress = <double>[];
+    await backup.restoreBackup(zip, onProgress: restoreProgress.add);
+    expect(restoreProgress.last, 1.0);
 
     // DB rows are back.
     final sources = await db.getSources();
@@ -75,6 +84,36 @@ void main() {
         '2026', 'note.md'));
     expect(restored.existsSync(), isTrue);
     expect(restored.readAsStringSync(), 'archived content');
+  });
+
+  test('remembers the last backup, with its size', () async {
+    final backup = BackupService();
+    expect(await backup.lastBackup(), isNull);
+    final zip = await backup.createBackup(nowMs: 1, outputDir: tmp);
+    await backup.recordBackup(zip, at: DateTime(2026, 10, 9, 14, 5));
+    final last = await backup.lastBackup();
+    expect(last!.at, DateTime(2026, 10, 9, 14, 5));
+    expect(last.bytes, zip.lengthSync());
+  });
+
+  test('last backup label', () {
+    final now = DateTime(2026, 10, 9, 18);
+    expect(SettingsScreenLabels.lastBackup(null, now: now), 'No backup yet.');
+    expect(
+        SettingsScreenLabels.lastBackup(
+            LastBackup(DateTime(2026, 10, 9, 14, 5), 3 * 1024 * 1024),
+            now: now),
+        'Last backup: today at 14:05 (3.0 MB)');
+    expect(
+        SettingsScreenLabels.lastBackup(
+            LastBackup(DateTime(2026, 10, 8, 9, 30), 2048),
+            now: now),
+        'Last backup: yesterday at 09:30 (2 KB)');
+    expect(
+        SettingsScreenLabels.lastBackup(
+            LastBackup(DateTime(2026, 9, 1, 8, 0), 0),
+            now: now),
+        'Last backup: 1 Sep 2026 at 08:00');
   });
 
   test('rejects a zip that is not an einkreader backup', () async {
