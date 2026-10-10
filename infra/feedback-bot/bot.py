@@ -176,16 +176,22 @@ Do the work the way this project is normally worked on:
   unclear or harmful and say so).
 - Add or update tests; run `flutter analyze` and the full test suite (see
   your memory notes for the environment setup) and fix failures.
+- Add the version to site/data/changelog.json (newest first: a short
+  title and a few plain-language changes for readers, plus a "feedback"
+  entry with this note's id and its subject), then run
+  `npm run build:changelog` in site/ and `npm test` there.
 - Commit to main with a clear message, bump the version in pubspec.yaml,
   tag vX.Y.Z, push, and wait for the GitHub Actions release build to
-  succeed (rerun transient failures). Deploy the site too if you changed it.
+  succeed (rerun transient failures). Pushing main deploys the site.
 - If nothing should be released (e.g. the feedback is already addressed or
   not actionable), don't release.
 
 Your FINAL message is posted publicly as the reply to this feedback, from
 einkreader's account. Make it only that reply: plain text, friendly, under
 600 characters, saying what changed and in which version (or why nothing
-changed). No markdown headings, no internal details, no file paths.
+changed), ending with the changelog link for that version, e.g.
+https://einkreader.app/changelog#v1.2.3. No markdown headings, no internal
+details, no file paths.
 """
 
 

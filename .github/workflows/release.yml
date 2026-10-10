@@ -27,6 +27,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Every release is documented at einkreader.app/changelog: the tagged
+      # version must have its entry in site/data/changelog.json.
+      - name: Check the changelog has this version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! python3 -c "import json,sys; sys.exit(0 if any(e.get('version') == sys.argv[1] for e in json.load(open('site/data/changelog.json'))) else 1)" "$version"; then
+            echo "::error::v$version has no entry in site/data/changelog.json (add one, then npm run build:changelog in site/)"
+            exit 1
+          fi
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

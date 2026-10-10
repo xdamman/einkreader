@@ -14,6 +14,7 @@
   },
   "scripts": {
     "build:browser": "npx --yes esbuild@0.24.0 scripts/nostr-browser.js --bundle --minify --format=esm --outfile=public/js/nostr.js",
-    "test": "node test/registry.test.mjs && node test/inbound.test.mjs && node test/substack.test.mjs"
+    "test": "node test/registry.test.mjs && node test/inbound.test.mjs && node test/substack.test.mjs && node test/changelog.test.mjs",
+    "build:changelog": "node scripts/build-changelog.mjs"
   }
 }

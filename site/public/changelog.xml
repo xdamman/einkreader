@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://einkreader.app/changelog</id>
+  <title>einkreader changelog</title>
+  <link href="https://einkreader.app/changelog"/>
+  <link rel="self" href="https://einkreader.app/changelog.xml"/>
+  <updated>2026-10-10T12:00:00Z</updated>
+  <author><name>einkreader</name></author>
+  <entry>
+    <id>https://einkreader.app/changelog#update-2026-10-10</id>
+    <title>Cleaner Substack emails, author profiles on the web</title>
+    <link href="https://einkreader.app/changelog#update-2026-10-10"/>
+    <updated>2026-10-10T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Substack newsletters sent or forwarded to your @einkreader.app address arrive as clean articles: title, byline and the post itself, without the newsletter clutter, blank gaps or your subscriber login link.&lt;/li&gt;&lt;li&gt;On the web feedback page, an author's name or avatar opens their profile.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.12</id>
+    <title>einkreader 0.6.12: Reading settings: font, margins and page turns</title>
+    <link href="https://einkreader.app/changelog#v0.6.12"/>
+    <updated>2026-10-10T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;New Reading section in Settings, with a live preview: text size, margins, and four fonts (Serif, Literata, Sans-serif, Atkinson Hyperlegible).&lt;/li&gt;&lt;li&gt;Turn pages instead of scrolling: articles move a screen at a time, with &amp;quot;← Page 2 / 5 →&amp;quot; at the bottom. Swipes and page keys turn pages too.&lt;/li&gt;&lt;li&gt;The text size is now remembered.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;From your feedback: &lt;a href=&quot;https://einkreader.app/feedback#/bead9dac584c3a187e844846b9f9bce4d9d32f1385fbaa36012e0c81144d0efa&quot;&gt;Paginated scrolling&lt;/a&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.11</id>
+    <title>einkreader 0.6.11: Know when someone answers your feedback</title>
+    <link href="https://einkreader.app/changelog#v0.6.11"/>
+    <updated>2026-10-10T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;The feedback icon shows how many new replies and reactions your feedback got; threads with news are marked &amp;quot;new&amp;quot;.&lt;/li&gt;&lt;li&gt;Feedback is now readable on the web at einkreader.app/feedback, and there is a contact page.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.10</id>
+    <title>einkreader 0.6.10: Backups that don't freeze the app</title>
+    <link href="https://einkreader.app/changelog#v0.6.10"/>
+    <updated>2026-10-09T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Backing up a large library no longer makes the app unresponsive; a progress bar shows how far along it is.&lt;/li&gt;&lt;li&gt;Settings show when your last backup was made, and how big it was.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.9</id>
+    <title>einkreader 0.6.9: Ready for the Play Store</title>
+    <link href="https://einkreader.app/changelog#v0.6.9"/>
+    <updated>2026-10-09T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;The Play Store version is signed for release.&lt;/li&gt;&lt;li&gt;Tidier website addresses: /privacy, /opensource, /brand.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.8</id>
+    <title>einkreader 0.6.8: X sign-in built into the Play Store version</title>
+    <link href="https://einkreader.app/changelog#v0.6.8"/>
+    <updated>2026-10-09T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;The Play Store version connects to X (Twitter) without needing your own developer key.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.7</id>
+    <title>einkreader 0.6.7: Feedback loads by itself</title>
+    <link href="https://einkreader.app/changelog#v0.6.7"/>
+    <updated>2026-09-28T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;The feedback list loads and refreshes on its own.&lt;/li&gt;&lt;li&gt;Screenshots are attached to article feedback only when you ask, and open full screen.&lt;/li&gt;&lt;li&gt;A more compact Inbox, with an &amp;quot;Other senders&amp;quot; filter.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.6</id>
+    <title>einkreader 0.6.6: Account deletion</title>
+    <link href="https://einkreader.app/changelog#v0.6.6"/>
+    <updated>2026-09-28T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;You can delete your profile and your @einkreader.app address, from the app or the website.&lt;/li&gt;&lt;li&gt;Fixed sharing by email.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.5</id>
+    <title>einkreader 0.6.5: Faster feedback, simpler setup</title>
+    <link href="https://einkreader.app/changelog#v0.6.5"/>
+    <updated>2026-09-27T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Feedback opens instantly from what's saved on your device.&lt;/li&gt;&lt;li&gt;Adding a source starts by picking its type: RSS, X or Nostr.&lt;/li&gt;&lt;li&gt;Creating a profile starts with your address, checked as you type.&lt;/li&gt;&lt;li&gt;Inbox comes first in the filters and in your sources.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.4</id>
+    <title>einkreader 0.6.4: Instant feedback posting</title>
+    <link href="https://einkreader.app/changelog#v0.6.4"/>
+    <updated>2026-09-27T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Posting feedback is instant; offline, it waits in the outbox.&lt;/li&gt;&lt;li&gt;A more compact feedback list.&lt;/li&gt;&lt;li&gt;Tapping a name opens a fuller profile with their highlights and feedback.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;From your feedback: &lt;a href=&quot;https://einkreader.app/feedback#/adf051644e07c0164ce79f7b12a9ff5c154535a4644701b2feccdd973da97a66&quot;&gt;Posting feedback should be instant&lt;/a&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.3</id>
+    <title>einkreader 0.6.3: A quieter feedback link</title>
+    <link href="https://einkreader.app/changelog#v0.6.3"/>
+    <updated>2026-09-27T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;The feedback button under articles became a discreet line of text.&lt;/li&gt;&lt;li&gt;A simpler feedback form that shows clearly who you post as.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;From your feedback: &lt;a href=&quot;https://einkreader.app/feedback#/34a03783c5c50359ac6792ead7c1d0ff327fda51812381c5ce48e2ec7eb7bc0d&quot;&gt;Feedback on feedback feature&lt;/a&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.2</id>
+    <title>einkreader 0.6.2: The Inbox</title>
+    <link href="https://einkreader.app/changelog#v0.6.2"/>
+    <updated>2026-09-27T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Links, newsletters and PDFs emailed to your @einkreader.app address land in a new Inbox, filtered by sender.&lt;/li&gt;&lt;li&gt;Mail from new senders waits for you to accept it.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.1</id>
+    <title>einkreader 0.6.1: Feedback with screenshots</title>
+    <link href="https://einkreader.app/changelog#v0.6.1"/>
+    <updated>2026-09-25T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Send feedback with a subject, a link and a screenshot, right from any article.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.0</id>
+    <title>einkreader 0.6.0: Public feedback</title>
+    <link href="https://einkreader.app/changelog#v0.6.0"/>
+    <updated>2026-09-25T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Share ideas and bugs with everyone from the app, reply in threads and react with emoji.&lt;/li&gt;&lt;li&gt;A brand page with logos and images at einkreader.app/brand.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.10</id>
+    <title>einkreader 0.5.10: Lighter X bookmark sync</title>
+    <link href="https://einkreader.app/changelog#v0.5.10"/>
+    <updated>2026-09-25T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;X bookmarks are fetched 10 at a time, and only as far back as needed.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.9</id>
+    <title>einkreader 0.5.9: X sign-in fixed</title>
+    <link href="https://einkreader.app/changelog#v0.5.9"/>
+    <updated>2026-09-25T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Fixed signing in to X on e-ink devices getting stuck in a loop.&lt;/li&gt;&lt;li&gt;Only new bookmarks are fetched; the debug log is quieter.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.8</id>
+    <title>einkreader 0.5.8: Instant link menu</title>
+    <link href="https://einkreader.app/changelog#v0.5.8"/>
+    <updated>2026-09-24T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Tapping a link opens its menu instantly, even offline.&lt;/li&gt;&lt;li&gt;Errors that need X reconnected offer a button to do it.&lt;/li&gt;&lt;li&gt;The Read tab is sorted by when you read each article.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.7</id>
+    <title>einkreader 0.5.7: Better X posts and articles</title>
+    <link href="https://einkreader.app/changelog#v0.5.7"/>
+    <updated>2026-09-23T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Links to X posts show the post itself; more articles extract cleanly.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.6</id>
+    <title>einkreader 0.5.6: Resume reading follows your filters</title>
+    <link href="https://einkreader.app/changelog#v0.5.6"/>
+    <updated>2026-09-14T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Resume reading sits below the filters and shows only what they select.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.5</id>
+    <title>einkreader 0.5.5: Readable X errors</title>
+    <link href="https://einkreader.app/changelog#v0.5.5"/>
+    <updated>2026-09-11T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Problems with X are explained in plain sentences.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.4</id>
+    <title>einkreader 0.5.4: Source errors you can see</title>
+    <link href="https://einkreader.app/changelog#v0.5.4"/>
+    <updated>2026-09-11T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;A source that fails to update shows a warning, and X can be reconnected from its feed.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.3</id>
+    <title>einkreader 0.5.3: Older websites</title>
+    <link href="https://einkreader.app/changelog#v0.5.3"/>
+    <updated>2026-08-29T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Articles from table-based sites (like paulgraham.com) extract properly.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.2</id>
+    <title>einkreader 0.5.2: Quotes keep their shape</title>
+    <link href="https://einkreader.app/changelog#v0.5.2"/>
+    <updated>2026-08-18T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Paragraph breaks and list lines survive in quotes.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.1</id>
+    <title>einkreader 0.5.1: Instant sharing</title>
+    <link href="https://einkreader.app/changelog#v0.5.1"/>
+    <updated>2026-08-17T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Sharing a highlight closes the dialog at once and publishes in the background.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.5.0</id>
+    <title>einkreader 0.5.0: Simpler sharing</title>
+    <link href="https://einkreader.app/changelog#v0.5.0"/>
+    <updated>2026-08-16T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;A button at the end of an article shares all your highlights from it.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.4.12</id>
+    <title>einkreader 0.4.12: Download status</title>
+    <link href="https://einkreader.app/changelog#v0.4.12"/>
+    <updated>2026-08-16T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Articles show whether they're downloaded; the Read and Highlights tabs filter by source.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.4.11</id>
+    <title>einkreader 0.4.11: Tweets that share links</title>
+    <link href="https://einkreader.app/changelog#v0.4.11"/>
+    <updated>2026-08-14T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;A short tweet sharing a link brings in the linked story.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.4.10</id>
+    <title>einkreader 0.4.10: Friendlier offline messages</title>
+    <link href="https://einkreader.app/changelog#v0.4.10"/>
+    <updated>2026-08-13T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Clear messages when you're offline, everywhere; an Advanced section in Settings.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.4.9</id>
+    <title>einkreader 0.4.9: Cleaner articles</title>
+    <link href="https://einkreader.app/changelog#v0.4.9"/>
+    <updated>2026-08-13T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Stray style code no longer shows up as text in articles.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.4.8</id>
+    <title>einkreader 0.4.8: Tables</title>
+    <link href="https://einkreader.app/changelog#v0.4.8"/>
+    <updated>2026-08-12T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Tables in articles render properly.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+</feed>
