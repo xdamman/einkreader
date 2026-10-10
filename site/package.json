@@ -12,6 +12,7 @@
     "turndown": "^7.2.0"
   },
   "scripts": {
+    "build:browser": "npx --yes esbuild@0.24.0 scripts/nostr-browser.js --bundle --minify --format=esm --outfile=public/js/nostr.js",
     "test": "node test/registry.test.mjs && node test/inbound.test.mjs"
   }
 }
