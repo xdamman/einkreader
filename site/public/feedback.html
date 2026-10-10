@@ -37,6 +37,10 @@
     .who { font-weight: bold; }
     .who:hover { text-decoration: underline; }
     .when { color: #666; font-size: 14px; }
+    .avatar.big { width: 64px; height: 64px; font-size: 26px; }
+    .profile { border-top: 1px solid #ddd; padding: 16px 0; }
+    .profile h2 { font-size: 24px; }
+    .section { font-size: 17px; margin: 18px 0 4px; }
     .subject { font-size: 18px; font-weight: bold; margin-bottom: 4px; }
     .text { font-size: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
@@ -137,7 +141,7 @@
       store.set('fb_events', Object.fromEntries(keep.map((e) => [e.id, e])));
     }
 
-    const profiles = new Map(Object.entries(store.get('fb_profiles', {})));
+    const profiles = new Map(Object.entries(store.get('fb_profiles2', {})));
     async function loadProfiles(pubkeys) {
       const missing = [...new Set(pubkeys)].filter((p) => !profiles.has(p));
       if (!missing.length) return;
@@ -145,11 +149,34 @@
       const newest = new Map();
       for (const e of found) if (!newest.has(e.pubkey) || newest.get(e.pubkey).created_at < e.created_at) newest.set(e.pubkey, e);
       for (const [pk, e] of newest) {
-        try { const c = JSON.parse(e.content); profiles.set(pk, { name: c.display_name || c.name || '', picture: c.picture || '', at: e.created_at }); } catch {}
+        try { const c = JSON.parse(e.content); profiles.set(pk, { name: c.display_name || c.name || '', picture: c.picture || '', about: c.about || '', website: c.website || '', nip05: c.nip05 || '', at: e.created_at }); } catch {}
       }
       for (const pk of missing) if (!profiles.has(pk)) profiles.set(pk, { name: '', picture: '' });
-      store.set('fb_profiles', Object.fromEntries(profiles));
+      store.set('fb_profiles2', Object.fromEntries(profiles));
       render();
+    }
+
+    // einkreader usernames (pubkey → name), so authors with a profile here
+    // link to their einkreader.app page.
+    const usernames = new Map(Object.entries(store.get('fb_usernames', {})));
+    async function loadUsernames() {
+      try {
+        const res = await fetch('/.well-known/nostr.json');
+        const { names } = await res.json();
+        usernames.clear();
+        for (const [name, pk] of Object.entries(names || {})) if (name !== '_') usernames.set(pk, name);
+        store.set('fb_usernames', Object.fromEntries(usernames));
+        render();
+      } catch {}
+    }
+
+    /// Where an author's name and avatar lead: the official account to the
+    /// home page, einkreader users to their profile page, anyone else to
+    /// their profile on this page.
+    function profileHref(pk) {
+      if (pk === OFFICIAL) return '/';
+      const name = usernames.get(pk);
+      return name ? `/${name}` : `#/u/${pk}`;
     }
 
     // ---------- model ----------
@@ -248,13 +275,13 @@
       div.className = 'note' + (list ? ' clickable' : '');
       const head = document.createElement('div');
       head.className = 'head';
-      const profileUrl = `https://njump.me/${npubEncode(e.pubkey)}`;
+      const profileUrl = profileHref(e.pubkey);
       const avatarLink = document.createElement('a');
-      avatarLink.href = profileUrl; avatarLink.target = '_blank'; avatarLink.rel = 'noopener';
+      avatarLink.href = profileUrl;
       avatarLink.onclick = (ev) => ev.stopPropagation();
       avatarLink.append(avatarEl(e.pubkey));
       const who = document.createElement('a');
-      who.className = 'who'; who.href = profileUrl; who.target = '_blank'; who.rel = 'noopener';
+      who.className = 'who'; who.href = profileUrl;
       who.textContent = displayName(e.pubkey);
       who.onclick = (ev) => ev.stopPropagation();
       const when = document.createElement('span');
@@ -323,12 +350,72 @@
         .sort((a, b) => a.created_at - b.created_at);
     }
 
+    function renderProfile(view, pk) {
+      const back = document.createElement('a');
+      back.href = '#'; back.textContent = '← All feedback'; back.className = 'back';
+      back.style.display = 'inline-block';
+      view.append(back);
+      const p = profiles.get(pk) || {};
+      const card = document.createElement('div');
+      card.className = 'profile';
+      const head = document.createElement('div');
+      head.className = 'head';
+      const avatar = avatarEl(pk);
+      avatar.classList.add('big');
+      const name = document.createElement('h2');
+      name.textContent = displayName(pk);
+      head.append(avatar, name);
+      card.append(head);
+      if (p.nip05) {
+        const n = document.createElement('div');
+        n.className = 'when'; n.textContent = p.nip05.replace(/^_@/, '');
+        card.append(n);
+      }
+      if (p.about) {
+        const about = document.createElement('div');
+        about.className = 'text'; about.style.marginTop = '8px';
+        linkify(about, p.about);
+        card.append(about);
+      }
+      const links = document.createElement('div');
+      links.className = 'meta';
+      if (/^https?:\/\//.test(p.website || '')) {
+        const w = document.createElement('a');
+        w.href = p.website; w.rel = 'nofollow noopener'; w.target = '_blank';
+        w.textContent = p.website.replace(/^https?:\/\//, '');
+        links.append(w);
+      }
+      const nostr = document.createElement('a');
+      nostr.href = `https://njump.me/${npubEncode(pk)}`; nostr.target = '_blank'; nostr.rel = 'noopener';
+      nostr.textContent = 'Full profile on Nostr ↗';
+      links.append(nostr);
+      card.append(links);
+      view.append(card);
+
+      const posts = [...events.values()]
+        .filter((e) => e.kind === 1 && e.pubkey === pk && (isFeedback(e) || events.has(rootOf(e) || '')))
+        .sort((a, b) => b.created_at - a.created_at);
+      const h = document.createElement('h3');
+      h.className = 'section';
+      h.textContent = posts.length ? 'Feedback and replies' : (loading ? 'Loading…' : 'No feedback from them yet.');
+      view.append(h);
+      for (const e of posts) {
+        const root = rootOf(e);
+        const el = noteEl(e, { list: true, replyCount: root ? 0 : repliesOf(e.id).length });
+        if (root) el.onclick = () => { location.hash = `#/${root}`; };
+        view.append(el);
+      }
+      if (!profiles.has(pk)) loadProfiles([pk]);
+    }
+
     let loading = false;
     function render() {
       const view = $('view');
       const threadId = (location.hash.match(/^#\/([0-9a-f]{64})$/) || [])[1];
-      $('appNote').hidden = !!threadId;
+      const userId = (location.hash.match(/^#\/u\/([0-9a-f]{64})$/) || [])[1];
+      $('appNote').hidden = !!threadId || !!userId;
       view.innerHTML = '';
+      if (userId) { renderProfile(view, userId); return; }
       if (threadId) {
         const back = document.createElement('a');
         back.href = '#'; back.textContent = '← All feedback'; back.className = 'back';
@@ -399,6 +486,7 @@
     $('refreshBtn').onclick = () => sync();
     window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
     render();
+    loadUsernames();
     sync();
     setInterval(() => { if (!document.hidden) sync(); }, 60000);
   </script>
