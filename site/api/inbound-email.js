@@ -10,6 +10,7 @@ import {
   bareAddress,
   buildItem,
   emailToMarkdown,
+  substackEmail,
   epubToMarkdown,
   pdfToMarkdown,
   usernameFromRecipients,
@@ -84,7 +85,14 @@ export default async function handler(req, res) {
   }
   const full = await fullResponse.json();
 
-  const markdown = emailToMarkdown({ html: full?.html, text: full?.text });
+  // Substack newsletters get their own cleanup (direct or forwarded).
+  const substack = await substackEmail({
+    html: full?.html,
+    from: email?.from,
+    subject: full?.subject ?? email?.subject,
+  });
+  const markdown = substack?.markdown ??
+      emailToMarkdown({ html: full?.html, text: full?.text });
   const attachmentsMarkdown = [];
   let documents = 0;
   for (const meta of email?.attachments ?? []) {
@@ -130,7 +138,8 @@ export default async function handler(req, res) {
   }
 
   const item = buildItem({
-    subject: full?.subject ?? email?.subject,
+    subject: substack?.subject ?? full?.subject ?? email?.subject,
+    url: substack?.url ?? undefined,
     from,
     markdown,
     attachmentsMarkdown,

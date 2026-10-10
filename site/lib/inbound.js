@@ -9,6 +9,35 @@ const turndown = new TurndownService({
 });
 turndown.remove(['script', 'style']);
 
+/// A Substack newsletter (sent directly or forwarded) as a clean article:
+/// the post's title, byline and body, the forwarder's note quoted above
+/// it, and the post's public address (without the subscriber's token).
+/// Null when the email isn't one. Loaded only for Substack mail, so
+/// other emails (and their PDF parsing) run exactly as before.
+export async function substackEmail({ html, from, subject }) {
+  if (!html || !looksLikeSubstack(html, from)) return null;
+  const { isSubstackEmail, substackToMarkdown } = await import('./substack.js');
+  if (!isSubstackEmail({ html, from })) return null;
+  try {
+    const post = substackToMarkdown(html);
+    if (!post.markdown) return null;
+    const note = post.note
+        ? post.note.split('\n').map((l) => `> ${l}`.trimEnd()).join('\n') +
+            '\n\n---\n\n'
+        : '';
+    return {
+      subject: post.title ?? subject?.replace(/^\s*(fwd?|tr|wg):\s*/i, ''),
+      markdown: note + post.markdown,
+      url: post.url,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const looksLikeSubstack = (html, from) =>
+  /substack/i.test(String(html)) || /substack\.com/i.test(String(from ?? ''));
+
 /// Email HTML (or plain text) to Markdown. Images embedded inline in the
 /// body (data: or cid: URIs — a mail app's preview of a shared article)
 /// are dropped: they'd store megabytes of base64 in the item, and real
@@ -82,7 +111,7 @@ export function verifySvixSignature(secret, headers, payload) {
 
 /// Assembles the stored inbox item from converted parts (pure).
 export function buildItem(
-    { subject, from, markdown, attachmentsMarkdown, documents = 0 }) {
+    { subject, from, markdown, attachmentsMarkdown, documents = 0, url }) {
   const body = [markdown, ...attachmentsMarkdown]
     .filter((part) => part && part.trim())
     .join('\n\n---\n\n');
@@ -90,7 +119,7 @@ export function buildItem(
     subject: subject?.trim() || 'Email',
     from,
     markdown: body,
-    url: firstLink(markdown),
+    url: url ?? firstLink(markdown),
     // PDF/EPUB attachments converted into the body: the email is then
     // content in itself, not just a link to read.
     documents,

@@ -4,6 +4,7 @@
   "type": "module",
   "description": "einkreader.app: landing page + NIP-05 usernames (name@einkreader.app)",
   "dependencies": {
+    "@mixmark-io/domino": "^2.2.0",
     "@noble/curves": "^1.6.0",
     "@noble/hashes": "^1.5.0",
     "@vercel/blob": "^0.27.0",
@@ -13,6 +14,6 @@
   },
   "scripts": {
     "build:browser": "npx --yes esbuild@0.24.0 scripts/nostr-browser.js --bundle --minify --format=esm --outfile=public/js/nostr.js",
-    "test": "node test/registry.test.mjs && node test/inbound.test.mjs"
+    "test": "node test/registry.test.mjs && node test/inbound.test.mjs && node test/substack.test.mjs"
   }
 }
