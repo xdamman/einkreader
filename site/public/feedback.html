@@ -24,8 +24,9 @@
     button, .btn { font: inherit; font-size: 15px; background: #fff; color: #111; border: 1.5px solid #111; padding: 8px 16px; cursor: pointer; text-decoration: none; display: inline-block; }
     button.primary { background: #111; color: #fff; }
     button:disabled { opacity: .5; cursor: default; }
-    button.link { border: none; padding: 0; text-decoration: underline; font-size: inherit; background: none; }
-    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+    .appnote { border: 1.5px solid #111; background: #f6f6f6; padding: 14px 16px; font-size: 16px; margin-bottom: 22px; }
+    .btn.primary { background: #111; color: #fff; }
     .status { font-size: 14px; color: #666; }
     .note { border-top: 1px solid #ddd; padding: 16px 0; }
     .note.clickable { cursor: pointer; }
@@ -42,22 +43,9 @@
     .shot { display: block; max-width: 100%; max-height: 360px; border: 1px solid #111; margin-top: 10px; cursor: zoom-in; }
     .shot.thumb { max-height: 140px; }
     .meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; font-size: 14px; }
-    .chip { border: 1px solid #111; border-radius: 14px; padding: 1px 10px; font-size: 14px; background: #fff; cursor: pointer; }
-    .chip.mine { background: #111; color: #fff; }
-    .react-picker { display: inline-flex; gap: 4px; }
+    .chip { border: 1px solid #111; border-radius: 14px; padding: 1px 10px; font-size: 14px; background: #fff; }
     .replies { margin-left: 22px; border-left: 2px solid #111; padding-left: 14px; }
     .back { margin-bottom: 14px; }
-    form, .panel { border: 1.5px solid #111; padding: 18px; margin-bottom: 24px; }
-    label { display: block; font-size: 15px; font-weight: bold; margin: 12px 0 4px; }
-    label .opt { font-weight: normal; color: #666; }
-    input[type=text], input[type=url], textarea { width: 100%; font: inherit; font-size: 16px; padding: 8px 10px; border: 1.5px solid #111; background: #fff; }
-    textarea { min-height: 120px; resize: vertical; }
-    .warn { border: 1.5px solid #111; padding: 10px 12px; font-size: 15px; margin: 14px 0; background: #f6f6f6; }
-    .identity { display: flex; align-items: center; gap: 10px; font-size: 15px; margin: 12px 0; flex-wrap: wrap; }
-    .preview { position: relative; display: inline-block; margin-top: 8px; }
-    .preview img { max-width: 220px; max-height: 160px; border: 1px solid #111; display: block; }
-    .preview button { position: absolute; top: 4px; right: 4px; padding: 0 8px; font-size: 14px; }
-    .formbar { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap; }
     .empty { color: #555; padding: 24px 0; border-top: 1px solid #ddd; }
     .viewer { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; z-index: 10; cursor: zoom-out; padding: 16px; }
     .viewer img { max-width: 100%; max-height: 100%; background: #fff; }
@@ -76,34 +64,15 @@
     is public, also in the app. Want to tell us something privately?
     <a href="/contact">Contact us</a> instead.</p>
 
-    <div class="actions" id="listActions">
-      <button class="primary" id="newBtn">New feedback</button>
-      <button id="refreshBtn">Refresh</button>
+    <div class="appnote" id="appNote">
+      <strong>Want to post feedback, reply or react?</strong> Use the
+      einkreader app: tap the feedback icon at the top right of the home
+      screen (or the Feedback link at the end of any article).
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/xdamman/einkreader/releases/latest">Get the app</a>
+        <button id="refreshBtn">Refresh</button>
+      </div>
     </div>
-
-    <form id="newForm" hidden>
-      <strong style="font-size:18px">New feedback</strong>
-      <div class="warn">All feedback is <strong>public</strong>: anyone can read it,
-      on this page and in the app. Don't include personal information (email,
-      phone number, address…).</div>
-      <label for="subject">Subject</label>
-      <input type="text" id="subject" maxlength="120" required placeholder="In a few words">
-      <label for="body">Message</label>
-      <textarea id="body" required placeholder="What happened, what you expected, or your idea"></textarea>
-      <label for="url">Link <span class="opt">(optional, e.g. an article that doesn't display well)</span></label>
-      <input type="url" id="url" placeholder="https://">
-      <label for="image">Image <span class="opt">(optional, e.g. a screenshot)</span></label>
-      <input type="file" id="image" accept="image/*">
-      <div class="preview" id="imagePreview" hidden>
-        <img alt="Attached image">
-        <button type="button" id="removeImage" aria-label="Remove image">✕</button>
-      </div>
-      <div id="identityBox"></div>
-      <div class="formbar">
-        <button type="button" id="cancelNew">Cancel</button>
-        <button type="submit" class="primary" id="postBtn">Post publicly</button>
-      </div>
-    </form>
 
     <div id="view"></div>
 
@@ -114,32 +83,14 @@
     </footer>
   </div>
 
-  <template id="identityTpl">
-    <div class="identity" data-has>
-      <span>Posting as</span>
-      <span class="avatar" data-avatar></span>
-      <strong data-name></strong>
-      <button type="button" class="link" data-change>change</button>
-    </div>
-    <div data-none>
-      <label for="idName">Your name <span class="opt">(shown publicly next to your feedback)</span></label>
-      <input type="text" id="idName" maxlength="50" placeholder="e.g. Alex">
-      <p class="status" style="margin-top:6px">A posting identity is created and kept in this
-      browser, so you can come back to your threads.<span data-ext hidden> Or
-      <button type="button" class="link" data-useext>use my Nostr browser extension</button>.</span></p>
-    </div>
-  </template>
 
   <script type="module">
-    import {
-      generateSecretKey, getPublicKey, signEvent, sha256Hex, npubEncode, npubDecode,
-    } from '/js/nostr.js';
+    // Read-only: posting, replying and reacting happen in the app.
+    import { npubEncode, npubDecode } from '/js/nostr.js';
 
     const OFFICIAL = npubDecode('npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7');
     const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
     const PROFILE_RELAYS = [...RELAYS, 'wss://purplepag.es', 'wss://relay.nos.social'];
-    const BLOSSOM = 'https://blossom.primal.net';
-    const QUICK = ['👍', '❤️', '🎉', '😂', '🙏', '👀'];
     const $ = (id) => document.getElementById(id);
 
     // ---------- storage (per-browser conveniences; all wrapped) ----------
@@ -149,7 +100,6 @@
         catch { return fallback; }
       },
       set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-      del(k) { try { localStorage.removeItem(k); } catch {} },
     };
 
     // ---------- relays ----------
@@ -179,26 +129,6 @@
       return [...byId.values()];
     }
 
-    function publishTo(url, event) {
-      return new Promise((resolve) => {
-        let ws;
-        const finish = (ok) => { clearTimeout(timer); try { ws && ws.close(); } catch {} resolve(ok); };
-        const timer = setTimeout(() => finish(false), 8000);
-        try { ws = new WebSocket(url); } catch { return finish(false); }
-        ws.onopen = () => ws.send(JSON.stringify(['EVENT', event]));
-        ws.onmessage = (m) => {
-          try { const d = JSON.parse(m.data); if (d[0] === 'OK' && d[1] === event.id) finish(d[2] === true); } catch {}
-        };
-        ws.onerror = () => finish(false);
-      });
-    }
-
-    async function publish(event) {
-      const results = await Promise.all(RELAYS.map((r) => publishTo(r, event)));
-      if (!results.some(Boolean)) throw new Error('Could not reach the network. Check your connection and try again.');
-      remember([event]);
-    }
-
     // ---------- local event cache: instant first paint ----------
     const events = new Map(Object.entries(store.get('fb_events', {})));
     function remember(list) {
@@ -220,71 +150,6 @@
       for (const pk of missing) if (!profiles.has(pk)) profiles.set(pk, { name: '', picture: '' });
       store.set('fb_profiles', Object.fromEntries(profiles));
       render();
-    }
-
-    // ---------- identity ----------
-    // 'local': a key generated and kept in this browser. 'ext': a NIP-07
-    // browser extension signs.
-    let identity = store.get('fb_identity'); // {mode, sk?, pubkey, name}
-
-    async function sign(template) {
-      const t = { created_at: Math.floor(Date.now() / 1000), tags: [], ...template };
-      if (identity?.mode === 'ext') return window.nostr.signEvent(t);
-      return signEvent(t, identity.sk);
-    }
-
-    async function createLocalIdentity(name) {
-      const sk = generateSecretKey();
-      identity = { mode: 'local', sk, pubkey: getPublicKey(sk), name };
-      store.set('fb_identity', identity);
-      const meta = await sign({ kind: 0, content: JSON.stringify({ name, display_name: name }) });
-      profiles.set(identity.pubkey, { name, picture: '' });
-      store.set('fb_profiles', Object.fromEntries(profiles));
-      publish(meta).catch(() => {});
-    }
-
-    async function useExtension() {
-      const pubkey = await window.nostr.getPublicKey();
-      identity = { mode: 'ext', pubkey, name: '' };
-      store.set('fb_identity', identity);
-      await loadProfiles([pubkey]);
-      renderIdentity();
-    }
-
-    function renderIdentity() {
-      const box = $('identityBox');
-      box.innerHTML = '';
-      const tpl = $('identityTpl').content.cloneNode(true);
-      const has = tpl.querySelector('[data-has]');
-      const none = tpl.querySelector('[data-none]');
-      if (identity) {
-        none.remove();
-        has.querySelector('[data-name]').textContent = displayName(identity.pubkey);
-        has.querySelector('[data-avatar]').replaceWith(avatarEl(identity.pubkey));
-        has.querySelector('[data-change]').onclick = () => {
-          if (identity.mode === 'local' && !confirm('Forget this identity on this browser? You won\'t be able to post as it again.')) return;
-          identity = null;
-          store.del('fb_identity');
-          renderIdentity();
-        };
-      } else {
-        has.remove();
-        if (window.nostr) {
-          none.querySelector('[data-ext]').hidden = false;
-          none.querySelector('[data-useext]').onclick = () => useExtension().catch((e) => alert(e.message || e));
-        }
-      }
-      box.append(tpl);
-    }
-
-    /// Makes sure we can sign; asks for a name if needed. Returns false if
-    /// the visitor declines.
-    async function ensureIdentity() {
-      if (identity) return true;
-      const name = (prompt('Your name, shown publicly next to what you post:') || '').trim();
-      if (!name) return false;
-      await createLocalIdentity(name);
-      return true;
     }
 
     // ---------- model ----------
@@ -332,7 +197,6 @@
       if (pk === OFFICIAL) return 'einkreader';
       const p = profiles.get(pk);
       if (p?.name) return p.name;
-      if (identity?.pubkey === pk && identity.name) return identity.name;
       return 'Anonymous';
     }
 
@@ -422,29 +286,15 @@
       const meta = document.createElement('div');
       meta.className = 'meta';
       for (const [emoji, who] of reactionsFor(e.id)) {
-        const chip = document.createElement('button');
-        chip.className = 'chip' + (identity && who.has(identity.pubkey) ? ' mine' : '');
+        const chip = document.createElement('span');
+        chip.className = 'chip';
         chip.textContent = `${emoji} ${who.size}`;
-        chip.onclick = (ev) => { ev.stopPropagation(); react(e, emoji); };
         meta.append(chip);
       }
-      if (list) {
-        if (replyCount) {
-          const r = document.createElement('span');
-          r.textContent = `💬 ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}`;
-          meta.append(r);
-        }
-      } else {
-        const picker = document.createElement('span');
-        picker.className = 'react-picker';
-        for (const emoji of QUICK) {
-          if (reactionsFor(e.id).has(emoji)) continue;
-          const b = document.createElement('button');
-          b.className = 'chip'; b.textContent = emoji; b.title = `React with ${emoji}`;
-          b.onclick = () => react(e, emoji);
-          picker.append(b);
-        }
-        meta.append(picker);
+      if (list && replyCount) {
+        const r = document.createElement('span');
+        r.textContent = `💬 ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}`;
+        meta.append(r);
       }
       if (meta.childNodes.length) div.append(meta);
       if (list) div.onclick = () => { location.hash = `#/${e.id}`; };
@@ -477,10 +327,8 @@
     function render() {
       const view = $('view');
       const threadId = (location.hash.match(/^#\/([0-9a-f]{64})$/) || [])[1];
-      const composing = !$('newForm').hidden;
-      $('listActions').hidden = !!threadId || composing;
+      $('appNote').hidden = !!threadId;
       view.innerHTML = '';
-      if (composing) return;
       if (threadId) {
         const back = document.createElement('a');
         back.href = '#'; back.textContent = '← All feedback'; back.className = 'back';
@@ -501,65 +349,22 @@
           for (const r of replies) box.append(noteEl(r));
           view.append(box);
         }
-        view.append(replyForm(root));
+        const note = document.createElement('p');
+        note.className = 'status';
+        note.style.marginTop = '16px';
+        note.textContent = 'To reply or react, open this feedback in the einkreader app.';
+        view.append(note);
         return;
       }
       const list = roots();
       if (!list.length) {
         const p = document.createElement('p');
         p.className = 'empty';
-        p.textContent = loading ? 'Loading feedback…' : 'No feedback yet. Be the first!';
+        p.textContent = loading ? 'Loading feedback…' : 'No feedback yet.';
         view.append(p);
         return;
       }
       for (const e of list) view.append(noteEl(e, { list: true, replyCount: repliesOf(e.id).length }));
-    }
-
-    let replyDraft = '';
-    function replyForm(root) {
-      const form = document.createElement('form');
-      form.innerHTML = `<label for="reply">Reply</label><textarea id="reply" placeholder="Add to this thread (public)"></textarea>
-        <div class="formbar"><button type="submit" class="primary">Reply publicly</button></div>`;
-      const ta = form.querySelector('textarea');
-      ta.value = replyDraft;
-      ta.oninput = () => { replyDraft = ta.value; };
-      form.onsubmit = async (ev) => {
-        ev.preventDefault();
-        const text = ta.value.trim();
-        if (!text || !(await ensureIdentity())) return;
-        const button = form.querySelector('button');
-        button.disabled = true; button.textContent = 'Posting…';
-        try {
-          const event = await sign({
-            kind: 1, content: text,
-            tags: [
-              ['e', root.id, '', 'root'],
-              ['p', root.pubkey],
-              ...(root.pubkey !== OFFICIAL ? [['p', OFFICIAL]] : []),
-              ['client', 'einkreader'],
-            ],
-          });
-          await publish(event);
-          replyDraft = '';
-          render();
-        } catch (e) {
-          alert(e.message || e);
-          button.disabled = false; button.textContent = 'Reply publicly';
-        }
-      };
-      return form;
-    }
-
-    async function react(note, emoji) {
-      if (!(await ensureIdentity())) return;
-      const mine = reactionsFor(note.id).get(emoji)?.has(identity.pubkey);
-      if (mine) return; // already reacted with that one
-      try {
-        const event = await sign({ kind: 7, content: emoji, tags: [['e', note.id], ['p', note.pubkey], ['k', '1']] });
-        remember([event]);
-        render();
-        await publish(event);
-      } catch (e) { alert(e.message || e); }
     }
 
     // ---------- sync ----------
@@ -569,20 +374,18 @@
       $('status').textContent = 'Updating…';
       render();
       try {
-        const syncedAt = store.get('fb_synced_at');
-        const since = syncedAt ? syncedAt - 86400 : undefined;
-        const startedAt = Math.floor(Date.now() / 1000);
-        const fresh = await query([{ kinds: [1], '#p': [OFFICIAL], limit: 200, ...(since ? { since } : {}) }]);
+        // Always the whole (small) history: a relay that was slow on one
+        // visit must not leave posts missing for good.
+        const fresh = await query([{ kinds: [1], '#p': [OFFICIAL], limit: 200 }]);
         remember(fresh);
         const rootIds = roots().map((e) => e.id);
         if (rootIds.length) {
-          remember(await query([{ kinds: [1, 7], '#e': rootIds, ...(since ? { since } : {}) }]));
+          remember(await query([{ kinds: [1, 7], '#e': rootIds }]));
           const replyIds = [...events.values()].filter((e) => e.kind === 1 && rootIds.includes(rootOf(e))).map((e) => e.id);
-          if (replyIds.length) remember(await query([{ kinds: [7], '#e': replyIds, ...(since ? { since } : {}) }]));
+          if (replyIds.length) remember(await query([{ kinds: [7], '#e': replyIds }]));
         }
         const threadId = (location.hash.match(/^#\/([0-9a-f]{64})$/) || [])[1];
         if (threadId && !events.has(threadId)) remember(await query([{ ids: [threadId] }, { kinds: [1, 7], '#e': [threadId] }]));
-        if (fresh.length || syncedAt) store.set('fb_synced_at', startedAt);
         $('status').textContent = '';
       } catch {
         $('status').textContent = 'Offline: showing saved feedback';
@@ -593,116 +396,11 @@
       }
     }
 
-    // ---------- new feedback ----------
-    let imageFile = null;
-    function openForm(prefill = {}) {
-      $('newForm').hidden = false;
-      $('listActions').hidden = true;
-      if (prefill.subject) $('subject').value = prefill.subject;
-      if (prefill.url) $('url').value = prefill.url;
-      if (prefill.body) $('body').value = prefill.body;
-      renderIdentity();
-      $('subject').focus();
-    }
-    function closeForm() {
-      $('newForm').hidden = true;
-      $('newForm').reset();
-      setImage(null);
-      if (location.hash === '#new') history.replaceState(null, '', location.pathname);
-      render();
-    }
-    function setImage(file) {
-      imageFile = file;
-      const prev = $('imagePreview');
-      prev.hidden = !file;
-      if (file) prev.querySelector('img').src = URL.createObjectURL(file);
-      else $('image').value = '';
-    }
-
-    async function uploadImage(file) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const hash = sha256Hex(bytes);
-      const auth = await sign({
-        kind: 24242, content: 'Upload feedback image',
-        tags: [['t', 'upload'], ['x', hash], ['expiration', String(Math.floor(Date.now() / 1000) + 600)]],
-      });
-      const res = await fetch(`${BLOSSOM}/upload`, {
-        method: 'PUT',
-        headers: { Authorization: 'Nostr ' + btoa(unescape(encodeURIComponent(JSON.stringify(auth)))), 'Content-Type': file.type || 'image/jpeg' },
-        body: bytes,
-      });
-      if (!res.ok) throw new Error(`The image could not be uploaded (HTTP ${res.status}). Try a smaller one, or post without it.`);
-      const { url } = await res.json();
-      if (!url) throw new Error('The image upload returned no address.');
-      return { url, mime: file.type || 'image/jpeg' };
-    }
-
-    $('newBtn').onclick = () => { location.hash = '#new'; };
     $('refreshBtn').onclick = () => sync();
-    $('cancelNew').onclick = closeForm;
-    $('image').onchange = (ev) => {
-      const file = ev.target.files[0];
-      if (file && file.size > 10 * 1024 * 1024) { alert('That image is over 10 MB. Please pick a smaller one.'); setImage(null); return; }
-      setImage(file || null);
-    };
-    $('removeImage').onclick = () => setImage(null);
-    $('newForm').onsubmit = async (ev) => {
-      ev.preventDefault();
-      const subject = $('subject').value.trim();
-      const body = $('body').value.trim();
-      const url = $('url').value.trim();
-      if (!subject || !body) return;
-      if (!identity) {
-        const name = (document.getElementById('idName')?.value || '').trim();
-        if (!name) { document.getElementById('idName')?.focus(); alert('Please enter your name, so others know who\'s asking.'); return; }
-        await createLocalIdentity(name);
-      }
-      const button = $('postBtn');
-      button.disabled = true;
-      try {
-        let image = null;
-        if (imageFile) { button.textContent = 'Uploading image…'; image = await uploadImage(imageFile); }
-        button.textContent = 'Posting…';
-        const content = [subject, body, url, image?.url].filter(Boolean).join('\n\n');
-        const event = await sign({
-          kind: 1, content,
-          tags: [
-            ['p', OFFICIAL],
-            ['subject', subject],
-            ...(url ? [['r', url]] : []),
-            ...(image ? [['imeta', `url ${image.url}`, `m ${image.mime}`]] : []),
-            ['client', 'einkreader'],
-          ],
-        });
-        await publish(event);
-        closeForm();
-        location.hash = `#/${event.id}`;
-      } catch (e) {
-        alert(e.message || e);
-      } finally {
-        button.disabled = false;
-        button.textContent = 'Post publicly';
-      }
-    };
-
-    function route() {
-      if (location.hash === '#new') { openForm(); return; }
-      $('newForm').hidden = true;
-      render();
-      window.scrollTo(0, 0);
-    }
-    window.addEventListener('hashchange', route);
-
-    // Prefill from links like /feedback?subject=…&url=…
-    const params = new URLSearchParams(location.search);
-    if (params.has('subject') || params.has('url') || params.has('new')) {
-      history.replaceState(null, '', location.pathname + '#new');
-      openForm({ subject: params.get('subject'), url: params.get('url'), body: params.get('body') });
-    } else {
-      route();
-    }
+    window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
+    render();
     sync();
-    setInterval(() => { if (!document.hidden && $('newForm').hidden) sync(); }, 60000);
+    setInterval(() => { if (!document.hidden) sync(); }, 60000);
   </script>
 </body>
 </html>
