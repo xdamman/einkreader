@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
 import 'services/archive_store.dart';
+import 'services/reading_settings.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -9,6 +10,8 @@ Future<void> main() async {
   // Resolve the offline archive directory up front so stored images render on
   // a cold start, before any sync runs.
   await ArchiveStore.instance.ensureInitialized();
+  // Before the first frame, so an article never renders with defaults first.
+  await ReadingSettings.instance.load();
   runApp(const EinkReaderApp());
 }
 

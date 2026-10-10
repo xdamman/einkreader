@@ -12,8 +12,8 @@ import '../db/app_database.dart';
 import '../models.dart';
 import '../services/archive_store.dart';
 import '../services/share_actions.dart';
+import '../services/reading_settings.dart';
 import '../services/sync_service.dart';
-import '../theme.dart';
 import '../widgets/markdown_view.dart';
 import '../widgets/share_note_dialog.dart';
 import 'feedback_screen.dart';
@@ -60,7 +60,10 @@ class _ArticleScreenState extends State<ArticleScreen> {
   Source? _source;
   List<Highlight> _highlights = [];
   String _selectedText = '';
-  double _fontSize = 18;
+
+  /// Text size, typeface, margins and paging (Settings → Reading).
+  ReadingPrefs _reading = ReadingSettings.instance.prefs.value;
+  double get _fontSize => _reading.fontSize;
   bool _reprocessing = false;
 
   /// Ordered feed ids and where we are in them. [_startIndex] is the article
@@ -78,8 +81,27 @@ class _ArticleScreenState extends State<ArticleScreen> {
     final at = widget.initialIndex ?? _ids.indexOf(widget.articleId);
     _startIndex = (at < 0 || at >= _ids.length) ? 0 : at;
     _index = _startIndex;
+    ReadingSettings.instance.prefs.addListener(_onReadingPrefs);
+    ReadingSettings.instance.load();
     _load();
   }
+
+  void _onReadingPrefs() {
+    if (!mounted) return;
+    setState(() => _reading = ReadingSettings.instance.prefs.value);
+    // Text reflowed (size, font, margins): re-snap to a page boundary and
+    // recount pages once laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      if (_reading.paginated) _goToPage(_currentPage());
+      _updatePage();
+    });
+  }
+
+  void _setFontSize(double size) => ReadingSettings.instance.update(
+      _reading.copyWith(
+          fontSize: size.clamp(
+              ReadingPrefs.minFontSize, ReadingPrefs.maxFontSize)));
 
   Future<void> _load() async {
     final article = await _db.getArticle(_currentId);
@@ -152,6 +174,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (!mounted || !_scroll.hasClients || _currentId != article.id) return;
     final maxExtent = _scroll.position.maxScrollExtent;
     if (maxExtent <= 0) {
+      _updatePage();
       // Only FINAL content that fits on screen counts as read: a pending
       // saved link renders a short placeholder, and marking that read
       // would silence reading progress forever.
@@ -164,6 +187,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (article.read == 0 && article.scrollPosition > 0) {
       _scroll.jumpTo(article.scrollPosition.clamp(0.0, maxExtent));
     }
+    // Paged: start on a page boundary (the page holding the saved spot).
+    if (_reading.paginated) _goToPage(_currentPage());
+    _updatePage();
   }
 
   void _onScroll(ScrollMetrics metrics, {required bool settled}) {
@@ -183,6 +209,60 @@ class _ArticleScreenState extends State<ArticleScreen> {
       _db.saveScrollPosition(
           article.id!, offset < _minReadingOffset ? 0 : offset);
     }
+  }
+
+  // ------------------------------------------------------------ pagination
+  // With "Turn pages" on (Settings → Reading), the article doesn't scroll
+  // freely: it moves a screen at a time, keeping one line of the previous
+  // page at the top so no line is lost at the cut, and a bar at the bottom
+  // shows "Page 2 / 5" with arrows.
+
+  /// (current page, page count), both 1-based for display.
+  final ValueNotifier<(int, int)> _page = ValueNotifier((1, 1));
+
+  /// How far one page turn moves: the screen height minus one line.
+  double get _pageStep {
+    final viewport = _scroll.position.viewportDimension;
+    final overlap = _fontSize * 1.55;
+    return viewport > overlap * 2 ? viewport - overlap : viewport;
+  }
+
+  int _pageCount() {
+    if (!_scroll.hasClients) return 1;
+    final max = _scroll.position.maxScrollExtent;
+    if (max <= 0) return 1;
+    return 1 + (max / _pageStep - 0.01).ceil();
+  }
+
+  /// 0-based page currently shown.
+  int _currentPage() {
+    if (!_scroll.hasClients) return 0;
+    final pos = _scroll.position;
+    if (pos.pixels >= pos.maxScrollExtent - 1) return _pageCount() - 1;
+    return (pos.pixels / _pageStep + 0.01).floor();
+  }
+
+  void _updatePage() {
+    if (!_scroll.hasClients) return;
+    _page.value = (_currentPage() + 1, _pageCount());
+  }
+
+  void _goToPage(int page) {
+    if (!_scroll.hasClients) return;
+    final count = _pageCount();
+    final p = page.clamp(0, count - 1);
+    final max = _scroll.position.maxScrollExtent;
+    _scroll.jumpTo((p * _pageStep).clamp(0.0, max < 0 ? 0.0 : max));
+    _updatePage();
+  }
+
+  /// Turns [delta] pages; false when already at that end.
+  bool _turnPage(int delta) {
+    final current = _currentPage();
+    final target = current + delta;
+    if (target < 0 || target >= _pageCount()) return false;
+    _goToPage(target);
+    return true;
   }
 
   /// Saves the current position when leaving the article (swipe or pop).
@@ -207,7 +287,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
   @override
   void dispose() {
     _saveProgress();
+    ReadingSettings.instance.prefs.removeListener(_onReadingPrefs);
     _scroll.dispose();
+    _page.dispose();
     _feedbackTap.dispose();
     super.dispose();
   }
@@ -254,9 +336,22 @@ class _ArticleScreenState extends State<ArticleScreen> {
     final ms = (event.timeStamp - startTime).inMilliseconds;
     final speed = ms > 0 ? dx.abs() / ms * 1000 : double.infinity; // px/s
 
+    // Paged: a vertical swipe turns the page (up = next), since the text
+    // doesn't scroll.
+    if (_reading.paginated) {
+      final vSpeed = ms > 0 ? dy.abs() / ms * 1000 : double.infinity;
+      if (dy.abs() >= 60 && dy.abs() > dx.abs() * 1.5 && vSpeed >= 300) {
+        _turnPage(dy < 0 ? 1 : -1);
+        return;
+      }
+    }
+
     // A deliberate horizontal fling: far enough, clearly horizontal, and quick
     // enough to not be a scroll or a slow text-selection drag.
     if (dx.abs() < 60 || dx.abs() < dy.abs() * 1.5 || speed < 300) return;
+    // Paged: swipes turn pages first; past the last (or before the first)
+    // page they move between articles as usual.
+    if (_reading.paginated && _turnPage(dx < 0 ? 1 : -1)) return;
     // Book convention: swiping left pulls in the next article, swiping right
     // turns back (to the previous article, then out to the feed).
     if (dx < 0) {
@@ -675,14 +770,12 @@ class _ArticleScreenState extends State<ArticleScreen> {
           IconButton(
             tooltip: 'Smaller text',
             icon: const Icon(Icons.text_decrease),
-            onPressed: () => setState(
-                () => _fontSize = (_fontSize - 2).clamp(14, 30)),
+            onPressed: () => _setFontSize(_fontSize - 2),
           ),
           IconButton(
             tooltip: 'Larger text',
             icon: const Icon(Icons.text_increase),
-            onPressed: () => setState(
-                () => _fontSize = (_fontSize + 2).clamp(14, 30)),
+            onPressed: () => _setFontSize(_fontSize + 2),
           ),
           IconButton(
             tooltip: 'Reload & reprocess',
@@ -702,7 +795,25 @@ class _ArticleScreenState extends State<ArticleScreen> {
           ),
         ],
       ),
-      body: Listener(
+      // Paged: page keys (e-reader page buttons, keyboards) turn pages.
+      body: CallbackShortcuts(
+        bindings: _reading.paginated
+            ? {
+                const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+                    _turnPage(1),
+                const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+                    _turnPage(1),
+                const SingleActivator(LogicalKeyboardKey.space): () =>
+                    _turnPage(1),
+                const SingleActivator(LogicalKeyboardKey.pageUp): () =>
+                    _turnPage(-1),
+                const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+                    _turnPage(-1),
+              }
+            : const {},
+        child: Focus(
+        autofocus: true,
+        child: Listener(
         key: const Key('articleSwipe'),
         // Swipe left → next article, swipe right → previous (or back to the
         // feed at the first-opened one). See _onPointerUp for why this is a
@@ -728,26 +839,35 @@ class _ArticleScreenState extends State<ArticleScreen> {
             ],
           );
         },
+        child: NotificationListener<ScrollMetricsNotification>(
+        // Images loading or the text reflowing change the page count.
+        onNotification: (_) {
+          _updatePage();
+          return false;
+        },
         child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (notification is ScrollUpdateNotification ||
               notification is ScrollEndNotification) {
             _onScroll(notification.metrics,
                 settled: notification is ScrollEndNotification);
+            if (notification is ScrollEndNotification) _updatePage();
           }
           return false;
         },
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // Comfortable measure on tablets: cap the text column width.
-            final horizontal = constraints.maxWidth > 720
-                ? (constraints.maxWidth - 680) / 2
-                : 20.0;
+            // Side margins from Settings → Reading (automatic: a
+            // comfortable column on tablets).
+            final horizontal = _reading.marginFor(constraints.maxWidth);
             return SingleChildScrollView(
               // New identity per article so scroll resets to the top on swipe.
               key: ValueKey(_currentId),
               controller: _scroll,
-              physics: const ClampingScrollPhysics(),
+              // Paged: only the page arrows and swipes move the text.
+              physics: _reading.paginated
+                  ? const NeverScrollableScrollPhysics()
+                  : const ClampingScrollPhysics(),
               padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 48),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -758,8 +878,8 @@ class _ArticleScreenState extends State<ArticleScreen> {
                       fontSize: _fontSize + 10,
                       fontWeight: FontWeight.w700,
                       height: 1.25,
-                      fontFamily: readingFontFamily,
-                      fontFamilyFallback: readingFontFallback,
+                      fontFamily: _reading.font.family,
+                      fontFamilyFallback: _reading.font.fallback,
                     ),
                   ),
                   if (meta.isNotEmpty)
@@ -796,6 +916,8 @@ class _ArticleScreenState extends State<ArticleScreen> {
                   MarkdownView(
                     markdown: content,
                     fontSize: _fontSize,
+                    fontFamily: _reading.font.family,
+                    fontFamilyFallback: _reading.font.fallback,
                     highlights: [for (final h in _highlights) h.text],
                     onHighlightTap: _manageHighlight,
                     onLinkTap: _onLinkTap,
@@ -868,10 +990,61 @@ class _ArticleScreenState extends State<ArticleScreen> {
         ),
         ),
         ),
+        ),
+        ),
+        ),
       ),
+      bottomNavigationBar: _reading.paginated ? _pageBar() : null,
       ),
     );
   }
+
+  /// "← Page 2 / 5 →": arrows only where there is somewhere to go. Hidden
+  /// when the article fits on one page.
+  Widget _pageBar() => ValueListenableBuilder<(int, int)>(
+        valueListenable: _page,
+        builder: (context, page, _) {
+          final (current, count) = page;
+          if (count <= 1) return const SizedBox.shrink();
+          return SafeArea(
+            child: Container(
+              decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(width: 1))),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              height: 52,
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 56,
+                    child: current > 1
+                        ? IconButton(
+                            tooltip: 'Previous page',
+                            icon: const Icon(Icons.arrow_back),
+                            onPressed: () => _turnPage(-1),
+                          )
+                        : null,
+                  ),
+                  Expanded(
+                    child: Text('Page $current / $count',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 16)),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: current < count
+                        ? IconButton(
+                            tooltip: 'Next page',
+                            icon: const Icon(Icons.arrow_forward),
+                            onPressed: () => _turnPage(1),
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
 
   /// Captures the page as it looks right now (before the form covers it)
   /// and opens the feedback form with it and the article's link.

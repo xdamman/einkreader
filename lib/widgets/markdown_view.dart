@@ -17,6 +17,10 @@ class MarkdownView extends StatefulWidget {
   final List<String> highlights;
   final double fontSize;
 
+  /// Body typeface (Settings → Reading); the serif reading stack by default.
+  final String fontFamily;
+  final List<String> fontFamilyFallback;
+
   /// Called with the full highlight text and the tap position when the user
   /// taps a painted highlight, so the reader can anchor a small menu there
   /// (share / note / remove).
@@ -33,6 +37,8 @@ class MarkdownView extends StatefulWidget {
     required this.markdown,
     this.highlights = const [],
     this.fontSize = 18,
+    this.fontFamily = readingFontFamily,
+    this.fontFamilyFallback = readingFontFallback,
     this.onHighlightTap,
     this.onLinkTap,
   });
@@ -139,8 +145,8 @@ class _MarkdownViewState extends State<MarkdownView> {
         color: Colors.black,
         fontSize: widget.fontSize,
         height: 1.55,
-        fontFamily: readingFontFamily,
-        fontFamilyFallback: readingFontFallback,
+        fontFamily: widget.fontFamily,
+        fontFamilyFallback: widget.fontFamilyFallback,
       );
 
   @override

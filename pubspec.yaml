@@ -46,3 +46,27 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Reading fonts offered in Settings → Reading (SIL Open Font License,
+  # see assets/fonts/OFL-*.txt).
+  fonts:
+    - family: Literata
+      fonts:
+        - asset: assets/fonts/Literata-Regular.ttf
+        - asset: assets/fonts/Literata-Italic.ttf
+          style: italic
+        - asset: assets/fonts/Literata-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Literata-BoldItalic.ttf
+          weight: 700
+          style: italic
+    - family: Atkinson Hyperlegible
+      fonts:
+        - asset: assets/fonts/AtkinsonHyperlegible-Regular.ttf
+        - asset: assets/fonts/AtkinsonHyperlegible-Italic.ttf
+          style: italic
+        - asset: assets/fonts/AtkinsonHyperlegible-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/AtkinsonHyperlegible-BoldItalic.ttf
+          weight: 700
+          style: italic

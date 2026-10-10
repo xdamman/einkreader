@@ -21,6 +21,7 @@ import '../services/errors.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
 import '../widgets/profile_switcher.dart';
+import '../widgets/reading_settings_panel.dart';
 import '../widgets/relay_settings.dart';
 import 'sources_screen.dart';
 
@@ -30,6 +31,8 @@ import 'sources_screen.dart';
 /// The settings areas, each its own screen one level down (Android-style):
 /// the hub stays a calm list, and every section gets room to breathe.
 enum SettingsSection {
+  reading('Reading', 'Text size, font, margins, page turns',
+      Icons.chrome_reader_mode_outlined),
   sources('Sources', 'Feeds and folders', Icons.rss_feed),
   plugins('Plugins', 'Twitter & Email', Icons.extension_outlined),
   profiles('Profiles', 'Nostr identities and switching',
@@ -417,6 +420,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: switch (section) {
+            SettingsSection.reading => [const ReadingSettingsPanel()],
             SettingsSection.sources => _sourcesSection(),
             SettingsSection.plugins => _pluginsSection(),
             SettingsSection.profiles => _profilesSection(),
@@ -452,6 +456,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Everyday sections up front; relays, storage and developer live one
   /// level deeper under Advanced — most readers never need them.
   static const _mainSections = [
+    SettingsSection.reading,
     SettingsSection.sources,
     SettingsSection.plugins,
     SettingsSection.profiles,
