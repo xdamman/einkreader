@@ -28,6 +28,10 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   late final FeedbackService _service = widget.service ?? FeedbackService();
   List<FeedbackNote>? _notes;
   Map<String, int> _replyCounts = {};
+
+  /// Thread root id → replies and reactions to the reader's notes they
+  /// haven't seen (opening the thread clears it).
+  Map<String, int> _unseen = {};
   String? _me;
   bool _canPost = false;
   String? _error;
@@ -63,10 +67,12 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       final canPost = await _service.canPost;
       final me = await _service.myPubkey;
       final cached = await _service.cachedFeedback();
+      final unseenCached = await _service.unseenByThread();
       await NostrProfileCache.load(cached.notes.map((n) => n.pubkey),
           nostr: _service.nostr);
       if (!mounted) return;
       setState(() {
+        _unseen = unseenCached;
         _canPost = canPost;
         _me = me;
         if (cached.notes.isNotEmpty || _notes == null) {
@@ -82,10 +88,12 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
         if (!mounted) return;
         fresh = await _service.feedback();
       }
+      final unseen = await _service.unseenByThread();
       await NostrProfileCache.load(fresh.notes.map((n) => n.pubkey),
           nostr: _service.nostr);
       if (!mounted) return;
       setState(() {
+        _unseen = unseen;
         _notes = fresh.notes;
         _replyCounts = fresh.replyCounts;
       });
@@ -180,6 +188,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                   canPost: _canPost,
                   service: _service,
                   replyCount: _replyCounts[note.id] ?? 0,
+                  newCount: _unseen[note.id] ?? 0,
                   compact: true,
                   onTap: note.sending ? null : () => _openThread(note),
                   onReply: () => _openThread(note),
@@ -251,6 +260,8 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
         if (notes.isNotEmpty) _notes = notes;
         _loading = false;
       });
+      // Everything in the thread is now on screen: clear its badge.
+      await _service.markThreadSeen(widget.root.id);
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -429,6 +440,9 @@ class FeedbackNoteTile extends StatelessWidget {
   final bool canPost;
   final FeedbackService service;
   final int? replyCount;
+
+  /// New replies and reactions to the reader's notes in this thread.
+  final int newCount;
   final bool large;
 
   /// In the list: the text is cut to a few lines and images are left out,
@@ -451,6 +465,7 @@ class FeedbackNoteTile extends StatelessWidget {
     required this.onReply,
     required this.onChanged,
     this.replyCount,
+    this.newCount = 0,
     this.large = false,
     this.compact = false,
     this.replyingTo,
@@ -666,6 +681,20 @@ class FeedbackNoteTile extends StatelessWidget {
                               : '$replyCount repl${replyCount == 1 ? 'y' : 'ies'}'),
                           onPressed: onReply,
                         ),
+                        if (newCount > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text('$newCount new',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                          ),
                       ],
                     ),
                 ],

@@ -6,6 +6,7 @@ import '../db/app_database.dart';
 import '../models.dart';
 import '../services/app_log.dart';
 import '../services/archive_store.dart';
+import '../services/feedback_service.dart';
 import '../services/outbox_service.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
@@ -118,7 +119,15 @@ class _HomeScreenState extends State<HomeScreen> {
       // Refresh the feed mid-sync as sources and downloads land, and once more
       // when the sync finishes.
       if (p.reload || !p.running) _load();
+      // Replies and reactions to the reader's feedback ride along each sync.
+      if (!p.running) FeedbackService().refreshNotifications();
     });
+    // The badge shows what's stored at once; the relays are asked on launch
+    // (same switch as the launch sync, which tests turn off).
+    FeedbackService().unseenByThread();
+    if (SyncService.instance.autoSyncOnLaunch) {
+      FeedbackService().refreshNotifications();
+    }
     _logSub = AppLogService.instance.changes.stream.listen((_) {
       if (mounted) _loadDeveloperMode();
     });
@@ -317,12 +326,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: _showOutbox,
                   ),
           ),
-          // Public feedback on Nostr: read, post, reply, react.
-          IconButton(
-            tooltip: 'Feedback',
-            icon: const Icon(Icons.forum_outlined),
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const FeedbackScreen())),
+          // Public feedback on Nostr: read, post, reply, react. The badge
+          // counts new replies and reactions to the reader's own feedback.
+          ValueListenableBuilder<int>(
+            valueListenable: FeedbackService.unseenCount,
+            builder: (context, unseen, _) => IconButton(
+              tooltip: unseen == 0
+                  ? 'Feedback'
+                  : 'Feedback ($unseen new)',
+              icon: Badge(
+                isLabelVisible: unseen > 0,
+                label: Text('$unseen'),
+                backgroundColor: Colors.black,
+                child: const Icon(Icons.forum_outlined),
+              ),
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const FeedbackScreen())),
+            ),
           ),
           // Hidden when there is nothing to sync (no source yet).
           if (_hasSomethingToSync || syncing)

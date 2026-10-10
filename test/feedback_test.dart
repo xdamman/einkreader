@@ -595,4 +595,79 @@ void main() {
         reason: 'retried automatically — no reload tap needed');
     expect(find.text('No feedback yet — be the first.'), findsNothing);
   });
+
+  group('notifications for replies and reactions to my feedback', () {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    const other = 'bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11';
+    var n = 0;
+    Map<String, dynamic> from(String pubkey, int kind, String content,
+            List<List<String>> tags) =>
+        {
+          'id': (++n).toRadixString(16).padLeft(64, '0'),
+          'pubkey': pubkey,
+          'kind': kind,
+          'content': content,
+          'created_at': now - 50,
+          'tags': tags,
+          'sig': '',
+        };
+
+    Future<FeedbackNote> setup() async {
+      SharedPreferences.setMockInitialValues(
+          {'feedback_seen_baseline': now - 100});
+      await ProfileService.instance.createIdentity();
+      final mine = await service.post('Night mode?');
+      final someoneElses = from(other, 1, 'Not mine', [
+        ['p', FeedbackService.officialHex]
+      ]);
+      relay.events.addAll([
+        someoneElses,
+        // Counted: a reply and a reaction to my note.
+        from(other, 1, 'Good idea', [
+          ['e', mine.id, '', 'root'],
+          ['p', FeedbackService.officialHex],
+        ]),
+        from(other, 7, '👍', [
+          ['e', mine.id],
+          ['p', (await service.myPubkey)!],
+        ]),
+        // Not counted: activity on someone else's note.
+        from(other, 7, '🎉', [
+          ['e', someoneElses['id'] as String],
+        ]),
+      ]);
+      // Not counted: my own reaction.
+      await service.react(mine, '❤️');
+      await service.feedback();
+      return mine;
+    }
+
+    test('counted per thread; opening the thread clears them', () async {
+      final mine = await setup();
+      expect(await service.unseenByThread(), {mine.id: 2});
+      expect(FeedbackService.unseenCount.value, 2);
+      await service.markThreadSeen(mine.id);
+      expect(await service.unseenByThread(), isEmpty);
+      expect(FeedbackService.unseenCount.value, 0);
+    });
+
+    test('nothing before the first check counts (no old history)', () async {
+      SharedPreferences.setMockInitialValues({});
+      await ProfileService.instance.createIdentity();
+      final mine = await service.post('Old feedback');
+      relay.events.add(from(other, 7, '👍', [
+        ['e', mine.id]
+      ]));
+      await service.feedback();
+      expect(await service.unseenByThread(), isEmpty);
+    });
+
+    testWidgets('the list marks threads with new activity', (tester) async {
+      await tester.runAsync(setup);
+      await tester.pumpWidget(MaterialApp(
+          theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
+      await settle(tester);
+      expect(find.text('2 new'), findsOneWidget);
+    });
+  });
 }

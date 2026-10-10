@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -190,8 +192,12 @@ class FeedbackService {
     // everything older that we never fetched. A day of overlap is cheap.
     final prefs = await SharedPreferences.getInstance();
     final syncedAt = prefs.getInt(_kSyncedAt);
-    final since = syncedAt == null ? null : syncedAt - 86400;
     final startedAt = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // Once a day, the whole history again: a relay that was slow on one
+    // sync must not leave older feedback (and its replies) missing for good.
+    final fullAt = prefs.getInt(_kFullSyncAt);
+    final full = fullAt == null || startedAt - fullAt > 86400;
+    final since = syncedAt == null || full ? null : syncedAt - 86400;
     final fresh = await _nostr.query({
       'kinds': [1],
       '#p': [officialHex],
@@ -205,6 +211,7 @@ class FeedbackService {
     // asks for everything again.
     if (fresh.isNotEmpty || syncedAt != null) {
       await prefs.setInt(_kSyncedAt, startedAt);
+      if (full && fresh.isNotEmpty) await prefs.setInt(_kFullSyncAt, startedAt);
     }
     final rootIds = (await cachedFeedback()).notes.map((n) => n.id).toList();
     if (rootIds.isNotEmpty) {
@@ -232,6 +239,7 @@ class FeedbackService {
   }
 
   static const _kSyncedAt = 'feedback_synced_at';
+  static const _kFullSyncAt = 'feedback_full_sync_at';
 
   /// Which notes are feedback (tag the official account) — recomputed from
   /// the cache once per service, then kept up to date as events arrive.
@@ -325,6 +333,100 @@ class FeedbackService {
   Future<void> _remember(Map<String, dynamic> event) async {
     await _db.saveNostrEvents([event]);
     _addressed.addAll(_idsAddressedToUs([event]));
+  }
+
+  /// How many replies and reactions to the reader's own feedback they
+  /// haven't seen yet, for the badge on the feedback icon. Updated by
+  /// [unseenByThread].
+  static final ValueNotifier<int> unseenCount = ValueNotifier(0);
+
+  static const _kSeenBaseline = 'feedback_seen_baseline';
+  static const _kThreadSeen = 'feedback_thread_seen';
+
+  /// Replies and reactions from others to the reader's notes, newer than
+  /// when they last opened that thread: thread root id → count. Only
+  /// counts activity after the first time this ran, so installing or
+  /// updating doesn't light up old history. Cache only, no network.
+  Future<Map<String, int>> unseenByThread() async {
+    final me = await myPubkey;
+    if (me == null) {
+      unseenCount.value = 0;
+      return const {};
+    }
+    final prefs = await SharedPreferences.getInstance();
+    var baseline = prefs.getInt(_kSeenBaseline);
+    if (baseline == null) {
+      baseline = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      await prefs.setInt(_kSeenBaseline, baseline);
+    }
+    final seen = _threadSeen(prefs);
+
+    final notes = {
+      for (final e in await _db.nostrEvents([1]))
+        e['id'] as String: FeedbackNote.fromEvent(e)
+    };
+    final mine = {
+      for (final n in notes.values)
+        if (n.pubkey == me) n.id
+    };
+    final out = <String, int>{};
+    void count(String thread, int createdAt) {
+      if (createdAt <= (seen[thread] ?? baseline!)) return;
+      out[thread] = (out[thread] ?? 0) + 1;
+    }
+
+    for (final e in await _db.nostrEvents([1, 7])) {
+      if (e['pubkey'] == me) continue;
+      final createdAt = (e['created_at'] as int?) ?? 0;
+      final ids = [
+        for (final tag in (e['tags'] as List? ?? const []))
+          if ((tag as List).length >= 2 && tag[0] == 'e') '${tag[1]}'
+      ];
+      if (ids.isEmpty) continue;
+      if (e['kind'] == 1) {
+        if (!ids.any(mine.contains)) continue;
+        final note = notes[e['id']];
+        count(note?.rootId ?? ids.first, createdAt);
+      } else {
+        // NIP-25: the last e-tag is the reacted-to note.
+        final target = ids.last;
+        if (!mine.contains(target)) continue;
+        count(notes[target]?.rootId ?? target, createdAt);
+      }
+    }
+    unseenCount.value = out.values.fold(0, (a, b) => a + b);
+    return out;
+  }
+
+  static Map<String, int> _threadSeen(SharedPreferences prefs) {
+    try {
+      final raw = prefs.getString(_kThreadSeen);
+      if (raw == null) return {};
+      return (jsonDecode(raw) as Map<String, dynamic>)
+          .map((k, v) => MapEntry(k, v as int));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// The reader opened this thread: its replies and reactions are seen.
+  Future<void> markThreadSeen(String rootId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final seen = _threadSeen(prefs)
+      ..[rootId] = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await prefs.setString(_kThreadSeen, jsonEncode(seen));
+    await unseenByThread();
+  }
+
+  /// Fetches what's new from the relays and updates [unseenCount]. For
+  /// the home screen, in the background: failures are ignored.
+  Future<void> refreshNotifications() async {
+    try {
+      if (!await canPost) return;
+      await unseenByThread();
+      await feedback();
+      await unseenByThread();
+    } catch (_) {}
   }
 
   /// Whether this install can sign (posting and reacting need a profile).
