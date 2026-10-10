@@ -379,6 +379,12 @@ class _MarkdownViewState extends State<MarkdownView> {
 
   static final _imageOnly =
       RegExp(r'^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)$');
+
+  /// A picture that links to something (often its full-size file):
+  /// `[![alt](src)](href)`. Shown as the picture; it used to come out as a
+  /// bare "!" link.
+  static final _linkedImageOnly = RegExp(
+      r'^\[!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)\]\(\s*\S+?\s*\)$');
   // The literal bullet • is common in tweet-sourced text.
   static final _listLine = RegExp(r'^(\s*)([-*+•]|\d+[.)])\s+(.*)$');
   static final _headingLine = RegExp(r'^(#{1,6})\s+(.*)$');
@@ -452,7 +458,8 @@ class _MarkdownViewState extends State<MarkdownView> {
         continue;
       }
 
-      final image = _imageOnly.firstMatch(trimmed);
+      final image = _imageOnly.firstMatch(trimmed) ??
+          _linkedImageOnly.firstMatch(trimmed);
       if (image != null) {
         flushParagraph();
         blocks.add(_Block(_BlockType.image, image.group(1) ?? '',

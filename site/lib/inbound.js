@@ -111,7 +111,8 @@ export function verifySvixSignature(secret, headers, payload) {
 
 /// Assembles the stored inbox item from converted parts (pure).
 export function buildItem(
-    { subject, from, markdown, attachmentsMarkdown, documents = 0, url }) {
+    { subject, from, markdown, attachmentsMarkdown, documents = 0, url,
+      content = false }) {
   const body = [markdown, ...attachmentsMarkdown]
     .filter((part) => part && part.trim())
     .join('\n\n---\n\n');
@@ -119,10 +120,14 @@ export function buildItem(
     subject: subject?.trim() || 'Email',
     from,
     markdown: body,
-    url: url ?? firstLink(markdown),
+    // An explicit url (even null) wins over guessing from the body.
+    url: url !== undefined ? url : firstLink(markdown),
     // PDF/EPUB attachments converted into the body: the email is then
     // content in itself, not just a link to read.
     documents,
+    // The email is the article itself (a newsletter): the reader shows it
+    // rather than downloading its link.
+    ...(content ? { content: true } : {}),
     receivedAt: Date.now(),
   };
 }

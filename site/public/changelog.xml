@@ -7,11 +7,18 @@
   <updated>2026-10-10T12:00:00Z</updated>
   <author><name>einkreader</name></author>
   <entry>
+    <id>https://einkreader.app/changelog#v0.6.13</id>
+    <title>einkreader 0.6.13: Forwarded newsletters stay readable</title>
+    <link href="https://einkreader.app/changelog#v0.6.13"/>
+    <updated>2026-10-10T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Substack newsletters forwarded or sent to your @einkreader.app address keep their whole text, with their title, byline and images, instead of being replaced by the publication's subscribe page.&lt;/li&gt;&lt;li&gt;Pictures that link to a larger version show as pictures, not as a stray &amp;quot;!&amp;quot;.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
+  <entry>
     <id>https://einkreader.app/changelog#update-2026-10-10</id>
-    <title>Cleaner Substack emails, author profiles on the web</title>
+    <title>Author profiles on the web</title>
     <link href="https://einkreader.app/changelog#update-2026-10-10"/>
     <updated>2026-10-10T12:00:00Z</updated>
-    <content type="html">&lt;ul&gt;&lt;li&gt;Substack newsletters sent or forwarded to your @einkreader.app address arrive as clean articles: title, byline and the post itself, without the newsletter clutter, blank gaps or your subscriber login link.&lt;/li&gt;&lt;li&gt;On the web feedback page, an author's name or avatar opens their profile.&lt;/li&gt;&lt;/ul&gt;</content>
+    <content type="html">&lt;ul&gt;&lt;li&gt;On the web feedback page, an author's name or avatar opens their profile.&lt;/li&gt;&lt;/ul&gt;</content>
   </entry>
   <entry>
     <id>https://einkreader.app/changelog#v0.6.12</id>
@@ -208,12 +215,5 @@
     <link href="https://einkreader.app/changelog#v0.4.9"/>
     <updated>2026-08-13T12:00:00Z</updated>
     <content type="html">&lt;ul&gt;&lt;li&gt;Stray style code no longer shows up as text in articles.&lt;/li&gt;&lt;/ul&gt;</content>
-  </entry>
-  <entry>
-    <id>https://einkreader.app/changelog#v0.4.8</id>
-    <title>einkreader 0.4.8: Tables</title>
-    <link href="https://einkreader.app/changelog#v0.4.8"/>
-    <updated>2026-08-12T12:00:00Z</updated>
-    <content type="html">&lt;ul&gt;&lt;li&gt;Tables in articles render properly.&lt;/li&gt;&lt;/ul&gt;</content>
   </entry>
 </feed>

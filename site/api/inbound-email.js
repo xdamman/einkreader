@@ -139,7 +139,7 @@ export default async function handler(req, res) {
 
   const item = buildItem({
     subject: substack?.subject ?? full?.subject ?? email?.subject,
-    url: substack?.url ?? undefined,
+    ...(substack ? { url: substack.url, content: true } : {}),
     from,
     markdown,
     attachmentsMarkdown,

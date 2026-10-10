@@ -89,6 +89,7 @@ void main() {
               'items': [
                 {'id': 'inbox/pk/1.json', 'url': 'https://blob/1.json'},
                 {'id': 'inbox/pk/2.json', 'url': 'https://blob/2.json'},
+                {'id': 'inbox/pk/3.json', 'url': 'https://blob/3.json'},
               ]
             }),
             200);
@@ -115,6 +116,20 @@ void main() {
               'markdown': 'Check this: https://example.com/essay',
               'url': 'https://example.com/essay',
               'receivedAt': 1700000001000,
+            }),
+            200);
+      }
+      if (url == 'https://blob/3.json') {
+        // A short newsletter: the server marks it as content, so it's kept
+        // as is even though it's short and has a link.
+        return http.Response(
+            jsonEncode({
+              'subject': 'Artizen',
+              'from': 'me@example.com',
+              'markdown': 'A short post. Read more on the web.',
+              'url': 'https://pub.substack.com/p/artizen',
+              'content': true,
+              'receivedAt': 1700000002000,
             }),
             200);
       }
@@ -146,7 +161,12 @@ void main() {
     final source = (await db.getSources())
         .firstWhere((s) => s.type == SourceType.email);
     final articles = await db.getArticles(sourceId: source.id);
-    expect(articles, hasLength(2));
+    expect(articles, hasLength(3));
+
+    final newsletter = articles.firstWhere((a) => a.title == 'Artizen');
+    expect(newsletter.fetched, 1, reason: 'a newsletter is its own content');
+    expect(newsletter.contentMarkdown, contains('A short post.'));
+    expect(newsletter.url, 'https://pub.substack.com/p/artizen');
 
     final letter = articles.firstWhere((a) => a.title == 'Sunday letter');
     expect(letter.author, 'me@example.com');
@@ -159,12 +179,13 @@ void main() {
     expect(linked.url, 'https://example.com/essay');
     expect(linked.summary, contains('Check this'));
 
-    expect(acked, containsAll(['inbox/pk/1.json', 'inbox/pk/2.json']));
+    expect(acked,
+        containsAll(['inbox/pk/1.json', 'inbox/pk/2.json', 'inbox/pk/3.json']));
 
     // A second sync inserts nothing new (guid dedupe) even if the server
     // still listed the items.
     await sync.syncAll();
-    expect(await db.getArticles(sourceId: source.id), hasLength(2));
+    expect(await db.getArticles(sourceId: source.id), hasLength(3));
   });
 
   test('mail from a new sender waits as a request until accepted',

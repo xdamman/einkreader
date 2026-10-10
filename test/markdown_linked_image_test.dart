@@ -59,4 +59,21 @@ void main() {
     // The link's visible label is still present.
     expect(texts, contains('source'));
   });
+
+  testWidgets('a picture wrapped in a link on one line shows as the picture',
+      (tester) async {
+    // What newsletter emails produce: [![alt](src)](full-size link).
+    const markdown = 'Intro.\n\n'
+        '[![A gallery](https://cdn.example.com/w_1100/big.jpeg)]'
+        '(https://cdn.example.com/big.jpeg)\n\nAfter.';
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: MarkdownView(markdown: markdown)))));
+    final image = tester.widget<Image>(find.byType(Image));
+    expect((image.image as NetworkImage).url,
+        'https://cdn.example.com/w_1100/big.jpeg');
+    expect(find.textContaining('!'), findsNothing,
+        reason: 'no bare "!" link left');
+  });
 }

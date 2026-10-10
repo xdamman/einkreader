@@ -879,7 +879,12 @@ class SyncService {
     final link = item['url'] as String?;
     final documents = (item['documents'] as num?)?.toInt() ?? 0;
     final note = emailNote(markdown, link);
-    final linkOnly = link != null && documents == 0 && note.length < 600;
+    // A newsletter (the server sets "content") is the article itself, even
+    // when short: never swap it for its link's page (for Substack, without
+    // the subscriber's session that's the "Subscribe" page).
+    final isContent = item['content'] == true;
+    final linkOnly =
+        link != null && documents == 0 && !isContent && note.length < 600;
     String? content;
     if (!linkOnly) {
       content = await _archive.localizeMarkdown(

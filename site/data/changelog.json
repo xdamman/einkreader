@@ -1,9 +1,17 @@
 [
   {
+    "version": "0.6.13",
     "date": "2026-10-10",
-    "title": "Cleaner Substack emails, author profiles on the web",
+    "title": "Forwarded newsletters stay readable",
     "changes": [
-      "Substack newsletters sent or forwarded to your @einkreader.app address arrive as clean articles: title, byline and the post itself, without the newsletter clutter, blank gaps or your subscriber login link.",
+      "Substack newsletters forwarded or sent to your @einkreader.app address keep their whole text, with their title, byline and images, instead of being replaced by the publication's subscribe page.",
+      "Pictures that link to a larger version show as pictures, not as a stray \"!\"."
+    ]
+  },
+  {
+    "date": "2026-10-10",
+    "title": "Author profiles on the web",
+    "changes": [
       "On the web feedback page, an author's name or avatar opens their profile."
     ]
   },
@@ -17,7 +25,10 @@
       "The text size is now remembered."
     ],
     "feedback": [
-      { "id": "bead9dac584c3a187e844846b9f9bce4d9d32f1385fbaa36012e0c81144d0efa", "title": "Paginated scrolling" }
+      {
+        "id": "bead9dac584c3a187e844846b9f9bce4d9d32f1385fbaa36012e0c81144d0efa",
+        "title": "Paginated scrolling"
+      }
     ]
   },
   {
@@ -95,7 +106,10 @@
       "Tapping a name opens a fuller profile with their highlights and feedback."
     ],
     "feedback": [
-      { "id": "adf051644e07c0164ce79f7b12a9ff5c154535a4644701b2feccdd973da97a66", "title": "Posting feedback should be instant" }
+      {
+        "id": "adf051644e07c0164ce79f7b12a9ff5c154535a4644701b2feccdd973da97a66",
+        "title": "Posting feedback should be instant"
+      }
     ]
   },
   {
@@ -107,7 +121,10 @@
       "A simpler feedback form that shows clearly who you post as."
     ],
     "feedback": [
-      { "id": "34a03783c5c50359ac6792ead7c1d0ff327fda51812381c5ce48e2ec7eb7bc0d", "title": "Feedback on feedback feature" }
+      {
+        "id": "34a03783c5c50359ac6792ead7c1d0ff327fda51812381c5ce48e2ec7eb7bc0d",
+        "title": "Feedback on feedback feature"
+      }
     ]
   },
   {
@@ -140,7 +157,9 @@
     "version": "0.5.10",
     "date": "2026-09-25",
     "title": "Lighter X bookmark sync",
-    "changes": ["X bookmarks are fetched 10 at a time, and only as far back as needed."]
+    "changes": [
+      "X bookmarks are fetched 10 at a time, and only as far back as needed."
+    ]
   },
   {
     "version": "0.5.9",
@@ -165,121 +184,161 @@
     "version": "0.5.7",
     "date": "2026-09-23",
     "title": "Better X posts and articles",
-    "changes": ["Links to X posts show the post itself; more articles extract cleanly."]
+    "changes": [
+      "Links to X posts show the post itself; more articles extract cleanly."
+    ]
   },
   {
     "version": "0.5.6",
     "date": "2026-09-14",
     "title": "Resume reading follows your filters",
-    "changes": ["Resume reading sits below the filters and shows only what they select."]
+    "changes": [
+      "Resume reading sits below the filters and shows only what they select."
+    ]
   },
   {
     "version": "0.5.5",
     "date": "2026-09-11",
     "title": "Readable X errors",
-    "changes": ["Problems with X are explained in plain sentences."]
+    "changes": [
+      "Problems with X are explained in plain sentences."
+    ]
   },
   {
     "version": "0.5.4",
     "date": "2026-09-11",
     "title": "Source errors you can see",
-    "changes": ["A source that fails to update shows a warning, and X can be reconnected from its feed."]
+    "changes": [
+      "A source that fails to update shows a warning, and X can be reconnected from its feed."
+    ]
   },
   {
     "version": "0.5.3",
     "date": "2026-08-29",
     "title": "Older websites",
-    "changes": ["Articles from table-based sites (like paulgraham.com) extract properly."]
+    "changes": [
+      "Articles from table-based sites (like paulgraham.com) extract properly."
+    ]
   },
   {
     "version": "0.5.2",
     "date": "2026-08-18",
     "title": "Quotes keep their shape",
-    "changes": ["Paragraph breaks and list lines survive in quotes."]
+    "changes": [
+      "Paragraph breaks and list lines survive in quotes."
+    ]
   },
   {
     "version": "0.5.1",
     "date": "2026-08-17",
     "title": "Instant sharing",
-    "changes": ["Sharing a highlight closes the dialog at once and publishes in the background."]
+    "changes": [
+      "Sharing a highlight closes the dialog at once and publishes in the background."
+    ]
   },
   {
     "version": "0.5.0",
     "date": "2026-08-16",
     "title": "Simpler sharing",
-    "changes": ["A button at the end of an article shares all your highlights from it."]
+    "changes": [
+      "A button at the end of an article shares all your highlights from it."
+    ]
   },
   {
     "version": "0.4.12",
     "date": "2026-08-16",
     "title": "Download status",
-    "changes": ["Articles show whether they're downloaded; the Read and Highlights tabs filter by source."]
+    "changes": [
+      "Articles show whether they're downloaded; the Read and Highlights tabs filter by source."
+    ]
   },
   {
     "version": "0.4.11",
     "date": "2026-08-14",
     "title": "Tweets that share links",
-    "changes": ["A short tweet sharing a link brings in the linked story."]
+    "changes": [
+      "A short tweet sharing a link brings in the linked story."
+    ]
   },
   {
     "version": "0.4.10",
     "date": "2026-08-13",
     "title": "Friendlier offline messages",
-    "changes": ["Clear messages when you're offline, everywhere; an Advanced section in Settings."]
+    "changes": [
+      "Clear messages when you're offline, everywhere; an Advanced section in Settings."
+    ]
   },
   {
     "version": "0.4.9",
     "date": "2026-08-13",
     "title": "Cleaner articles",
-    "changes": ["Stray style code no longer shows up as text in articles."]
+    "changes": [
+      "Stray style code no longer shows up as text in articles."
+    ]
   },
   {
     "version": "0.4.8",
     "date": "2026-08-12",
     "title": "Tables",
-    "changes": ["Tables in articles render properly."]
+    "changes": [
+      "Tables in articles render properly."
+    ]
   },
   {
     "version": "0.4.7",
     "date": "2026-08-12",
     "title": "A calmer Settings",
-    "changes": ["Settings are organized into sections, one screen each."]
+    "changes": [
+      "Settings are organized into sections, one screen each."
+    ]
   },
   {
     "version": "0.4.6",
     "date": "2026-08-12",
     "title": "Profile polish",
-    "changes": ["Small fixes to how profiles look."]
+    "changes": [
+      "Small fixes to how profiles look."
+    ]
   },
   {
     "version": "0.4.5",
     "date": "2026-08-12",
     "title": "Reader fixes",
-    "changes": ["Hidden page content stays hidden; highlights work across bold text."]
+    "changes": [
+      "Hidden page content stays hidden; highlights work across bold text."
+    ]
   },
   {
     "version": "0.4.4",
     "date": "2026-08-09",
     "title": "Profile editor",
-    "changes": ["A clearer profile editor."]
+    "changes": [
+      "A clearer profile editor."
+    ]
   },
   {
     "version": "0.4.3",
     "date": "2026-08-09",
     "title": "Accents fixed",
-    "changes": ["Pages without a declared encoding no longer show garbled accents; copy an article's link from the share menu."]
+    "changes": [
+      "Pages without a declared encoding no longer show garbled accents; copy an article's link from the share menu."
+    ]
   },
   {
     "version": "0.4.2",
     "date": "2026-08-09",
     "title": "Your profile, as others see it",
-    "changes": ["The profile screen mirrors your public page, with an editable address."]
+    "changes": [
+      "The profile screen mirrors your public page, with an editable address."
+    ]
   },
   {
     "version": "0.4.1",
     "date": "2026-08-08",
     "title": "Public pages",
-    "changes": ["Simpler public profile pages with a link for each story, and ways to subscribe."]
+    "changes": [
+      "Simpler public profile pages with a link for each story, and ways to subscribe."
+    ]
   },
   {
     "version": "0.4.0",
@@ -294,31 +353,41 @@
     "version": "0.3.5",
     "date": "2026-08-02",
     "title": "Tweets keep their line breaks",
-    "changes": ["Long tweets keep their paragraphs and lists."]
+    "changes": [
+      "Long tweets keep their paragraphs and lists."
+    ]
   },
   {
     "version": "0.3.4",
     "date": "2026-07-28",
     "title": "Search filters",
-    "changes": ["Narrow search results by source, author and more."]
+    "changes": [
+      "Narrow search results by source, author and more."
+    ]
   },
   {
     "version": "0.3.3",
     "date": "2026-07-28",
     "title": "Search",
-    "changes": ["Search across sources, authors, titles, content and highlights."]
+    "changes": [
+      "Search across sources, authors, titles, content and highlights."
+    ]
   },
   {
     "version": "0.3.2",
     "date": "2026-07-28",
     "title": "X bookmarks by author",
-    "changes": ["Filter X bookmarks by author."]
+    "changes": [
+      "Filter X bookmarks by author."
+    ]
   },
   {
     "version": "0.3.1",
     "date": "2026-07-28",
     "title": "All your X bookmarks",
-    "changes": ["Your whole X bookmark history is imported, resuming where it stopped."]
+    "changes": [
+      "Your whole X bookmark history is imported, resuming where it stopped."
+    ]
   },
   {
     "version": "0.3.0",
@@ -343,13 +412,17 @@
     "version": "0.2.2",
     "date": "2026-07-21",
     "title": "A tidier library folder",
-    "changes": ["Saved articles are organized by year and source."]
+    "changes": [
+      "Saved articles are organized by year and source."
+    ]
   },
   {
     "version": "0.2.1",
     "date": "2026-07-21",
     "title": "Update fix",
-    "changes": ["Fixed the app failing to open after updating to 0.2.0 (no data was lost)."]
+    "changes": [
+      "Fixed the app failing to open after updating to 0.2.0 (no data was lost)."
+    ]
   },
   {
     "version": "0.2.0",
@@ -365,55 +438,73 @@
     "version": "0.1.15",
     "date": "2026-07-17",
     "title": "Less newsletter clutter",
-    "changes": ["Newsletter calls to action are hidden in articles."]
+    "changes": [
+      "Newsletter calls to action are hidden in articles."
+    ]
   },
   {
     "version": "0.1.14",
     "date": "2026-07-17",
     "title": "Highlights in your files",
-    "changes": ["Highlights stay in sync with a highlights file in your library folder."]
+    "changes": [
+      "Highlights stay in sync with a highlights file in your library folder."
+    ]
   },
   {
     "version": "0.1.13",
     "date": "2026-07-17",
     "title": "Folders in the feed",
-    "changes": ["Folders expand right in the feed's filters."]
+    "changes": [
+      "Folders expand right in the feed's filters."
+    ]
   },
   {
     "version": "0.1.12",
     "date": "2026-07-17",
     "title": "Organizing sources",
-    "changes": ["Drag sources into folders; see each source's description and stats."]
+    "changes": [
+      "Drag sources into folders; see each source's description and stats."
+    ]
   },
   {
     "version": "0.1.11",
     "date": "2026-07-17",
     "title": "Share highlights on X",
-    "changes": ["Post highlights to X, sized to fit your plan."]
+    "changes": [
+      "Post highlights to X, sized to fit your plan."
+    ]
   },
   {
     "version": "0.1.10",
     "date": "2026-07-17",
     "title": "Folders and sharing",
-    "changes": ["Organize sources into folders; a share menu for articles."]
+    "changes": [
+      "Organize sources into folders; a share menu for articles."
+    ]
   },
   {
     "version": "0.1.9",
     "date": "2026-07-05",
     "title": "Read later",
-    "changes": ["Save any link to read later, from other apps or the clipboard."]
+    "changes": [
+      "Save any link to read later, from other apps or the clipboard."
+    ]
   },
   {
     "version": "0.1.8",
     "date": "2026-07-05",
     "title": "Save links from articles",
-    "changes": ["Save links found inside articles to read later."]
+    "changes": [
+      "Save links found inside articles to read later."
+    ]
   },
   {
     "version": "0.1.7",
     "date": "2026-07-05",
     "title": "Resume where you left off",
-    "changes": ["The app remembers where you stopped reading."]
+    "changes": [
+      "The app remembers where you stopped reading."
+    ]
   },
   {
     "version": "0.1.6",

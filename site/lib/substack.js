@@ -14,7 +14,15 @@ turndown.remove(['script', 'style']);
 /// Characters Substack (and other senders) repeat to pad the inbox preview:
 /// combining grapheme joiner, zero-width (non-)joiners/spaces, soft hyphen,
 /// figure space, BOM.
-const INVISIBLE = /[͏­᠎​-‏ ⁠-⁤﻿]/g;
+const INVISIBLE = new RegExp(`[${[
+  0x034F, 0x00AD, 0x180E, 0x2007, 0xFEFF, // grapheme joiner, soft hyphen…
+  ...range(0x200B, 0x200F), // zero-width spaces and joiners, marks
+  ...range(0x2060, 0x2064), // word joiner and invisible operators
+].map((c) => String.fromCodePoint(c)).join('')}]`, 'g');
+
+function range(from, to) {
+  return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+}
 
 /// Whether this email is a Substack newsletter (direct or forwarded). A
 /// plain email that merely shares a Substack link is not.
@@ -49,167 +57,145 @@ export function cleanSubstackUrl(href) {
   return url.toString();
 }
 
-/// The public web address of the post, when the email carries one:
-/// a /p/slug link (canonical, without query), else the app link to it.
+/// The public web address of the post, when the email carries one: a
+/// /p/slug link, canonical (no query). Never an app link: without the
+/// subscriber's token those land on the publication's subscribe page.
 export function substackPostUrl(doc) {
   const hrefs = Array.from(doc.querySelectorAll('a[href]'))
       .map((a) => a.getAttribute('href'));
-  for (const href of hrefs) {
-    const m = /^https?:\/\/([a-z0-9-]+\.substack\.com|[^/\s]+)\/p\/([a-z0-9-]+)/i
-        .exec(href);
-    if (m && !/open\.substack\.com/i.test(m[1])) return `https://${m[1]}/p/${m[2]}`;
-  }
   for (const href of hrefs) {
     const m = /open\.substack\.com\/pub\/([a-z0-9-]+)\/p\/([a-z0-9-]+)/i
         .exec(href);
     if (m) return `https://${m[1]}.substack.com/p/${m[2]}`;
   }
-  const title = doc.querySelector('h1 a[href*="app-link/post"]') ??
-      doc.querySelector('a[href*="app-link/post"]');
-  return title ? cleanSubstackUrl(title.getAttribute('href')) : null;
+  for (const href of hrefs) {
+    const m = /^https?:\/\/([a-z0-9.-]+)\/p\/([a-z0-9-]+)/i.exec(href);
+    if (m && !/^(open\.)?substack\.com$/i.test(m[1])) {
+      return `https://${m[1]}/p/${m[2]}`;
+    }
+  }
+  return null;
 }
 
-const isHidden = (el) => /display\s*:\s*none|max-height\s*:\s*0|mso-hide\s*:\s*all/i
-    .test(el.getAttribute?.('style') ?? '');
+const HIDDEN_STYLE =
+    /display\s*:\s*none|max-height\s*:\s*0(px)?\s*(;|$)|opacity\s*:\s*0(\.0+)?\s*(;|$)|font-size\s*:\s*0(px)?\s*(;|$)/i;
+const textOf = (el) => (el.textContent ?? '').replace(INVISIBLE, '')
+    .replace(/\s+/g, ' ').trim();
+const wordCount = (s) => (s.replace(INVISIBLE, '').match(/[\p{L}\p{N}]{2,}/gu) ?? []).length;
 
 /// Converts a Substack email to { title, byline, markdown, url, note }.
-/// [note] is what the forwarder wrote above the forwarded newsletter.
+///
+/// Conservative on purpose: it removes only what it can recognize (hidden
+/// preview padding, icon links, forwarded headers, known buttons and the
+/// footer) and never picks a "post container" that could drop text. If the
+/// result still lost much of the email's words, the email's full text is
+/// used instead, just without the invisible padding.
 export function substackToMarkdown(html) {
   const doc = domino.createDocument(String(html ?? ''));
   const body = doc.body;
+  const fullWords = wordCount(body.textContent ?? '');
+  const fallback = tidy(turndown.turndown(body.innerHTML));
 
-  for (const el of Array.from(body.querySelectorAll('*'))) {
-    if (el.isConnected !== false && isHidden(el)) el.remove();
-  }
-
-  // Forwarded: the newsletter sits in the mail app's quote; what's above it
-  // is the forwarder's note, and the forwarded headers are dropped.
-  const quotes = Array.from(body.querySelectorAll(
-      'blockquote[type="cite"], .gmail_quote, blockquote'));
-  let root = body;
-  let note = '';
-  const post = body.querySelector('.post, .body.markup, h1.post-title') ??
-      body.querySelector('h1');
-  // The outermost quote holding the post (mail apps nest them).
-  const container = post && quotes.filter((q) => q.contains(post)).pop();
-  if (container) {
-    root = container;
-    let outer = container;
-    while (outer.parentNode && outer.parentNode !== body) outer = outer.parentNode;
-    const noteDoc = domino.createDocument('');
-    for (const node of Array.from(body.childNodes)) {
-      if (node === outer) break;
-      noteDoc.body.appendChild(node.cloneNode(true));
+  // Hidden preview text: only small hidden bits, never a hidden wrapper
+  // around the post (some emails hide content per client).
+  for (const el of Array.from(body.querySelectorAll('[style]'))) {
+    if (el.isConnected === false) continue;
+    if (HIDDEN_STYLE.test(el.getAttribute('style')) && textOf(el).length < 300) {
+      el.remove();
     }
-    for (const q of Array.from(noteDoc.body.querySelectorAll('blockquote, .gmail_quote, .gmail_attr'))) {
-      q.remove();
-    }
-    note = tidy(turndown.turndown(noteDoc.body.innerHTML))
-        .split('\n')
-        .filter((l) => !/^(begin forwarded message|-+\s*forwarded message\s*-+)/i
-            .test(l.trim()))
-        .join('\n')
-        .trim();
+  }
+  // Icon links (like, comment, share, the author's avatar): a small image
+  // and no words.
+  for (const a of Array.from(body.querySelectorAll('a[href]'))) {
+    a.setAttribute('href', cleanSubstackUrl(a.getAttribute('href')));
+    const imgs = Array.from(a.querySelectorAll('img'));
+    if (!imgs.length || textOf(a)) continue;
+    const small = imgs.every((img) =>
+      Number(img.getAttribute('width') ?? 999) <= 48 ||
+      Number(img.getAttribute('height') ?? 999) <= 48 ||
+      /\/icon\/|lucide/i.test(img.getAttribute('src') ?? ''));
+    if (small) a.remove();
+  }
+  for (const img of Array.from(body.querySelectorAll('img'))) {
+    if (/\/icon\/|lucide/i.test(img.getAttribute('src') ?? '')) img.remove();
   }
 
-  const titleEl = root.querySelector('h1.post-title, h1');
-  const title = titleEl?.textContent.replace(INVISIBLE, '').trim() || null;
-  // The subtitle: by class, else the h3 right after the title.
-  const subtitleEl = root.querySelector('h3.subtitle, .subtitle') ??
-      Array.from(root.querySelectorAll('h3')).find((h) => titleEl &&
-          titleEl.compareDocumentPosition(h) & 4 /* FOLLOWING */);
-  const subtitle =
-      subtitleEl?.textContent.replace(INVISIBLE, '').trim() || null;
-  const author = root.querySelector('a.author, .meta-author') ??
-      Array.from(root.querySelectorAll('a[href*="substack.com/@"]'))
-          .find((a) => !a.querySelector('img') && a.textContent.trim());
-  let authorName = author?.textContent.replace(INVISIBLE, '').trim() || null;
-  if (!authorName) {
-    // The forwarded headers: "From: Name from Publication <x@substack.com>".
-    const from = /From:\s*([^<\n]+?)\s*<[^>]*substack\.com>/i
-        .exec(body.textContent ?? '');
-    authorName = from?.[1].trim() || null;
-  }
-  const date = author?.parentNode?.querySelector('.meta, .post-date, time')
-      ?.textContent.trim() || null;
+  const titleEl = body.querySelector('h1.post-title') ?? body.querySelector('h1');
+  const title = titleEl ? textOf(titleEl) || null : null;
   const url = substackPostUrl(doc);
 
-  const content = root.querySelector('.body.markup, .markup') ??
-      root.querySelector('.post') ?? root;
-  // Newsletter widgets inside the post body.
-  for (const el of Array.from(content.querySelectorAll(
-      '.subscription-widget-wrap, .subscription-widget, .button-wrapper, ' +
-      '.captioned-button-wrap, .install-substack-app-embed, ' +
-      '.email-ufi-2-top, .email-ufi-2-bottom, .footer, .post-header, ' +
-      'p.forwarded'))) {
-    el.remove();
-  }
-  for (const a of Array.from(content.querySelectorAll('a[href]'))) {
-    a.setAttribute('href', cleanSubstackUrl(a.getAttribute('href')));
-    // Icon links (like, comment, share…) carry only a small image.
-    const img = a.querySelector('img');
-    const small = img && Number(img.getAttribute('width') ?? 999) <= 48;
-    if (small && !a.textContent.replace(INVISIBLE, '').trim()) a.remove();
-  }
-  // Image links to the full-size picture: keep just the image.
-  for (const a of Array.from(content.querySelectorAll('a[href]'))) {
-    if (!a.querySelector('img') || a.textContent.replace(INVISIBLE, '').trim()) continue;
-    if (!a.classList.contains('image-link') &&
-        !/substackcdn\.com|\.(jpe?g|png|gif|webp)(\?|$)/i.test(a.getAttribute('href'))) {
-      continue;
-    }
-    a.replaceWith(...Array.from(a.childNodes));
-  }
+  // The author: the post's byline link, else the forwarded "From:" line.
+  const authorLink = body.querySelector('a.author') ??
+      Array.from(body.querySelectorAll('a[href*="substack.com/@"]'))
+          .find((link) => textOf(link));
+  const fromHeader = /From:\s*([^<\n]+?)\s*<[^>]*substack\.com>/i
+      .exec(body.textContent ?? '');
+  const authorName = (authorLink && textOf(authorLink)) ||
+      fromHeader?.[1].replace(INVISIBLE, '').trim() || null;
 
-  if (content === root) {
-    // No post container (unfamiliar markup): the post starts at its title.
-    if (titleEl) {
-      for (const node of Array.from(root.querySelectorAll('*'))) {
-        if (node.isConnected === false || node.contains(titleEl)) continue;
-        if (node.compareDocumentPosition(titleEl) &
-            4 /* DOCUMENT_POSITION_FOLLOWING */) {
-          node.remove();
-        }
-      }
-      // Text directly in a container before the title.
-      for (let n = titleEl; n && n !== root; n = n.parentNode) {
-        while (n.previousSibling) n.previousSibling.remove();
-      }
-      subtitleEl?.remove();
-      titleEl.remove();
-    }
-    for (const q of Array.from(root.querySelectorAll('blockquote[type="cite"]'))) {
-      q.replaceWith(...Array.from(q.childNodes));
-    }
-  }
+  const { note, lines } = splitForward(
+      tidy(turndown.turndown(body.innerHTML)).split('\n'));
 
-  // A container's own markup (not the quote around it).
-  let markdown = tidy(turndown.turndown(
-      content === root ? root.innerHTML : content.outerHTML));
-  if (content === root) {
-    // Drop the chrome lines we know by heart, and the footer.
-    const lines = [];
-    for (const raw of markdown.split('\n')) {
-      const line = raw.trim();
-      if (/^©/.test(line)) break;
-      if (CHROME.test(line)) continue;
-      lines.push(raw);
-    }
-    markdown = tidy(lines.join('\n'));
+  // The post starts at its title: what's above it in the newsletter is the
+  // inbox preview and "Forwarded this email? Subscribe". Only when the
+  // title is near the top, so nothing real is skipped.
+  let start = 0;
+  const titleIndex = title
+    ? lines.findIndex((l) => /^#\s/.test(l) && l.includes(title.slice(0, 40)))
+    : -1;
+  if (titleIndex >= 0 &&
+      lines.slice(0, titleIndex).filter((l) => l.trim()).length <= 12) {
+    start = titleIndex + 1;
   }
-
-  const byline = [authorName, date].filter(Boolean).join(' · ');
+  let out = lines.slice(start);
+  // The subtitle right under the title becomes an italic line.
+  let subtitle = null;
+  const firstText = out.findIndex((l) => l.trim());
+  if (firstText >= 0 && /^#{2,6}\s/.test(out[firstText])) {
+    subtitle = out[firstText].replace(/^#+\s*/, '').trim();
+    out.splice(firstText, 1);
+  }
+  out = out.filter((l) => !CHROME.test(l.trim()));
+  // The footer: from the © line, when it's near the end.
+  const copyright = out.findIndex((l) => /^©/.test(l.trim()));
+  if (copyright >= 0 &&
+      out.slice(copyright).filter((l) => l.trim()).length <= 12) {
+    out = out.slice(0, copyright);
+  }
+  // A picture linking to its full-size file: just the picture (the
+  // reader shows images inside links as a bare "!").
+  let markdown = tidy(out.join('\n')
+      .replace(/\[(!\[[^\]]*\]\([^)\s]+\))\]\([^)\s]+\)/g, '$1'));
   const header = [
     subtitle && subtitle !== title ? `*${subtitle}*` : null,
-    byline ? `By ${byline}` : null,
+    authorName ? `By ${authorName}` : null,
   ].filter(Boolean).join('\n\n');
-  return {
-    title,
-    byline: byline || null,
-    url,
-    note,
-    markdown: [header, markdown].filter(Boolean).join('\n\n'),
-  };
+  markdown = [header, markdown].filter(Boolean).join('\n\n');
+
+  // Safety net: never lose the post. The chrome is a small part of an
+  // email; losing more than half the words means something went wrong.
+  if (wordCount(markdown) + wordCount(note) < fullWords * 0.5) {
+    return { title, byline: authorName, url, note: '', markdown: fallback };
+  }
+  return { title, byline: authorName, url, note, markdown };
+}
+
+/// Splits a forwarded email's markdown: the forwarder's note (above the
+/// "Begin forwarded message" / "Forwarded message" marker) and the
+/// forwarded email itself, unquoted and without its From/Date/To/Subject
+/// header lines.
+function splitForward(lines) {
+  const marker = lines.findIndex((l) =>
+    /^(>\s*)*(begin forwarded message|-{2,}\s*forwarded message\s*-{2,})/i
+        .test(l.trim()));
+  if (marker < 0) return { note: '', lines };
+  const note = tidy(lines.slice(0, marker).join('\n'));
+  const rest = lines.slice(marker + 1).map((l) => l.replace(/^>\s?/, ''));
+  const header = /^\**(from|date|sent|to|cc|subject|reply-to):?\**:?\s/i;
+  // Header lines come first (possibly after blank lines).
+  let i = 0;
+  while (i < rest.length && (!rest[i].trim() || header.test(rest[i].trim()))) i++;
+  return { note, lines: rest.slice(i) };
 }
 
 const CHROME = new RegExp('^(' + [
