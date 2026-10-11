@@ -9,7 +9,11 @@ identities — it:
   1. reacts 👀 as the official account (seen, being worked on),
   2. runs Claude Code (Opus) headless in the repo to implement the feedback,
      test it and ship a release,
-  3. replies to the feedback as the official account with what changed.
+  3. drafts a reply saying what changed. Patch releases are iterations, so
+     the reply waits: when the next minor version is published on the
+     changelog (site/data/changelog.json), every waiting reply goes out with
+     the link to that version's entry. Feedback that needs no release
+     (already done, not actionable) is answered right away.
 
 Other people's feedback is never acted on until Xavier 👍s it: the note text
 is untrusted input for an agent that can commit and release.
@@ -68,6 +72,41 @@ def load_state():
         return json.loads(STATE_FILE.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return {"handled": {}, "approved": [], "pending_posts": []}
+
+
+CHANGELOG = REPO / "site/data/changelog.json"
+
+
+def latest_minor():
+    """The newest version published on the changelog (minor versions only)."""
+    try:
+        entries = json.loads(CHANGELOG.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    return next((e["version"] for e in entries if e.get("version")), None)
+
+
+def release_deferred(state):
+    """Once a new minor version is on the changelog, sends every reply that
+    waited for it, ending with the link to its entry."""
+    minor = latest_minor()
+    if minor is None:
+        return
+    if "announced_minor" not in state:
+        # First run: only minors published from now on release replies.
+        state["announced_minor"] = minor
+        save_state(state)
+        return
+    if minor == state["announced_minor"]:
+        return
+    link = f"https://einkreader.app/changelog#v{minor}"
+    for entry in state.pop("deferred_replies", []):
+        content = f"{entry['content'].rstrip()}\n\nIn version {minor}: {link}"
+        post(state, "reply", {"id": entry["note"], "pubkey": entry["author"]},
+             content)
+    log(f"version {minor} published: waiting replies sent")
+    state["announced_minor"] = minor
+    save_state(state)
 
 
 def save_state(state):
@@ -188,13 +227,14 @@ Do the work the way this project is normally worked on:
 - If nothing should be released (e.g. the feedback is already addressed or
   not actionable), don't release.
 
-Your FINAL message is posted publicly as the reply to this feedback, from
+Your FINAL message becomes the public reply to this feedback, from
 einkreader's account. Make it only that reply: plain text, friendly, under
-600 characters, saying what changed and in which version (or why nothing
-changed), and that it's in the app once updated (e.g. "Fixed in version
-1.2.3; update the app to get it"). No changelog link: patch versions
-aren't on the changelog page. No markdown headings, no internal
-details, no file paths.
+500 characters, saying what changed for the reader. If you released, it is
+sent once the next minor version is published, with that version's
+changelog link appended automatically: don't mention version numbers or
+links. If you did NOT release (nothing to change), start the message with
+the line NO_RELEASE, then the reply explaining why; it is sent right away.
+No markdown headings, no internal details, no file paths.
 """
 
 
@@ -240,8 +280,14 @@ def handle(state, note):
     post(state, "reaction", note, "👀")
     save_state(state)
     reply = run_claude(note)
-    if reply:
-        post(state, "reply", note, reply)
+    if reply and reply.startswith("NO_RELEASE"):
+        post(state, "reply", note, reply.removeprefix("NO_RELEASE").strip())
+        state["handled"][note_id] = "done"
+    elif reply:
+        # Shipped as a patch: the reply waits for the next minor version.
+        state.setdefault("deferred_replies", []).append(
+            {"note": note_id, "author": note["pubkey"], "content": reply})
+        log(f"reply to {note_id[:12]} waits for the next minor version")
         state["handled"][note_id] = "done"
     else:
         state["handled"][note_id] = "failed"
@@ -300,10 +346,12 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--once":
         poll(state)
+        release_deferred(state)
         flush_pending(state)
         return
     while True:
         try:
+            release_deferred(state)
             flush_pending(state)
             poll(state)
         except Exception as e:  # never let one bad event kill the service
