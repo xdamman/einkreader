@@ -1,0 +1,166 @@
+[
+  {
+    "version": "0.6.15",
+    "date": "2026-10-11",
+    "title": "Quote posts on X, or a screenshot when you can't",
+    "changes": [
+      "Sharing a post to X quotes it. If X refuses the quote because its author limits who can quote it, the post goes out with a screenshot of the original attached instead (reconnect X once to allow image uploads).",
+      "The debug log shows the date stored for each new X bookmark."
+    ]
+  },
+  {
+    "version": "0.6.14",
+    "date": "2026-10-11",
+    "title": "Every article in its source's list, faster search",
+    "changes": [
+      "The home screen lists every article instead of only the 500 most recent.",
+      "Search is faster and shows each result's date.",
+      "Posts X refuses for good, like duplicates, wait in the outbox with the reason instead of being retried at every sync."
+    ]
+  },
+  {
+    "version": "0.6.13",
+    "date": "2026-10-10",
+    "title": "Forwarded newsletters stay readable",
+    "changes": [
+      "Substack newsletters forwarded or sent to your @einkreader.app address keep their whole text, with their title, byline and images, instead of being replaced by the publication's subscribe page.",
+      "Pictures that link to a larger version show as pictures, not as a stray \"!\"."
+    ]
+  },
+  {
+    "date": "2026-10-10",
+    "title": "Author profiles on the web",
+    "changes": [
+      "On the web feedback page, an author's name or avatar opens their profile."
+    ]
+  },
+  {
+    "version": "0.6.12",
+    "date": "2026-10-10",
+    "title": "Reading settings: font, margins and page turns",
+    "changes": [
+      "New Reading section in Settings, with a live preview: text size, margins, and four fonts (Serif, Literata, Sans-serif, Atkinson Hyperlegible).",
+      "Turn pages instead of scrolling: articles move a screen at a time, with \"← Page 2 / 5 →\" at the bottom. Swipes and page keys turn pages too.",
+      "The text size is now remembered."
+    ],
+    "feedback": [
+      {
+        "id": "bead9dac584c3a187e844846b9f9bce4d9d32f1385fbaa36012e0c81144d0efa",
+        "title": "Paginated scrolling"
+      }
+    ]
+  },
+  {
+    "version": "0.6.11",
+    "date": "2026-10-10",
+    "title": "Know when someone answers your feedback",
+    "changes": [
+      "The feedback icon shows how many new replies and reactions your feedback got; threads with news are marked \"new\".",
+      "Feedback is now readable on the web at einkreader.app/feedback, and there is a contact page."
+    ]
+  },
+  {
+    "version": "0.6.10",
+    "date": "2026-10-09",
+    "title": "Backups that don't freeze the app",
+    "changes": [
+      "Backing up a large library no longer makes the app unresponsive; a progress bar shows how far along it is.",
+      "Settings show when your last backup was made, and how big it was."
+    ]
+  },
+  {
+    "version": "0.6.9",
+    "date": "2026-10-09",
+    "title": "Ready for the Play Store",
+    "changes": [
+      "The Play Store version is signed for release.",
+      "Tidier website addresses: /privacy, /opensource, /brand."
+    ]
+  },
+  {
+    "version": "0.6.8",
+    "date": "2026-10-09",
+    "title": "X sign-in built into the Play Store version",
+    "changes": [
+      "The Play Store version connects to X (Twitter) without needing your own developer key."
+    ]
+  },
+  {
+    "version": "0.6.7",
+    "date": "2026-09-28",
+    "title": "Feedback loads by itself",
+    "changes": [
+      "The feedback list loads and refreshes on its own.",
+      "Screenshots are attached to article feedback only when you ask, and open full screen.",
+      "A more compact Inbox, with an \"Other senders\" filter."
+    ]
+  },
+  {
+    "version": "0.6.6",
+    "date": "2026-09-28",
+    "title": "Account deletion",
+    "changes": [
+      "You can delete your profile and your @einkreader.app address, from the app or the website.",
+      "Fixed sharing by email."
+    ]
+  },
+  {
+    "version": "0.6.5",
+    "date": "2026-09-27",
+    "title": "Faster feedback, simpler setup",
+    "changes": [
+      "Feedback opens instantly from what's saved on your device.",
+      "Adding a source starts by picking its type: RSS, X or Nostr.",
+      "Creating a profile starts with your address, checked as you type.",
+      "Inbox comes first in the filters and in your sources."
+    ]
+  },
+  {
+    "version": "0.6.4",
+    "date": "2026-09-27",
+    "title": "Instant feedback posting",
+    "changes": [
+      "Posting feedback is instant; offline, it waits in the outbox.",
+      "A more compact feedback list.",
+      "Tapping a name opens a fuller profile with their highlights and feedback."
+    ],
+    "feedback": [
+      {
+        "id": "adf051644e07c0164ce79f7b12a9ff5c154535a4644701b2feccdd973da97a66",
+        "title": "Posting feedback should be instant"
+      }
+    ]
+  },
+  {
+    "version": "0.6.3",
+    "date": "2026-09-27",
+    "title": "A quieter feedback link",
+    "changes": [
+      "The feedback button under articles became a discreet line of text.",
+      "A simpler feedback form that shows clearly who you post as."
+    ],
+    "feedback": [
+      {
+        "id": "34a03783c5c50359ac6792ead7c1d0ff327fda51812381c5ce48e2ec7eb7bc0d",
+        "title": "Feedback on feedback feature"
+      }
+    ]
+  },
+  {
+    "version": "0.6.2",
+    "date": "2026-09-27",
+    "title": "The Inbox",
+    "changes": [
+      "Links, newsletters and PDFs emailed to your @einkreader.app address land in a new Inbox, filtered by sender.",
+      "Mail from new senders waits for you to accept it."
+    ]
+  },
+  {
+    "version": "0.6.1",
+    "date": "2026-09-25",
+    "title": "Feedback with screenshots",
+    "changes": [
+      "Send feedback with a subject, a link and a screenshot, right from any article."
+    ]
+  }
+]

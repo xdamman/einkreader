@@ -1,5 +1,11 @@
 // Builds public/changelog.html and public/changelog.xml (Atom) from
 // data/changelog.json. Run `npm run build:changelog` after editing it.
+//
+// Only minor versions (X.Y.0) are published: each entry gathers everything
+// since the previous minor. Patch releases and site updates collect their
+// notes in data/changelog-next.json until Xavier calls the next minor; its
+// entry then folds them in (listing their versions under `includes`, so old
+// links like /changelog#v0.6.3 still land on the right entry).
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const root = new URL('..', import.meta.url);
@@ -23,8 +29,11 @@ function entryHtml(entry) {
   const download = entry.version
     ? ` · <a href="https://github.com/xdamman/einkreader/releases/tag/v${esc(entry.version)}">Download</a>`
     : '';
+  // Invisible anchors for the patch versions folded into this entry.
+  const aliases = (entry.includes ?? []).map((v) =>
+    `<span id="v${esc(v)}"></span>`).join('');
   return `
-    <article class="entry" id="${anchor}">
+    <article class="entry" id="${anchor}">${aliases}
       <div class="meta"><a class="anchor" href="#${anchor}">${label}</a> · ${esc(longDate(entry.date))}${download}</div>
       <h2>${esc(entry.title)}</h2>
       <ul>${entry.changes.map((c) => `\n        <li>${esc(c)}</li>`).join('')}
@@ -71,7 +80,8 @@ export function changelogHtml(entries) {
   <div class="wrap">
     <a class="brand" href="/">← einkreader</a>
     <h1>Changelog</h1>
-    <p class="intro">What's new in each version. Many changes start as
+    <p class="intro">What's new in each version (smaller updates in
+    between are gathered into the next one). Many changes start as
     <a href="/feedback">feedback</a>; follow along with the
     <a href="/changelog.xml">changelog feed</a>, in einkreader of course.</p>
 ${entries.map(entryHtml).join('\n')}

@@ -173,9 +173,8 @@ class ShareActions {
   /// no doubt which connection is active), adapts the character budget to
   /// the account's plan (see TwitterService.tweetMaxLength), and posts as a
   /// native quote tweet of [quoted] when given — with a preview card of the
-  /// quoted post, like on twitter.com. X only lets apps quote the account's
-  /// own posts or posts mentioning it; any other post is attached as a
-  /// screenshot, and the dialog says so.
+  /// quoted post, like on twitter.com. If X refuses the quote, a screenshot
+  /// of the post is attached instead (see TwitterService.postTweet).
   static Future<void> onTwitter(BuildContext context,
       {required String draft, QuotedTweet? quoted}) async {
     final twitter = SyncService.instance.twitter;
@@ -190,12 +189,6 @@ class ShareActions {
           future: accountInfo,
           builder: (context, snapshot) {
             final username = snapshot.data?.username;
-            final quoteMode = quoted == null
-                ? ''
-                : quoted.quotableBy(username)
-                    ? ' · quoting the original post'
-                    : ' · the post goes as a screenshot (X only lets apps '
-                        'quote your own posts or posts that mention you)';
             return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +197,8 @@ class ShareActions {
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Text(
-                  'Posting as @$username$quoteMode',
+                  'Posting as @$username'
+                  '${quoted != null ? ' · quoting the original post' : ''}',
                   style: const TextStyle(
                       fontSize: 13, fontStyle: FontStyle.italic),
                 ),

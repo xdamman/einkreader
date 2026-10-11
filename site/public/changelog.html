@@ -35,510 +35,96 @@
   <div class="wrap">
     <a class="brand" href="/">← einkreader</a>
     <h1>Changelog</h1>
-    <p class="intro">What's new in each version. Many changes start as
+    <p class="intro">What's new in each version (smaller updates in
+    between are gathered into the next one). Many changes start as
     <a href="/feedback">feedback</a>; follow along with the
     <a href="/changelog.xml">changelog feed</a>, in einkreader of course.</p>
 
-    <article class="entry" id="v0.6.14">
-      <div class="meta"><a class="anchor" href="#v0.6.14">Version 0.6.14</a> · October 11, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.14">Download</a></div>
-      <h2>Fresh bookmarks always show, faster search</h2>
-      <ul>
-        <li>Every article now appears in its source's list. The home screen used to load only the 500 most recent, so a feed with items dated in the future could push new bookmarks out of sight. An item dated in the future is now listed on the day it arrived.</li>
-        <li>Search is faster: it no longer loads every matching article's full text, and it lays out only the results on screen. Results now show their date.</li>
-        <li>Sharing to X a post that X won't let apps quote (only your own posts or posts that mention you can be) now attaches a screenshot of the post instead of failing.</li>
-        <li>Posts X refuses for good, such as duplicates, are no longer retried at every sync. They wait in the outbox with the reason until you discard them.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.13">
-      <div class="meta"><a class="anchor" href="#v0.6.13">Version 0.6.13</a> · October 10, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.13">Download</a></div>
-      <h2>Forwarded newsletters stay readable</h2>
-      <ul>
-        <li>Substack newsletters forwarded or sent to your @einkreader.app address keep their whole text, with their title, byline and images, instead of being replaced by the publication's subscribe page.</li>
-        <li>Pictures that link to a larger version show as pictures, not as a stray &quot;!&quot;.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="update-2026-10-10">
-      <div class="meta"><a class="anchor" href="#update-2026-10-10">Service update</a> · October 10, 2026</div>
-      <h2>Author profiles on the web</h2>
-      <ul>
-        <li>On the web feedback page, an author's name or avatar opens their profile.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.12">
-      <div class="meta"><a class="anchor" href="#v0.6.12">Version 0.6.12</a> · October 10, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.12">Download</a></div>
-      <h2>Reading settings: font, margins and page turns</h2>
-      <ul>
-        <li>New Reading section in Settings, with a live preview: text size, margins, and four fonts (Serif, Literata, Sans-serif, Atkinson Hyperlegible).</li>
-        <li>Turn pages instead of scrolling: articles move a screen at a time, with &quot;← Page 2 / 5 →&quot; at the bottom. Swipes and page keys turn pages too.</li>
-        <li>The text size is now remembered.</li>
-      </ul>
-      <p class="feedback">From your feedback: <a href="/feedback#/bead9dac584c3a187e844846b9f9bce4d9d32f1385fbaa36012e0c81144d0efa">Paginated scrolling</a></p>
-    </article>
-
-    <article class="entry" id="v0.6.11">
-      <div class="meta"><a class="anchor" href="#v0.6.11">Version 0.6.11</a> · October 10, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.11">Download</a></div>
-      <h2>Know when someone answers your feedback</h2>
-      <ul>
-        <li>The feedback icon shows how many new replies and reactions your feedback got; threads with news are marked &quot;new&quot;.</li>
-        <li>Feedback is now readable on the web at einkreader.app/feedback, and there is a contact page.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.10">
-      <div class="meta"><a class="anchor" href="#v0.6.10">Version 0.6.10</a> · October 9, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.10">Download</a></div>
-      <h2>Backups that don't freeze the app</h2>
-      <ul>
-        <li>Backing up a large library no longer makes the app unresponsive; a progress bar shows how far along it is.</li>
-        <li>Settings show when your last backup was made, and how big it was.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.9">
-      <div class="meta"><a class="anchor" href="#v0.6.9">Version 0.6.9</a> · October 9, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.9">Download</a></div>
-      <h2>Ready for the Play Store</h2>
-      <ul>
-        <li>The Play Store version is signed for release.</li>
-        <li>Tidier website addresses: /privacy, /opensource, /brand.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.8">
-      <div class="meta"><a class="anchor" href="#v0.6.8">Version 0.6.8</a> · October 9, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.8">Download</a></div>
-      <h2>X sign-in built into the Play Store version</h2>
-      <ul>
-        <li>The Play Store version connects to X (Twitter) without needing your own developer key.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.7">
-      <div class="meta"><a class="anchor" href="#v0.6.7">Version 0.6.7</a> · September 28, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.7">Download</a></div>
-      <h2>Feedback loads by itself</h2>
-      <ul>
-        <li>The feedback list loads and refreshes on its own.</li>
-        <li>Screenshots are attached to article feedback only when you ask, and open full screen.</li>
-        <li>A more compact Inbox, with an &quot;Other senders&quot; filter.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.6">
-      <div class="meta"><a class="anchor" href="#v0.6.6">Version 0.6.6</a> · September 28, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.6">Download</a></div>
-      <h2>Account deletion</h2>
-      <ul>
-        <li>You can delete your profile and your @einkreader.app address, from the app or the website.</li>
-        <li>Fixed sharing by email.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.5">
-      <div class="meta"><a class="anchor" href="#v0.6.5">Version 0.6.5</a> · September 27, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.5">Download</a></div>
-      <h2>Faster feedback, simpler setup</h2>
-      <ul>
-        <li>Feedback opens instantly from what's saved on your device.</li>
-        <li>Adding a source starts by picking its type: RSS, X or Nostr.</li>
-        <li>Creating a profile starts with your address, checked as you type.</li>
-        <li>Inbox comes first in the filters and in your sources.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.4">
-      <div class="meta"><a class="anchor" href="#v0.6.4">Version 0.6.4</a> · September 27, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.4">Download</a></div>
-      <h2>Instant feedback posting</h2>
-      <ul>
-        <li>Posting feedback is instant; offline, it waits in the outbox.</li>
-        <li>A more compact feedback list.</li>
-        <li>Tapping a name opens a fuller profile with their highlights and feedback.</li>
-      </ul>
-      <p class="feedback">From your feedback: <a href="/feedback#/adf051644e07c0164ce79f7b12a9ff5c154535a4644701b2feccdd973da97a66">Posting feedback should be instant</a></p>
-    </article>
-
-    <article class="entry" id="v0.6.3">
-      <div class="meta"><a class="anchor" href="#v0.6.3">Version 0.6.3</a> · September 27, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.3">Download</a></div>
-      <h2>A quieter feedback link</h2>
-      <ul>
-        <li>The feedback button under articles became a discreet line of text.</li>
-        <li>A simpler feedback form that shows clearly who you post as.</li>
-      </ul>
-      <p class="feedback">From your feedback: <a href="/feedback#/34a03783c5c50359ac6792ead7c1d0ff327fda51812381c5ce48e2ec7eb7bc0d">Feedback on feedback feature</a></p>
-    </article>
-
-    <article class="entry" id="v0.6.2">
-      <div class="meta"><a class="anchor" href="#v0.6.2">Version 0.6.2</a> · September 27, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.2">Download</a></div>
-      <h2>The Inbox</h2>
-      <ul>
-        <li>Links, newsletters and PDFs emailed to your @einkreader.app address land in a new Inbox, filtered by sender.</li>
-        <li>Mail from new senders waits for you to accept it.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.1">
-      <div class="meta"><a class="anchor" href="#v0.6.1">Version 0.6.1</a> · September 25, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.1">Download</a></div>
-      <h2>Feedback with screenshots</h2>
-      <ul>
-        <li>Send feedback with a subject, a link and a screenshot, right from any article.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.6.0">
+    <article class="entry" id="v0.6.0"><span id="v0.5.10"></span><span id="v0.5.9"></span><span id="v0.5.8"></span><span id="v0.5.7"></span><span id="v0.5.6"></span><span id="v0.5.5"></span><span id="v0.5.4"></span><span id="v0.5.3"></span><span id="v0.5.2"></span><span id="v0.5.1"></span>
       <div class="meta"><a class="anchor" href="#v0.6.0">Version 0.6.0</a> · September 25, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.6.0">Download</a></div>
-      <h2>Public feedback</h2>
+      <h2>Public feedback and smoother X</h2>
       <ul>
         <li>Share ideas and bugs with everyone from the app, reply in threads and react with emoji.</li>
         <li>A brand page with logos and images at einkreader.app/brand.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.10">
-      <div class="meta"><a class="anchor" href="#v0.5.10">Version 0.5.10</a> · September 25, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.10">Download</a></div>
-      <h2>Lighter X bookmark sync</h2>
-      <ul>
         <li>X bookmarks are fetched 10 at a time, and only as far back as needed.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.9">
-      <div class="meta"><a class="anchor" href="#v0.5.9">Version 0.5.9</a> · September 25, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.9">Download</a></div>
-      <h2>X sign-in fixed</h2>
-      <ul>
         <li>Fixed signing in to X on e-ink devices getting stuck in a loop.</li>
         <li>Only new bookmarks are fetched; the debug log is quieter.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.8">
-      <div class="meta"><a class="anchor" href="#v0.5.8">Version 0.5.8</a> · September 24, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.8">Download</a></div>
-      <h2>Instant link menu</h2>
-      <ul>
         <li>Tapping a link opens its menu instantly, even offline.</li>
         <li>Errors that need X reconnected offer a button to do it.</li>
         <li>The Read tab is sorted by when you read each article.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.7">
-      <div class="meta"><a class="anchor" href="#v0.5.7">Version 0.5.7</a> · September 23, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.7">Download</a></div>
-      <h2>Better X posts and articles</h2>
-      <ul>
         <li>Links to X posts show the post itself; more articles extract cleanly.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.6">
-      <div class="meta"><a class="anchor" href="#v0.5.6">Version 0.5.6</a> · September 14, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.6">Download</a></div>
-      <h2>Resume reading follows your filters</h2>
-      <ul>
         <li>Resume reading sits below the filters and shows only what they select.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.5">
-      <div class="meta"><a class="anchor" href="#v0.5.5">Version 0.5.5</a> · September 11, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.5">Download</a></div>
-      <h2>Readable X errors</h2>
-      <ul>
         <li>Problems with X are explained in plain sentences.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.4">
-      <div class="meta"><a class="anchor" href="#v0.5.4">Version 0.5.4</a> · September 11, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.4">Download</a></div>
-      <h2>Source errors you can see</h2>
-      <ul>
         <li>A source that fails to update shows a warning, and X can be reconnected from its feed.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.3">
-      <div class="meta"><a class="anchor" href="#v0.5.3">Version 0.5.3</a> · August 29, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.3">Download</a></div>
-      <h2>Older websites</h2>
-      <ul>
         <li>Articles from table-based sites (like paulgraham.com) extract properly.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.2">
-      <div class="meta"><a class="anchor" href="#v0.5.2">Version 0.5.2</a> · August 18, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.2">Download</a></div>
-      <h2>Quotes keep their shape</h2>
-      <ul>
         <li>Paragraph breaks and list lines survive in quotes.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.5.1">
-      <div class="meta"><a class="anchor" href="#v0.5.1">Version 0.5.1</a> · August 17, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.1">Download</a></div>
-      <h2>Instant sharing</h2>
-      <ul>
         <li>Sharing a highlight closes the dialog at once and publishes in the background.</li>
       </ul>
     </article>
 
-    <article class="entry" id="v0.5.0">
+    <article class="entry" id="v0.5.0"><span id="v0.4.12"></span><span id="v0.4.11"></span><span id="v0.4.10"></span><span id="v0.4.9"></span><span id="v0.4.8"></span><span id="v0.4.7"></span><span id="v0.4.6"></span><span id="v0.4.5"></span><span id="v0.4.4"></span><span id="v0.4.3"></span><span id="v0.4.2"></span><span id="v0.4.1"></span>
       <div class="meta"><a class="anchor" href="#v0.5.0">Version 0.5.0</a> · August 16, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.5.0">Download</a></div>
-      <h2>Simpler sharing</h2>
+      <h2>Public pages and a calmer app</h2>
       <ul>
         <li>A button at the end of an article shares all your highlights from it.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.12">
-      <div class="meta"><a class="anchor" href="#v0.4.12">Version 0.4.12</a> · August 16, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.12">Download</a></div>
-      <h2>Download status</h2>
-      <ul>
         <li>Articles show whether they're downloaded; the Read and Highlights tabs filter by source.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.11">
-      <div class="meta"><a class="anchor" href="#v0.4.11">Version 0.4.11</a> · August 14, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.11">Download</a></div>
-      <h2>Tweets that share links</h2>
-      <ul>
         <li>A short tweet sharing a link brings in the linked story.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.10">
-      <div class="meta"><a class="anchor" href="#v0.4.10">Version 0.4.10</a> · August 13, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.10">Download</a></div>
-      <h2>Friendlier offline messages</h2>
-      <ul>
         <li>Clear messages when you're offline, everywhere; an Advanced section in Settings.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.9">
-      <div class="meta"><a class="anchor" href="#v0.4.9">Version 0.4.9</a> · August 13, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.9">Download</a></div>
-      <h2>Cleaner articles</h2>
-      <ul>
         <li>Stray style code no longer shows up as text in articles.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.8">
-      <div class="meta"><a class="anchor" href="#v0.4.8">Version 0.4.8</a> · August 12, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.8">Download</a></div>
-      <h2>Tables</h2>
-      <ul>
         <li>Tables in articles render properly.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.7">
-      <div class="meta"><a class="anchor" href="#v0.4.7">Version 0.4.7</a> · August 12, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.7">Download</a></div>
-      <h2>A calmer Settings</h2>
-      <ul>
         <li>Settings are organized into sections, one screen each.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.6">
-      <div class="meta"><a class="anchor" href="#v0.4.6">Version 0.4.6</a> · August 12, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.6">Download</a></div>
-      <h2>Profile polish</h2>
-      <ul>
         <li>Small fixes to how profiles look.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.5">
-      <div class="meta"><a class="anchor" href="#v0.4.5">Version 0.4.5</a> · August 12, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.5">Download</a></div>
-      <h2>Reader fixes</h2>
-      <ul>
         <li>Hidden page content stays hidden; highlights work across bold text.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.4">
-      <div class="meta"><a class="anchor" href="#v0.4.4">Version 0.4.4</a> · August 9, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.4">Download</a></div>
-      <h2>Profile editor</h2>
-      <ul>
         <li>A clearer profile editor.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.3">
-      <div class="meta"><a class="anchor" href="#v0.4.3">Version 0.4.3</a> · August 9, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.3">Download</a></div>
-      <h2>Accents fixed</h2>
-      <ul>
         <li>Pages without a declared encoding no longer show garbled accents; copy an article's link from the share menu.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.2">
-      <div class="meta"><a class="anchor" href="#v0.4.2">Version 0.4.2</a> · August 9, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.2">Download</a></div>
-      <h2>Your profile, as others see it</h2>
-      <ul>
         <li>The profile screen mirrors your public page, with an editable address.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.4.1">
-      <div class="meta"><a class="anchor" href="#v0.4.1">Version 0.4.1</a> · August 8, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.1">Download</a></div>
-      <h2>Public pages</h2>
-      <ul>
         <li>Simpler public profile pages with a link for each story, and ways to subscribe.</li>
       </ul>
     </article>
 
-    <article class="entry" id="v0.4.0">
+    <article class="entry" id="v0.4.0"><span id="v0.3.5"></span><span id="v0.3.4"></span><span id="v0.3.3"></span><span id="v0.3.2"></span><span id="v0.3.1"></span>
       <div class="meta"><a class="anchor" href="#v0.4.0">Version 0.4.0</a> · August 5, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.4.0">Download</a></div>
-      <h2>Several profiles</h2>
+      <h2>Search, every X bookmark, several profiles</h2>
       <ul>
         <li>Use several profiles and switch between them, each with its own library.</li>
         <li>Writing a note and sharing a highlight happen in one place.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.3.5">
-      <div class="meta"><a class="anchor" href="#v0.3.5">Version 0.3.5</a> · August 2, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.3.5">Download</a></div>
-      <h2>Tweets keep their line breaks</h2>
-      <ul>
         <li>Long tweets keep their paragraphs and lists.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.3.4">
-      <div class="meta"><a class="anchor" href="#v0.3.4">Version 0.3.4</a> · July 28, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.3.4">Download</a></div>
-      <h2>Search filters</h2>
-      <ul>
         <li>Narrow search results by source, author and more.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.3.3">
-      <div class="meta"><a class="anchor" href="#v0.3.3">Version 0.3.3</a> · July 28, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.3.3">Download</a></div>
-      <h2>Search</h2>
-      <ul>
         <li>Search across sources, authors, titles, content and highlights.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.3.2">
-      <div class="meta"><a class="anchor" href="#v0.3.2">Version 0.3.2</a> · July 28, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.3.2">Download</a></div>
-      <h2>X bookmarks by author</h2>
-      <ul>
         <li>Filter X bookmarks by author.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.3.1">
-      <div class="meta"><a class="anchor" href="#v0.3.1">Version 0.3.1</a> · July 28, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.3.1">Download</a></div>
-      <h2>All your X bookmarks</h2>
-      <ul>
         <li>Your whole X bookmark history is imported, resuming where it stopped.</li>
       </ul>
     </article>
 
-    <article class="entry" id="v0.3.0">
+    <article class="entry" id="v0.3.0"><span id="v0.2.3"></span><span id="v0.2.2"></span><span id="v0.2.1"></span>
       <div class="meta"><a class="anchor" href="#v0.3.0">Version 0.3.0</a> · July 24, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.3.0">Download</a></div>
-      <h2>A new home</h2>
+      <h2>A new home and your own email address</h2>
       <ul>
         <li>A redesigned home screen; swipe right on an item to read it.</li>
         <li>Highlighting is instant, with a menu right where you tapped.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.2.3">
-      <div class="meta"><a class="anchor" href="#v0.2.3">Version 0.2.3</a> · July 22, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.2.3">Download</a></div>
-      <h2>Your own address</h2>
-      <ul>
         <li>A free name@einkreader.app address, and a public page for your highlights.</li>
         <li>Email articles to your reading feed.</li>
         <li>X threads arrive whole, with their images.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.2.2">
-      <div class="meta"><a class="anchor" href="#v0.2.2">Version 0.2.2</a> · July 21, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.2.2">Download</a></div>
-      <h2>A tidier library folder</h2>
-      <ul>
         <li>Saved articles are organized by year and source.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.2.1">
-      <div class="meta"><a class="anchor" href="#v0.2.1">Version 0.2.1</a> · July 21, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.2.1">Download</a></div>
-      <h2>Update fix</h2>
-      <ul>
         <li>Fixed the app failing to open after updating to 0.2.0 (no data was lost).</li>
       </ul>
     </article>
 
-    <article class="entry" id="v0.2.0">
+    <article class="entry" id="v0.2.0"><span id="v0.1.15"></span><span id="v0.1.14"></span><span id="v0.1.13"></span><span id="v0.1.12"></span><span id="v0.1.11"></span><span id="v0.1.10"></span><span id="v0.1.9"></span><span id="v0.1.8"></span><span id="v0.1.7"></span>
       <div class="meta"><a class="anchor" href="#v0.2.0">Version 0.2.0</a> · July 21, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.2.0">Download</a></div>
-      <h2>Nostr</h2>
+      <h2>Nostr, folders and sharing</h2>
       <ul>
         <li>Follow Nostr profiles: their notes, long reads and bookmarks.</li>
         <li>An optional public profile to share highlights with comments.</li>
         <li>Anything that can't be sent right away waits in an outbox.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.15">
-      <div class="meta"><a class="anchor" href="#v0.1.15">Version 0.1.15</a> · July 17, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.15">Download</a></div>
-      <h2>Less newsletter clutter</h2>
-      <ul>
         <li>Newsletter calls to action are hidden in articles.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.14">
-      <div class="meta"><a class="anchor" href="#v0.1.14">Version 0.1.14</a> · July 17, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.14">Download</a></div>
-      <h2>Highlights in your files</h2>
-      <ul>
         <li>Highlights stay in sync with a highlights file in your library folder.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.13">
-      <div class="meta"><a class="anchor" href="#v0.1.13">Version 0.1.13</a> · July 17, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.13">Download</a></div>
-      <h2>Folders in the feed</h2>
-      <ul>
         <li>Folders expand right in the feed's filters.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.12">
-      <div class="meta"><a class="anchor" href="#v0.1.12">Version 0.1.12</a> · July 17, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.12">Download</a></div>
-      <h2>Organizing sources</h2>
-      <ul>
         <li>Drag sources into folders; see each source's description and stats.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.11">
-      <div class="meta"><a class="anchor" href="#v0.1.11">Version 0.1.11</a> · July 17, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.11">Download</a></div>
-      <h2>Share highlights on X</h2>
-      <ul>
         <li>Post highlights to X, sized to fit your plan.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.10">
-      <div class="meta"><a class="anchor" href="#v0.1.10">Version 0.1.10</a> · July 17, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.10">Download</a></div>
-      <h2>Folders and sharing</h2>
-      <ul>
         <li>Organize sources into folders; a share menu for articles.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.9">
-      <div class="meta"><a class="anchor" href="#v0.1.9">Version 0.1.9</a> · July 5, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.9">Download</a></div>
-      <h2>Read later</h2>
-      <ul>
         <li>Save any link to read later, from other apps or the clipboard.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.8">
-      <div class="meta"><a class="anchor" href="#v0.1.8">Version 0.1.8</a> · July 5, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.8">Download</a></div>
-      <h2>Save links from articles</h2>
-      <ul>
         <li>Save links found inside articles to read later.</li>
-      </ul>
-    </article>
-
-    <article class="entry" id="v0.1.7">
-      <div class="meta"><a class="anchor" href="#v0.1.7">Version 0.1.7</a> · July 5, 2026 · <a href="https://github.com/xdamman/einkreader/releases/tag/v0.1.7">Download</a></div>
-      <h2>Resume where you left off</h2>
-      <ul>
         <li>The app remembers where you stopped reading.</li>
       </ul>
     </article>

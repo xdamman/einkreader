@@ -25,10 +25,17 @@ for (const e of entries) {
   assert.ok(e.title && e.changes.length, `${e.version ?? e.date}: title and changes`);
   for (const f of e.feedback ?? []) assert.match(f.id, /^[0-9a-f]{64}$/);
 }
-// The app's current version has its entry.
+// Only minor versions are published; patches wait in changelog-next.json.
+for (const v of versions) {
+  assert.match(v, /^\d+\.\d+\.0$|^0\.1\.6$/, `${v}: only minor versions are published`);
+}
+const next = JSON.parse(read('data/changelog-next.json'));
+// The app's current version is documented: published if a minor, else noted
+// for the next one.
 const pubspec = read('../pubspec.yaml');
 const current = /^version:\s*([0-9.]+)/m.exec(pubspec)[1];
-assert.ok(versions.includes(current),
-    `version ${current} (pubspec.yaml) is missing from data/changelog.json`);
+assert.ok(versions.includes(current) || next.some((e) => e.version === current),
+    `version ${current} (pubspec.yaml) is in neither data/changelog.json ` +
+    'nor data/changelog-next.json');
 
 console.log('changelog tests passed');

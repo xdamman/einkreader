@@ -27,14 +27,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Every release is documented at einkreader.app/changelog: the tagged
-      # version must have its entry in site/data/changelog.json.
+      # Every release is documented: a minor version (X.Y.0) by its entry at
+      # einkreader.app/changelog (site/data/changelog.json), a patch by its
+      # notes in site/data/changelog-next.json, published with the next minor.
       - name: Check the changelog has this version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if ! python3 -c "import json,sys; sys.exit(0 if any(e.get('version') == sys.argv[1] for e in json.load(open('site/data/changelog.json'))) else 1)" "$version"; then
-            echo "::error::v$version has no entry in site/data/changelog.json (add one, then npm run build:changelog in site/)"
+          case "$version" in *.0) file=site/data/changelog.json ;; *) file=site/data/changelog-next.json ;; esac
+          if ! python3 -c "import json,sys; sys.exit(0 if any(e.get('version') == sys.argv[1] for e in json.load(open(sys.argv[2]))) else 1)" "$version" "$file"; then
+            echo "::error::v$version has no entry in $file"
             exit 1
           fi
 

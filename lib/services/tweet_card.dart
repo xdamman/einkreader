@@ -5,9 +5,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
 import 'package:intl/intl.dart';
 
-/// What the reader sees of a post they want to quote: enough to decide
-/// whether X allows a native quote, and to draw a screenshot of it when it
-/// doesn't.
+/// What the reader sees of a post they want to quote: enough to draw a
+/// screenshot of it when X refuses the native quote.
 class QuotedTweet {
   final String id;
 
@@ -28,18 +27,6 @@ class QuotedTweet {
   });
 
   String get url => 'https://x.com/${username ?? 'i'}/status/$id';
-
-  /// X's API only lets an app quote (or reply to) posts written by the
-  /// connected account or that mention it. Checking first avoids a refused
-  /// post: anything else goes out as a screenshot instead.
-  bool quotableBy(String? me) {
-    if (me == null || me.isEmpty) return true; // Unknown: let X decide.
-    final handle = me.toLowerCase();
-    if (username?.toLowerCase() == handle) return true;
-    return RegExp('@${RegExp.escape(handle)}(?![A-Za-z0-9_])',
-            caseSensitive: false)
-        .hasMatch(text);
-  }
 
   Map<String, Object?> toJson() => {
         'id': id,

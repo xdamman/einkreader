@@ -176,10 +176,12 @@ Do the work the way this project is normally worked on:
   unclear or harmful and say so).
 - Add or update tests; run `flutter analyze` and the full test suite (see
   your memory notes for the environment setup) and fix failures.
-- Add the version to site/data/changelog.json (newest first: a short
-  title and a few plain-language changes for readers, plus a "feedback"
-  entry with this note's id and its subject), then run
-  `npm run build:changelog` in site/ and `npm test` there.
+- Release a PATCH version (bump the last number; only Xavier decides on
+  minor versions). Note it in site/data/changelog-next.json (newest first:
+  version, date, a short title and a few plain-language changes for
+  readers, plus a "feedback" entry with this note's id and its subject).
+  Patches are not published on the changelog page; their notes are
+  gathered into the next minor version's entry. Run `npm test` in site/.
 - Commit to main with a clear message, bump the version in pubspec.yaml,
   tag vX.Y.Z, push, and wait for the GitHub Actions release build to
   succeed (rerun transient failures). Pushing main deploys the site.
@@ -189,8 +191,9 @@ Do the work the way this project is normally worked on:
 Your FINAL message is posted publicly as the reply to this feedback, from
 einkreader's account. Make it only that reply: plain text, friendly, under
 600 characters, saying what changed and in which version (or why nothing
-changed), ending with the changelog link for that version, e.g.
-https://einkreader.app/changelog#v1.2.3. No markdown headings, no internal
+changed), and that it's in the app once updated (e.g. "Fixed in version
+1.2.3; update the app to get it"). No changelog link: patch versions
+aren't on the changelog page. No markdown headings, no internal
 details, no file paths.
 """
 

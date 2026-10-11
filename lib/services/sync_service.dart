@@ -689,7 +689,8 @@ class SyncService {
       final isNew = await _db.insertArticleIfNew(article);
       await AppLogService.instance.debug(
         'Twitter: bookmark by $userLabel (${tweet.id}) '
-        '${isNew ? 'added: "${article.displayTitle}"' : 'skipped — duplicate url'}',
+        '${isNew ? 'added: "${article.displayTitle}"' : 'skipped — duplicate url'}'
+        ' · dated ${published == null ? 'unknown (X sent no date)' : DateTime.fromMillisecondsSinceEpoch(published).toIso8601String()}',
       );
       if (isNew) {
         inserted++;

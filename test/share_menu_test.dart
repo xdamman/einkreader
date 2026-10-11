@@ -433,21 +433,27 @@ void main() {
       expect(body, {'text': 'Great thread', 'quote_tweet_id': '1234567890'});
     });
 
-    test('a post X won\'t let us quote goes out as a screenshot',
+    test('a refused quote is resent with a screenshot of the stored post',
         () async {
-      final paths = <String>[];
+      final calls = <String>[];
       Map<String, dynamic>? tweet;
       final twitter = TwitterService(
         accessToken: () async => 'token',
-        me: () async => 'xdamman',
         client: MockClient((request) async {
-          paths.add(request.url.path);
+          calls.add('${request.method} ${request.url.path}');
           if (request.url.path == '/2/media/upload') {
             expect(request.headers['content-type'],
                 startsWith('multipart/form-data'));
             return http.Response('{"data": {"id": "777"}}', 200);
           }
-          tweet = jsonDecode(request.body) as Map<String, dynamic>;
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body.containsKey('quote_tweet_id')) {
+            return http.Response(
+                '{"detail":"You can only reply to or quote posts where you '
+                'are mentioned or are the author.","status":403}',
+                403);
+          }
+          tweet = body;
           return http.Response('{"data": {"id": "1"}}', 201);
         }),
       );
@@ -457,28 +463,15 @@ void main() {
               authorName: 'Patrick Collison',
               username: 'patrickc',
               text: 'Brothers Karamazov was Einstein\'s favorite novel'));
-      // Never tried as a quote: X would refuse it.
-      expect(paths, ['/2/media/upload', '/2/tweets']);
+      // Quote first; no lookup needed: the stored post is drawn.
+      expect(calls,
+          ['POST /2/tweets', 'POST /2/media/upload', 'POST /2/tweets']);
       expect(tweet, {
         'text': 'So true',
         'media': {
           'media_ids': ['777']
         },
       });
-    });
-
-    test('own posts and posts mentioning the account are quoted natively',
-        () async {
-      const own = QuotedTweet(id: '1', username: 'XDamman', text: 'mine');
-      const mention =
-          QuotedTweet(id: '2', username: 'a', text: 'cc @xdamman, thoughts?');
-      const other =
-          QuotedTweet(id: '3', username: 'a', text: 'cc @xdammanfan');
-      expect(own.quotableBy('xdamman'), isTrue);
-      expect(mention.quotableBy('xdamman'), isTrue);
-      expect(other.quotableBy('xdamman'), isFalse);
-      // Unknown account: let X decide.
-      expect(other.quotableBy(null), isTrue);
     });
 
     test('a refused quote is retried as a screenshot of the looked-up post',

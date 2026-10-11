@@ -90,7 +90,7 @@ class TwitterService {
   static const _tokenUrl = 'https://api.x.com/2/oauth2/token';
   static const _apiBase = 'https://api.x.com/2';
   // tweet.write enables "Share on Twitter" from the reader, media.write the
-  // screenshot of a post X won't let us quote; connections made before
+  // screenshot sent when X refuses a quote; connections made before
   // either was added must be reconnected to grant it.
   static const _scopes =
       'tweet.read tweet.write users.read bookmark.read media.write '
@@ -110,16 +110,9 @@ class TwitterService {
   /// layer can be driven by a fake [http.Client] without a real connection.
   final Future<String> Function()? _accessTokenOverride;
 
-  /// Test seam for the connected account's handle.
-  final Future<String?> Function()? _usernameOverride;
-
-  TwitterService(
-      {http.Client? client,
-      Future<String> Function()? accessToken,
-      Future<String?> Function()? me})
+  TwitterService({http.Client? client, Future<String> Function()? accessToken})
       : _client = client ?? http.Client(),
-        _accessTokenOverride = accessToken,
-        _usernameOverride = me;
+        _accessTokenOverride = accessToken;
 
   Future<bool> get isConnected async =>
       (await _storage.read(key: _kRefreshToken)) != null;
@@ -539,10 +532,10 @@ class TwitterService {
   /// get a 403 until reconnected. Every step logs with a "Twitter:" prefix so
   /// the debug screen's search surfaces the whole story of a post.
   ///
-  /// X's API only lets an app quote posts by the connected account or that
-  /// mention it. Any other post is attached as a screenshot instead: up
-  /// front when [quoted] shows it isn't quotable, or after X refuses the
-  /// quote (the post is then looked up to draw it).
+  /// The quote is always tried first. When X refuses it (the author limits
+  /// who may quote, or the API's own limits apply), the post goes out again
+  /// with a screenshot of the quoted post attached instead, drawn from
+  /// [quoted] or, without it, from the post looked up by id.
   Future<void> postTweet(String text,
       {String? quoteTweetId, QuotedTweet? quoted}) async {
     quoteTweetId ??= quoted?.id;
@@ -558,12 +551,6 @@ class TwitterService {
           .error('Twitter: no valid access token for posting: $e');
       rethrow;
     }
-    if (quoted != null && !quoted.quotableBy(await _me())) {
-      await AppLogService.instance.info(
-          'Twitter: X only allows quoting your own posts or posts that '
-          'mention you; attaching a screenshot of ${quoted.id} instead');
-      return _postWithScreenshot(token, text, quoted);
-    }
     try {
       await _createTweet(token, {
         'text': text,
@@ -575,18 +562,6 @@ class TwitterService {
           'screenshot of it instead');
       final card = quoted ?? await _quotedFromApi(quoteTweetId!);
       await _postWithScreenshot(token, text, card);
-    }
-  }
-
-  /// The connected account's handle; null when unknown (tests, or storage
-  /// unavailable), in which case X decides whether a quote is allowed.
-  Future<String?> _me() async {
-    final override = _usernameOverride;
-    if (override != null) return override();
-    try {
-      return await username;
-    } catch (_) {
-      return null;
     }
   }
 
@@ -686,9 +661,8 @@ class TwitterService {
     return '$id';
   }
 
-  /// X's 403 for quoting (or replying to) a post the account may not:
-  /// "You can only reply to or quote posts where you are mentioned or are
-  /// the author."
+  /// X's 403 for a quote it won't allow, e.g. "You can only reply to or
+  /// quote posts where you are mentioned or are the author."
   static bool isQuoteRefusal(String body) {
     final lower = body.toLowerCase();
     return lower.contains('quote') &&
