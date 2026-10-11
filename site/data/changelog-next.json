@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.6.16",
+    "date": "2026-10-11",
+    "title": "Instant search, a cleaner profile editor",
+    "changes": [
+      "Search uses a full-text index, so results come back almost instantly however big your library is. Accents don't matter (\"etudiants\" finds \"Étudiants\"), and words match by their beginning.",
+      "Opening your profile no longer flashes \"Create a profile\" first.",
+      "The profile editor drops its welcome box and the repeated address box."
+    ]
+  },
+  {
     "date": "2026-10-11",
     "title": "Faster public pages and a weekly email digest",
     "changes": [

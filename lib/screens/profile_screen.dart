@@ -177,6 +177,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _username.text = (await _profileService.username) ??
           (await _profileService.pendingUsername) ??
           '';
+      // The profile shows now; the shared highlights (which may ask the
+      // relays) fill in after.
+      if (!mounted) return;
+      setState(() => _enabled = true);
       // One entry per highlight, newest first (a highlight shared to both
       // the profile and as a link appears once). Best-effort: the profile
       // fields must render even if the database is unavailable.
@@ -465,7 +469,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Scaffold(
         appBar: AppBar(
           title:
-              Text(_enabled == true ? 'Your profile' : 'Create a profile'),
+              // Nothing while loading: guessing "Create a profile" flashed
+              // the wrong title before an existing profile showed.
+              Text(switch (_enabled) {
+                null => '',
+                true => 'Your profile',
+                false => 'Create a profile',
+              }),
           actions: [
             if (_enabled == true && !_editing)
               IconButton(
@@ -986,7 +996,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _editor() {
     final initial =
         _name.text.trim().isEmpty ? '?' : _name.text.trim()[0].toUpperCase();
-    final username = _address?.split('@').first ?? '';
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Center(
@@ -995,20 +1004,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  border: Border.all(width: 1.5),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  'Welcome to your profile. It\'s live at '
-                  'einkreader.app/$username. Everything below is tappable — '
-                  'fill in what you like.',
-                  style: const TextStyle(fontSize: 13.5, height: 1.4),
-                ),
-              ),
-              const SizedBox(height: 18),
               Center(
                 child: GestureDetector(
                   onTap: _pickAvatar,
@@ -1038,51 +1033,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: TextStyle(
                         fontSize: 12, fontStyle: FontStyle.italic)),
               ),
-              if (_address != null) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    border: Border.all(width: 1.5),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(_address!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              fontFamily: 'monospace')),
-                      const SizedBox(height: 6),
-                      InkWell(
-                        onTap: () => launchUrl(
-                            Uri.parse('https://einkreader.app/'
-                                '${_address!.split('@').first}'),
-                            mode: LaunchMode.externalApplication),
-                        child: Text(
-                          'einkreader.app/${_address!.split('@').first} ↗',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontFamily: 'monospace',
-                              decoration: TextDecoration.underline),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _addressPending
-                            ? 'Registering when back online — this will be '
-                                'your address to be tagged and followed'
-                            : 'Share this address so people can tag you and '
-                                'subscribe to your highlights',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 18),
               TextField(
                 controller: _name,
@@ -1098,8 +1048,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   suffixText: '@einkreader.app',
                   errorText: _usernameError,
                   helperText: 'Also your page: '
-                      'einkreader.app/${_username.text.trim().isEmpty ? '…' : _username.text.trim()} '
-                      '— renaming frees the old address',
+                      'einkreader.app/${_username.text.trim().isEmpty ? '…' : _username.text.trim()}',
                   helperMaxLines: 2,
                 ),
                 onChanged: (_) => setState(() {}),

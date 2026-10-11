@@ -73,7 +73,7 @@ class _SearchScreenState extends State<SearchScreen> {
   /// characters clears the results and shows the intro message.
   void _onChanged(String value) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), () {
+    _debounce = Timer(const Duration(milliseconds: 150), () {
       final query = value.trim();
       if (query.length < 2) {
         setState(() {

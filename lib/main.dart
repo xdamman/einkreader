@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'db/app_database.dart';
 import 'screens/home_screen.dart';
 import 'services/archive_store.dart';
 import 'services/reading_settings.dart';
@@ -13,6 +16,8 @@ Future<void> main() async {
   // Before the first frame, so an article never renders with defaults first.
   await ReadingSettings.instance.load();
   runApp(const EinkReaderApp());
+  // Builds (or tops up) the search index in the background.
+  unawaited(AppDatabase.instance.buildSearchIndex());
 }
 
 class EinkReaderApp extends StatelessWidget {

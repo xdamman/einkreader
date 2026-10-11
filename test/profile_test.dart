@@ -162,11 +162,12 @@ void main() {
     expect((await ProfileService.instance.profile()).name, 'Xavier');
     expect(await ProfileService.instance.username, 'xavier');
 
-    // Editor: tappable avatar invitation, the full address made obvious,
-    // bio, links; still no key talk.
+    // Editor: tappable avatar invitation, bio, links; no welcome box or
+    // address box (the username field shows the address); no key talk.
     expect(find.text('Tap the avatar to change it'), findsOneWidget);
-    expect(find.text('xavier@einkreader.app'), findsOneWidget);
-    expect(find.textContaining('tag you and'), findsOneWidget);
+    expect(find.textContaining('Welcome to your profile'), findsNothing);
+    expect(find.textContaining('tag you and'), findsNothing);
+    expect(find.textContaining('renaming frees'), findsNothing);
     expect(find.text('Short bio'), findsOneWidget);
     expect(find.text('Links'), findsOneWidget);
     expect(find.textContaining('secret key'), findsNothing);

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -116,6 +118,8 @@ class AppDatabase {
   Future<void> close() async {
     await _db?.close();
     _db = null;
+    // A restored file may lack the index: rebuilt on the next search.
+    _ftsReady = false;
   }
 
   /// Adds a column unless the table already has it. Every ADD COLUMN
@@ -1296,6 +1300,183 @@ class AppDatabase {
     return '$prefix${flat.substring(start, end).trim()}$suffix';
   }
 
+  // ---------------------------------------------------------- search index
+
+  /// Full-text index over article title, author, summary and body, so
+  /// search answers from an index instead of reading every article's text.
+  /// FTS5 when this device's SQLite has it, else FTS4; when neither exists,
+  /// search falls back to scanning with LIKE. Triggers keep it current; a
+  /// background pass ([buildSearchIndex]) adds articles stored before it
+  /// existed.
+  bool _ftsReady = false;
+  String _ftsKind = 'fts5';
+  Future<void>? _ftsBuilding;
+
+  Future<String?> _createFtsTable(Database db) async {
+    final existing = await db.rawQuery(
+        "SELECT sql FROM sqlite_master WHERE name = 'articles_fts'");
+    if (existing.isNotEmpty) {
+      return (existing.first['sql'] as String? ?? '').contains('fts5')
+          ? 'fts5'
+          : 'fts4';
+    }
+    for (final (kind, sql) in [
+      ('fts5', 'CREATE VIRTUAL TABLE articles_fts USING fts5('
+          "title, author, summary, body, tokenize = 'unicode61')"),
+      ('fts4', 'CREATE VIRTUAL TABLE articles_fts USING fts4('
+          'title, author, summary, body, tokenize=unicode61)'),
+      ('fts4', 'CREATE VIRTUAL TABLE articles_fts USING fts4('
+          'title, author, summary, body)'),
+    ]) {
+      try {
+        await db.execute(sql);
+        return kind;
+      } catch (_) {
+        // Not compiled into this SQLite: try the next.
+      }
+    }
+    return null;
+  }
+
+  /// Creates the index (once) and indexes any article not in it yet, in
+  /// small batches. Safe to call repeatedly; one pass runs at a time.
+  Future<void> buildSearchIndex() => _ftsBuilding ??= _buildSearchIndex();
+
+  Future<void> _buildSearchIndex() async {
+    try {
+      final db = await database;
+      final kind = await _createFtsTable(db);
+      if (kind == null) return;
+      const cols = 'title, author, summary, body';
+      const vals = 'new.title, new.author, new.summary, new.content_markdown';
+      await db.execute('CREATE TRIGGER IF NOT EXISTS articles_fts_ai '
+          'AFTER INSERT ON articles BEGIN '
+          'INSERT INTO articles_fts(rowid, $cols) VALUES (new.id, $vals); END');
+      await db.execute('CREATE TRIGGER IF NOT EXISTS articles_fts_ad '
+          'AFTER DELETE ON articles BEGIN '
+          'DELETE FROM articles_fts WHERE rowid = old.id; END');
+      // Only text changes reindex: read flags and scroll positions change
+      // constantly.
+      await db.execute('CREATE TRIGGER IF NOT EXISTS articles_fts_au '
+          'AFTER UPDATE OF title, author, summary, content_markdown '
+          'ON articles BEGIN '
+          'DELETE FROM articles_fts WHERE rowid = old.id; '
+          'INSERT INTO articles_fts(rowid, $cols) VALUES (new.id, $vals); END');
+      var total = 0;
+      while (true) {
+        final added = await db.rawUpdate(
+            'INSERT INTO articles_fts(rowid, $cols) '
+            'SELECT id, title, author, summary, content_markdown '
+            'FROM articles a WHERE NOT EXISTS '
+            '(SELECT 1 FROM articles_fts f WHERE f.rowid = a.id) '
+            'ORDER BY id DESC LIMIT 100');
+        total += added;
+        if (added == 0) break;
+      }
+      _ftsKind = kind;
+      _ftsReady = true;
+      if (total > 0) {
+        await AppLogService.instance
+            .info('Search index ($kind): $total articles indexed');
+      }
+    } catch (e) {
+      await AppLogService.instance.warn('Search index unavailable: $e');
+    } finally {
+      _ftsBuilding = null;
+    }
+  }
+
+  /// An FTS query for [terms]: every word as a prefix (`dosto*`), all
+  /// required. Words are split on anything but letters and digits, so no
+  /// user input reaches the query syntax.
+  static String? _ftsQuery(List<String> terms) {
+    final words = terms
+        .expand((t) => t.split(RegExp(r'[^\p{L}\p{N}]+', unicode: true)))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    if (words.isEmpty) return null;
+    return words.map((w) => '$w*').join(' ');
+  }
+
+  /// Matching articles (light: no full text), snippets around body
+  /// matches, and which matched outside their title/author.
+  Future<(List<Article>, Map<int, String>, Set<int>)> _searchArticles(
+      Database db, List<String> terms) async {
+    final match = _ftsReady ? _ftsQuery(terms) : null;
+    if (!_ftsReady) unawaited(buildSearchIndex());
+    final List<Map<String, Object?>> rows;
+    if (match != null) {
+      rows = await db.rawQuery(
+          'SELECT ${_listColumns.join(', ')} FROM articles '
+          'WHERE id IN (SELECT rowid FROM articles_fts '
+          'WHERE articles_fts MATCH ?) AND $_profileSources',
+          [match, activeProfile]);
+    } else {
+      // No index (yet): scan. Plain LIKE on the body (case-insensitive for
+      // ASCII, like LOWER): lowercasing every article's text is slow.
+      final clauses = <String>[];
+      final args = <String>[];
+      for (final term in terms) {
+        final arg = _likeArg(term);
+        clauses.add("(LOWER(title) LIKE ? ESCAPE '\\' "
+            "OR LOWER(COALESCE(author, '')) LIKE ? ESCAPE '\\' "
+            "OR LOWER(COALESCE(summary, '')) LIKE ? ESCAPE '\\' "
+            "OR content_markdown LIKE ? ESCAPE '\\')");
+        args.addAll([arg, arg, arg, arg]);
+      }
+      rows = await db.rawQuery(
+          'SELECT ${_listColumns.join(', ')} FROM articles '
+          'WHERE $_profileSources AND (${clauses.join(' AND ')})',
+          [activeProfile, ...args]);
+    }
+    final articles = rows.map(Article.fromMap).toList();
+    final snippets = <int, String>{};
+    final bodyHit = <int>{};
+    final needBody = <int>[];
+    for (final article in articles) {
+      final inTitle = _anyTermIn(article.title, terms) ||
+          _anyTermIn(article.author, terms);
+      if (!inTitle) bodyHit.add(article.id!);
+      final summary = snippetAround(article.summary, terms);
+      if (summary != null) {
+        snippets[article.id!] = summary;
+      } else if (!inTitle) {
+        needBody.add(article.id!);
+      }
+    }
+    // Body snippets only for the first results: reading text is the slow
+    // part, and the list shows a screenful at a time.
+    final first = terms.first;
+    for (var i = 0; i < needBody.length && i < 200; i += 50) {
+      final ids = needBody.skip(i).take(50).toList();
+      final marks = List.filled(ids.length, '?').join(',');
+      // The index's own excerpt matches like the search does (accents,
+      // word prefixes); without it, the first literal match of a term.
+      final bodies = match != null
+          ? await db.rawQuery(
+              'SELECT rowid AS id, ${_ftsKind == 'fts5' ? "snippet(articles_fts, 3, '', '', '…', 14)" : "snippet(articles_fts, '', '', '…', 3, 14)"} AS body '
+              'FROM articles_fts WHERE articles_fts MATCH ? '
+              'AND rowid IN ($marks)',
+              [match, ...ids])
+          : await db.rawQuery(
+              'SELECT id, substr(content_markdown, '
+              'max(1, instr(LOWER(content_markdown), ?) - 120), 300) AS body '
+              'FROM articles WHERE id IN ($marks) '
+              'AND instr(LOWER(content_markdown), ?) > 0',
+              [first, ...ids, first]);
+      for (final row in bodies) {
+        final body = row['body'] as String?;
+        final snippet = match != null
+            ? body?.replaceAll(RegExp(r'\s+'), ' ').trim()
+            : snippetAround(body, terms);
+        if (snippet != null && snippet.isNotEmpty) {
+          snippets[row['id'] as int] = snippet;
+        }
+      }
+    }
+    return (articles, snippets, bodyHit);
+  }
+
   /// Universal search over sources, authors, article titles/content and
   /// highlights (their text and comments). Whitespace splits the query into
   /// terms that are ANDed — every term must match somewhere in a row. Matching
@@ -1323,43 +1504,7 @@ class AppDatabase {
     ''', [activeProfile, ...hArgs]);
     final highlights = highlightRows.map(Highlight.fromMap).toList();
 
-    // Articles: title, author, summary and full content. The full text is
-    // matched in SQL but never loaded: only a short stretch around the
-    // first match comes back, for the snippet. Plain LIKE (already
-    // case-insensitive for ASCII, like LOWER) on the body: lowercasing
-    // every article's whole text was most of the search time.
-    final aClauses = <String>[];
-    final aArgs = <String>[];
-    for (final term in terms) {
-      final arg = _likeArg(term);
-      aClauses.add("(LOWER(title) LIKE ? ESCAPE '\\' "
-          "OR LOWER(COALESCE(author, '')) LIKE ? ESCAPE '\\' "
-          "OR LOWER(COALESCE(summary, '')) LIKE ? ESCAPE '\\' "
-          "OR content_markdown LIKE ? ESCAPE '\\')");
-      aArgs.addAll([arg, arg, arg, arg]);
-    }
-    final first = terms.first;
-    final articleRows = await db.rawQuery('''
-      SELECT ${_listColumns.join(', ')},
-             CASE WHEN instr(LOWER(content_markdown), ?) > 0
-               THEN substr(content_markdown,
-                 max(1, instr(LOWER(content_markdown), ?) - 120), 300)
-             END AS body_match
-      FROM articles
-      WHERE $_profileSources AND (${aClauses.join(' AND ')})
-    ''', [first, first, activeProfile, ...aArgs]);
-    final articles = <Article>[];
-    final snippets = <int, String>{};
-    final bodyHit = <int>{};
-    for (final row in articleRows) {
-      final article = Article.fromMap(row);
-      articles.add(article);
-      final summarySnippet = snippetAround(article.summary, terms);
-      final body = row['body_match'] as String?;
-      final snippet = summarySnippet ?? snippetAround(body, terms);
-      if (snippet != null) snippets[article.id!] = snippet;
-      if (summarySnippet != null || body != null) bodyHit.add(article.id!);
-    }
+    final (articles, snippets, bodyHit) = await _searchArticles(db, terms);
 
     // Sources: title or url (a twitter username lives in the url).
     final (sWhere, sArgs) = _matchClause(['title', 'url'], terms);
