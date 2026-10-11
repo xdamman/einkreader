@@ -32,7 +32,7 @@
   "crons": [
     {
       "path": "/api/digest",
-      "schedule": "0 7 * * 1"
+      "schedule": "0 * * * *"
     }
   ]
 }

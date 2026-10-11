@@ -135,6 +135,8 @@ the RSS reader made for your e-ink device.</footer>
       body: JSON.stringify({
         name: form.dataset.profile,
         email: form.elements.email.value,
+        // Digests arrive Saturday 7am in the reader's own time zone.
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
     });
     out.textContent = res.ok
@@ -181,8 +183,8 @@ function subscribeHtml(name, displayName) {
 
     <dialog id="m-email"><button class="close">✕</button>
       <h3>By email</h3>
-      <p>A weekly digest of ${first}'s new highlights and comments — only
-      when there's something new.</p>
+      <p>A digest of ${first}'s new highlights and comments, Saturday
+      mornings, only when there's something new.</p>
       <form id="email-form" data-profile="${esc(name)}"><div class="row">
         <input type="email" name="email" required autofocus
             autocomplete="email" placeholder="you@example.com">

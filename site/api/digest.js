@@ -1,6 +1,7 @@
 // The email digest of shared highlights.
-//   GET  (Vercel cron, weekly) — every profile with confirmed subscribers
-//        and new highlights since its last digest gets one sent.
+//   GET  (Vercel cron, hourly) — each confirmed subscriber for whom it is
+//        now Saturday 7:xx in their own time zone gets the highlights
+//        shared since their last digest (or in the past week), if any.
 //   POST { name, to } — a test digest of the last week (or the latest
 //        highlights when the week was quiet) to one address only.
 // Both require `Authorization: Bearer $CRON_SECRET` (Vercel's cron sends it).
@@ -8,8 +9,9 @@ import { buildDigest, highlightsSince } from '../lib/digest.js';
 import { DIGEST_FROM, sendEmail } from '../lib/email.js';
 import { profileMeta, refreshFromRelays } from '../lib/profile_cache.js';
 import { loadRegistry, pubkeyOf } from '../lib/registry.js';
-import { actionUrl, loadSubscribers, profilesWithSubscribers,
-  saveSubscribers } from '../lib/subscribers.js';
+import { actionUrl, decryptEmail, digestDue, loadSubscribers,
+  profilesWithSubscribers, saveSubscribers, subscriberId }
+  from '../lib/subscribers.js';
 
 const WEEK = 7 * 24 * 3600;
 
@@ -25,7 +27,7 @@ async function eventsOf(pubkey) {
 }
 
 function message({ name, displayName, events, to, test }) {
-  const unsubscribeUrl = actionUrl('unsubscribe', name, to);
+  const unsubscribeUrl = actionUrl('unsubscribe', name, subscriberId(to));
   const digest = buildDigest(
       { name, displayName, events, unsubscribeUrl, test });
   return {
@@ -68,30 +70,42 @@ export default async function handler(req, res) {
 
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET/POST' });
   const report = {};
+  const date = new Date();
   for (const name of await profilesWithSubscribers()) {
     const pubkey = pubkeyOf(registry[name]);
     if (!pubkey) continue;
     const data = await loadSubscribers(name);
-    const recipients = data.subscribers.filter((s) => s.confirmed);
-    if (!recipients.length) continue;
+    const due = data.subscribers.filter((s) => s.confirmed && digestDue(s, date));
+    if (!due.length) continue;
     const all = await eventsOf(pubkey);
-    const events = highlightsSince(all, data.lastSentAt || now - WEEK);
-    if (!events.length) {
-      report[name] = 'nothing new';
-      continue;
-    }
     const displayName = profileMeta(all).name || name;
     let sent = 0;
-    for (const { email } of recipients) {
+    let quiet = 0;
+    for (const subscriber of due) {
+      const since = Math.floor((subscriber.lastSentAt || 0) / 1000) ||
+          now - WEEK;
+      const events = highlightsSince(all, since);
+      // Marked as handled either way: a quiet week sends nothing, and the
+      // next one counts from here.
+      const previous = subscriber.lastSentAt;
+      subscriber.lastSentAt = date.getTime();
+      if (!events.length) {
+        quiet++;
+        continue;
+      }
       try {
-        await sendEmail(message({ name, displayName, events, to: email }));
+        await sendEmail(message({ name, displayName, events,
+          to: decryptEmail(subscriber.enc) }));
         sent++;
       } catch (e) {
+        // Not sent: next Saturday's digest covers this week too.
+        subscriber.lastSentAt = previous;
         console.error(`digest ${name}: ${e.message}`);
       }
     }
-    await saveSubscribers(name, { ...data, lastSentAt: now });
-    report[name] = `${sent}/${recipients.length} sent, ${events.length} highlights`;
+    await saveSubscribers(name, data);
+    report[name] = `${sent} sent, ${quiet} with nothing new, ` +
+        `${due.length - sent - quiet} failed`;
   }
   return res.status(200).json({ ok: true, report });
 }

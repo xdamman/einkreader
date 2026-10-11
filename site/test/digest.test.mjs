@@ -6,7 +6,9 @@ import { bytesToHex } from '@noble/hashes/utils';
 import { buildDigest, highlightsSince } from '../lib/digest.js';
 import { mergeEvents, validEvent } from '../lib/profile_cache.js';
 import { eventId } from '../lib/registry.js';
-import { actionUrl, checkToken, linkToken } from '../lib/subscribers.js';
+import { actionUrl, checkToken, decryptEmail, digestDue, encryptEmail,
+  linkToken, storageKey, subscriberId, validTimeZone }
+  from '../lib/subscribers.js';
 
 const key = 'test-secret';
 const sk = schnorr.utils.randomPrivateKey();
@@ -40,14 +42,40 @@ assert.match(digest.text, /> Second quote/);
 assert.match(buildDigest({ name: 'x', displayName: 'X', events: [h1],
   unsubscribeUrl: 'u', test: true }).subject, /^\[Test\] X: 1 new highlight /);
 
-// Signed links: bound to purpose, profile and address.
-const token = linkToken('confirm', 'xavier', 'a@b.co', key);
-assert.ok(checkToken('confirm', 'xavier', 'a@b.co', token, key));
-assert.ok(!checkToken('unsubscribe', 'xavier', 'a@b.co', token, key));
-assert.ok(!checkToken('confirm', 'xavier', 'c@b.co', token, key));
-assert.ok(!checkToken('confirm', 'xavier', 'a@b.co', 'nope', key));
-assert.match(actionUrl('unsubscribe', 'xavier', 'a@b.co', key),
-    /^https:\/\/einkreader\.app\/api\/subscribe\?a=unsubscribe&name=xavier&email=a%40b\.co&t=[0-9a-f]{32}$/);
+// Signed links: bound to purpose, profile and subscriber id; they never
+// carry the address.
+const id = subscriberId('A@b.co ', key);
+assert.equal(id, subscriberId('a@b.co', key));
+assert.match(id, /^[0-9a-f]{24}$/);
+const token = linkToken('confirm', 'xavier', id, key);
+assert.ok(checkToken('confirm', 'xavier', id, token, key));
+assert.ok(!checkToken('unsubscribe', 'xavier', id, token, key));
+assert.ok(!checkToken('confirm', 'xavier', subscriberId('c@b.co', key), token, key));
+assert.ok(!checkToken('confirm', 'xavier', id, 'nope', key));
+const url = actionUrl('unsubscribe', 'xavier', id, key);
+assert.match(url, /^https:\/\/einkreader\.app\/api\/subscribe\?a=unsubscribe&name=xavier&id=[0-9a-f]{24}&t=[0-9a-f]{32}$/);
+assert.doesNotMatch(url, /b\.co/);
+
+// Addresses are stored encrypted to the server's key: only it decrypts.
+const serverKey = storageKey(bytesToHex(schnorr.utils.randomPrivateKey()));
+const otherKey = storageKey(bytesToHex(schnorr.utils.randomPrivateKey()));
+const enc = encryptEmail('reader@example.com', serverKey);
+assert.doesNotMatch(enc, /reader|example/);
+assert.equal(decryptEmail(enc, serverKey), 'reader@example.com');
+assert.throws(() => decryptEmail(enc, otherKey));
+
+// Saturday 7:xx in the subscriber's own time zone, at most once a week.
+const sat7Brussels = new Date('2026-10-17T05:30:00Z'); // 07:30 CEST
+assert.ok(digestDue({ tz: 'Europe/Brussels' }, sat7Brussels));
+assert.ok(!digestDue({ tz: 'America/New_York' }, sat7Brussels)); // 01:30
+assert.ok(digestDue({ tz: 'America/New_York' },
+    new Date('2026-10-17T11:10:00Z'))); // 07:10 EDT
+assert.ok(!digestDue({ tz: 'Europe/Brussels' },
+    new Date('2026-10-16T05:30:00Z'))); // Friday
+assert.ok(!digestDue({ tz: 'Europe/Brussels',
+  lastSentAt: sat7Brussels.getTime() - 3600 * 1000 }, sat7Brussels));
+assert.equal(validTimeZone('Not/AZone'), 'UTC');
+assert.equal(validTimeZone('Asia/Kolkata'), 'Asia/Kolkata');
 
 // Event cache: signed events of the cached kinds by the author only.
 assert.ok(validEvent(h1, pubkey));
