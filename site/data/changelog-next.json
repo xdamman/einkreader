@@ -4,7 +4,8 @@
     "title": "Saturday morning digests",
     "changes": [
       "Email digests arrive on Saturday at 7am in your own time zone, only in weeks with new highlights.",
-      "Subscriber email addresses are stored encrypted."
+      "Subscriber email addresses are stored encrypted.",
+      "Public pages and digests show when each highlight was shared, above its title, so it isn't confused with the article's own date. Digests include the author's bio."
     ]
   },
   {

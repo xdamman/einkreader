@@ -33,6 +33,9 @@ const page = (title, body, { name, displayName, feedTitle }) => `<!doctype html>
   .masthead .bio { font-size:14px; color:#444; margin-top:2px; }
   .masthead .links { font-size:13px; margin-top:6px; }
   .masthead .links a { margin:0 7px; }
+  .shared { font-size:12px; letter-spacing:.09em; text-transform:uppercase;
+            color:#888; margin-bottom:2px; }
+  .more { margin:26px 0 0; font-size:16px; }
   .crumb { font-size:12px; letter-spacing:.09em; text-transform:uppercase;
            margin:18px 0 2px; }
   .crumb a { color:#666; text-decoration:none; }
@@ -147,6 +150,12 @@ the RSS reader made for your e-ink device.</footer>
 </script>
 </body></html>`;
 
+/// "Shared October 11, 2026".
+export function sharedOn(seconds) {
+  return 'Shared ' + new Date(seconds * 1000).toLocaleDateString('en-US',
+      { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
 function storyHtml(name, group, { headingLink = true } = {}) {
   const quotes = group.quotes.map((quote) => {
     const anchor = `q-${String(quote.id ?? '').slice(0, 12)}`;
@@ -156,9 +165,9 @@ function storyHtml(name, group, { headingLink = true } = {}) {
         title="Permalink to this quote">#</a></span>${esc(quote.text)}</blockquote>
       ${quote.comment ? `<p class="say">${esc(quote.comment)}</p>` : ''}`;
   }).join('\n');
-  const date = group.latest
-      ? new Date(group.latest * 1000).toISOString().slice(0, 10)
-      : '';
+  // When the reader shared it (newest quote in the story), shown above the
+  // title so it can't be mistaken for the source's publication date.
+  const date = group.latest ? sharedOn(group.latest) : '';
   const title = headingLink
       ? `<a href="/${esc(name)}/s/${group.id}">${esc(group.title)}</a>`
       : esc(group.title);
@@ -166,8 +175,9 @@ function storyHtml(name, group, { headingLink = true } = {}) {
       ? `<a href="${esc(group.url)}" rel="nofollow noopener">${esc(group.domain ?? 'original')}</a>`
       : (group.domain ? esc(group.domain) : '');
   return `<article class="story">
+    ${date ? `<div class="shared">${date}</div>` : ''}
     <h2>${title}</h2>
-    <div class="meta">${source}${source && date ? ' · ' : ''}${date}</div>
+    ${source ? `<div class="meta">${source}</div>` : ''}
     ${quotes}
   </article>`;
 }
@@ -285,8 +295,9 @@ export default async function handler(req, res) {
     return res.status(200).send(page(
         `${group.title} — ${displayName}`,
         `${masthead}
-         <div class="crumb"><a href="/${esc(name)}">← ${esc(displayName)}</a></div>
          ${storyHtml(name, group, { headingLink: false })}
+         <p class="more"><a href="/${esc(name)}">View more highlights and notes
+           from ${esc(displayName)} →</a></p>
          ${subscribeHtml(name, displayName)}`,
         opts));
   }

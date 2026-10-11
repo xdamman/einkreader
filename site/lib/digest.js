@@ -2,6 +2,10 @@
 // (HTML and plain text), grouped by story exactly like the public page.
 import { groupStories } from './profile_render.js';
 
+const sharedOn = (seconds) => 'Shared ' +
+    new Date(seconds * 1000).toLocaleDateString('en-US',
+        { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+
 const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
@@ -13,8 +17,8 @@ export function highlightsSince(events, sinceSeconds) {
 }
 
 /// { subject, html, text } for [events] (already narrowed to the period).
-export function buildDigest({ name, displayName, events, unsubscribeUrl,
-  test = false }) {
+export function buildDigest({ name, displayName, about, events,
+  unsubscribeUrl, test = false }) {
   const groups = groupStories(events);
   const base = `https://einkreader.app/${name}`;
   const count = events.filter((e) => e.kind === 9802).length;
@@ -25,6 +29,7 @@ export function buildDigest({ name, displayName, events, unsubscribeUrl,
 
   const storiesHtml = groups.map((g) => `
     <div style="margin:0 0 30px">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#888;margin-bottom:2px">${sharedOn(g.latest)}</div>
       <h2 style="font-size:20px;line-height:1.3;margin:0 0 2px">
         <a href="${base}/s/${g.id}" style="color:#111;text-decoration:none">${esc(g.title)}</a></h2>
       ${g.url ? `<div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#888;margin-bottom:8px">
@@ -38,7 +43,8 @@ export function buildDigest({ name, displayName, events, unsubscribeUrl,
   <div style="max-width:34em;margin:0 auto;padding:28px 20px;font-family:Georgia,'Times New Roman',serif;color:#111;line-height:1.6">
     <div style="text-align:center;border-bottom:3px solid #111;padding-bottom:12px;margin-bottom:26px">
       <div style="font-size:24px;font-weight:700"><a href="${base}" style="color:#111;text-decoration:none">${esc(displayName)}</a></div>
-      <div style="font-size:14px;color:#555">New highlights and comments</div>
+      ${about ? `<div style="font-size:14px;color:#444">${esc(about)}</div>` : ''}
+      <div style="font-size:13px;color:#777;margin-top:4px">New highlights and notes</div>
     </div>
     ${storiesHtml}
     <p style="text-align:center;margin:10px 0 0"><a href="${base}" style="color:#111">Read everything on ${esc(displayName)}'s page →</a></p>
@@ -49,9 +55,11 @@ export function buildDigest({ name, displayName, events, unsubscribeUrl,
   </div></body></html>`;
 
   const text = [
-    `${displayName}: new highlights and comments`,
+    `${displayName}: new highlights and notes`,
+    ...(about ? [about] : []),
     '',
     ...groups.flatMap((g) => [
+      sharedOn(g.latest),
       g.title.toUpperCase(),
       `${base}/s/${g.id}`,
       '',

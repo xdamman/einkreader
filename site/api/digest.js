@@ -26,10 +26,10 @@ async function eventsOf(pubkey) {
   return (await refreshFromRelays(pubkey)).cache.events;
 }
 
-function message({ name, displayName, events, to, test }) {
+function message({ name, displayName, about, events, to, test }) {
   const unsubscribeUrl = actionUrl('unsubscribe', name, subscriberId(to));
   const digest = buildDigest(
-      { name, displayName, events, unsubscribeUrl, test });
+      { name, displayName, about, events, unsubscribeUrl, test });
   return {
     from: `${displayName} via einkreader <${DIGEST_FROM}>`,
     to,
@@ -63,8 +63,9 @@ export default async function handler(req, res) {
       events = all.filter((e) => e.kind === 9802).slice(0, 10);
     }
     if (!events.length) return res.status(409).json({ error: 'no highlights' });
-    const displayName = profileMeta(all).name || name;
-    await sendEmail(message({ name, displayName, events, to, test: true }));
+    const meta = profileMeta(all);
+    await sendEmail(message({ name, displayName: meta.name || name,
+      about: meta.about, events, to, test: true }));
     return res.status(200).json({ ok: true, highlights: events.length });
   }
 
@@ -78,7 +79,8 @@ export default async function handler(req, res) {
     const due = data.subscribers.filter((s) => s.confirmed && digestDue(s, date));
     if (!due.length) continue;
     const all = await eventsOf(pubkey);
-    const displayName = profileMeta(all).name || name;
+    const meta = profileMeta(all);
+    const displayName = meta.name || name;
     let sent = 0;
     let quiet = 0;
     for (const subscriber of due) {
@@ -94,8 +96,8 @@ export default async function handler(req, res) {
         continue;
       }
       try {
-        await sendEmail(message({ name, displayName, events,
-          to: decryptEmail(subscriber.enc) }));
+        await sendEmail(message({ name, displayName, about: meta.about,
+          events, to: decryptEmail(subscriber.enc) }));
         sent++;
       } catch (e) {
         // Not sent: next Saturday's digest covers this week too.

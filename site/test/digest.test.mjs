@@ -36,6 +36,8 @@ const digest = buildDigest({ name: 'xavier', displayName: 'Xavier',
 assert.equal(digest.subject, 'Xavier: 2 new highlights from "Story B" and 1 more');
 assert.match(digest.html, /First &lt;quote&gt;/);
 assert.match(digest.html, /So true/);
+assert.match(digest.html, /Shared January 1, 1970/);
+assert.match(buildDigest({ name: 'x', displayName: 'X', about: 'Dad & reader', events: [h1], unsubscribeUrl: 'u' }).html, /Dad &amp; reader/);
 assert.match(digest.html, /https:\/\/einkreader.app\/u\?x=1/);
 assert.doesNotMatch(digest.html, /Old/);
 assert.match(digest.text, /> Second quote/);
