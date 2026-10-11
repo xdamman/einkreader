@@ -1,5 +1,14 @@
 [
   {
+    "date": "2026-10-11",
+    "title": "Faster public pages and a weekly email digest",
+    "changes": [
+      "Public profile pages load in a fraction of a second instead of about five, and update within seconds of a new highlight.",
+      "Following someone by email now asks you to confirm your address, and every digest has a one-click unsubscribe link.",
+      "The email form on profile pages fits phone screens and no longer zooms the page when you type."
+    ]
+  },
+  {
     "version": "0.6.15",
     "date": "2026-10-11",
     "title": "Quote posts on X, or a screenshot when you can't",
