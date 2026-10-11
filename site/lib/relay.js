@@ -1,8 +1,10 @@
 // Minimal relay query over native WebSocket (Node 22+).
+// relay.nostr.band was dropped: it stopped answering, and every query
+// waited out its timeout.
 export const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.band',
+  'wss://relay.primal.net',
 ];
 
 function queryOne(url, filter, timeoutMs) {

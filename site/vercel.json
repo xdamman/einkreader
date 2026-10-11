@@ -28,5 +28,11 @@
       "destination": "/brand",
       "permanent": true
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/digest",
+      "schedule": "0 7 * * 1"
+    }
   ]
 }

@@ -1,0 +1,18 @@
+# systemd user service: forwards new Nostr events from einkreader authors to
+# the site, so their public pages update within seconds.
+# Install:  ln -sf "$PWD/infra/profile-listener/einkreader-profile-listener.service" \
+#             ~/.config/systemd/user/ && systemctl --user daemon-reload && \
+#           systemctl --user enable --now einkreader-profile-listener
+[Unit]
+Description=einkreader profile listener (Nostr events -> einkreader.app page cache)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node %h/github/xdamman/einkreader/infra/profile-listener/listener.mjs
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

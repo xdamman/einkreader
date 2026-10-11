@@ -8,13 +8,14 @@
     "@noble/curves": "^1.6.0",
     "@noble/hashes": "^1.5.0",
     "@vercel/blob": "^0.27.0",
+    "@vercel/functions": "3.9.11",
     "jszip": "^3.10.1",
     "pdf-parse": "^1.1.1",
     "turndown": "^7.2.0"
   },
   "scripts": {
     "build:browser": "npx --yes esbuild@0.24.0 scripts/nostr-browser.js --bundle --minify --format=esm --outfile=public/js/nostr.js",
-    "test": "node test/registry.test.mjs && node test/inbound.test.mjs && node test/substack.test.mjs && node test/changelog.test.mjs",
+    "test": "node test/registry.test.mjs && node test/inbound.test.mjs && node test/substack.test.mjs && node test/changelog.test.mjs && node test/digest.test.mjs",
     "build:changelog": "node scripts/build-changelog.mjs"
   }
 }

@@ -5,8 +5,9 @@
 // Story titles link to the LOCAL story permalink; the source domain under
 // them links to the original. Quotes render as blockquotes with the
 // reader's commentary after each; a quote without a comment stands alone.
-import { queryRelays } from '../lib/relay.js';
 import { groupStories, storyForQuote } from '../lib/profile_render.js';
+import { background, cacheProfileResponse, eventsFor, invalidateProfile,
+  profileMeta } from '../lib/profile_cache.js';
 import { loadRegistry, pubkeyOf } from '../lib/registry.js';
 
 const esc = (value) => String(value ?? '')
@@ -56,24 +57,35 @@ const page = (title, body, { name, displayName, feedTitle }) => `<!doctype html>
   .subscribe { border-top:1px solid #ddd; margin-top:44px; padding-top:22px;
                text-align:center; }
   .subscribe .lead { font-size:16px; margin-bottom:12px; }
-  .chan { display:inline-block; font-size:14px; margin:4px 6px;
+  /* Buttons and links stay black: browsers (iOS) tint them blue. */
+  button { color:#111; -webkit-tap-highlight-color:transparent; }
+  .chan { display:inline-block; font-size:15px; margin:4px 6px;
           padding:7px 16px; border:1.5px solid #111; border-radius:18px;
-          background:#fff; font-family:inherit; cursor:pointer; }
-  dialog { border:2px solid #111; border-radius:10px; padding:22px;
-           max-width:26em; width:90%; font-family:inherit; }
+          background:#fff; color:#111; font-family:inherit; cursor:pointer; }
+  :focus { outline:none; }
+  :focus-visible { outline:2px solid #111; outline-offset:2px; }
+  /* margin:auto centers the dialog (the reset above removed it). */
+  dialog { margin:auto; border:2px solid #111; border-radius:12px;
+           padding:26px 22px 22px; max-width:26em; width:calc(100% - 32px);
+           font-family:inherit; color:#111; background:#fff;
+           text-align:left; }
   dialog::backdrop { background:rgba(0,0,0,.45); }
   dialog h3 { font-size:18px; margin-bottom:8px; }
   dialog p { font-size:14.5px; margin-bottom:10px; }
-  dialog .row { display:flex; gap:8px; }
-  dialog input[type=email] { flex:1; font:inherit; font-size:14px;
-    padding:8px 10px; border:1.5px solid #111; border-radius:6px; }
+  dialog .row { display:flex; gap:8px; flex-wrap:wrap; }
+  /* 16px or more: iOS zooms into smaller inputs on focus. */
+  dialog input[type=email] { flex:1 1 12em; min-width:0; font:inherit;
+    font-size:16px; padding:9px 12px; border:1.5px solid #111;
+    border-radius:8px; color:#111; background:#fff; }
+  dialog input[type=email]:focus { outline:none; border-width:2px; }
   dialog code { font-family:monospace; font-size:13px; background:#f2f2f2;
                 padding:2px 6px; word-break:break-all; }
-  dialog .go { font-size:14px; padding:8px 16px; border:2px solid #111;
-               border-radius:18px; background:#111; color:#fff;
-               font-family:inherit; cursor:pointer; }
-  dialog .close { position:absolute; top:10px; right:14px; border:0;
-                  background:none; font-size:18px; cursor:pointer; }
+  dialog .go { flex:0 0 auto; font-size:16px; padding:9px 18px;
+               border:2px solid #111; border-radius:20px; background:#111;
+               color:#fff; font-family:inherit; cursor:pointer; }
+  dialog .close { position:absolute; top:8px; right:10px; border:0;
+                  background:none; font-size:20px; line-height:1;
+                  padding:6px; color:#111; cursor:pointer; }
   dialog ul { padding-left:20px; font-size:14px; }
   dialog li { margin-bottom:4px; }
   .empty { margin-top:30px; font-style:italic; color:#555;
@@ -126,7 +138,7 @@ the RSS reader made for your e-ink device.</footer>
       }),
     });
     out.textContent = res.ok
-        ? "You're on the list — a weekly digest, only when there's something new."
+        ? 'Almost there: check your inbox and confirm with the link we just sent.'
         : 'That didn\\u2019t work — check the address and try again.';
     if (res.ok) form.elements.email.value = '';
   });
@@ -172,8 +184,8 @@ function subscribeHtml(name, displayName) {
       <p>A weekly digest of ${first}'s new highlights and comments — only
       when there's something new.</p>
       <form id="email-form" data-profile="${esc(name)}"><div class="row">
-        <input type="email" name="email" required
-            placeholder="you@example.com">
+        <input type="email" name="email" required autofocus
+            autocomplete="email" placeholder="you@example.com">
         <button class="go">Subscribe</button>
       </div></form>
       <p id="email-status" style="margin-top:8px"></p>
@@ -216,15 +228,13 @@ export default async function handler(req, res) {
       <p>No such reader here (yet).</p></body>`);
   }
 
-  const events = await queryRelays(
-      { kinds: [0, 9802], authors: [pubkey], limit: 100 });
-  const metaEvent = events
-      .filter((e) => e.kind === 0)
-      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
-  let meta = {};
-  try {
-    meta = JSON.parse(metaEvent?.content ?? '{}');
-  } catch {}
+  // From the server-side event cache (lib/profile_cache.js), not the
+  // relays: a page renders in milliseconds.
+  const events = await eventsFor(pubkey, {
+    background,
+    onRefreshed: () => invalidateProfile(name),
+  });
+  const meta = profileMeta(events);
   const displayName = meta.name || name;
   const groups = groupStories(events);
 
@@ -234,7 +244,7 @@ export default async function handler(req, res) {
   if (qid) {
     const group = storyForQuote(groups, qid);
     if (group) {
-      res.setHeader('Cache-Control', 'public, s-maxage=300');
+      await cacheProfileResponse(res, name);
       return res
           .redirect(302, `/${name}/s/${group.id}#q-${qid.slice(0, 12)}`);
     }
@@ -258,7 +268,7 @@ export default async function handler(req, res) {
     feedTitle: `${displayName} — highlights`,
   };
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, s-maxage=300');
+  await cacheProfileResponse(res, name);
 
   if (sid) {
     const group = groups.find((g) => g.id === sid);

@@ -1,8 +1,9 @@
 // RSS feed of a profile's shared highlights: /:name/feed.xml
 // One item per story (the same grouping as the page), quotes + comments in
 // the description, linking to the local story permalink.
-import { queryRelays } from '../lib/relay.js';
 import { groupStories } from '../lib/profile_render.js';
+import { background, cacheProfileResponse, eventsFor, invalidateProfile,
+  profileMeta } from '../lib/profile_cache.js';
 import { loadRegistry, pubkeyOf } from '../lib/registry.js';
 
 const esc = (value) => String(value ?? '')
@@ -15,15 +16,11 @@ export default async function handler(req, res) {
   const pubkey = pubkeyOf(registry[name]);
   if (!pubkey) return res.status(404).send('not found');
 
-  const events = await queryRelays(
-      { kinds: [0, 9802], authors: [pubkey], limit: 100 });
-  const metaEvent = events
-      .filter((e) => e.kind === 0)
-      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
-  let meta = {};
-  try {
-    meta = JSON.parse(metaEvent?.content ?? '{}');
-  } catch {}
+  const events = await eventsFor(pubkey, {
+    background,
+    onRefreshed: () => invalidateProfile(name),
+  });
+  const meta = profileMeta(events);
   const displayName = meta.name || name;
   const base = `https://einkreader.app/${name}`;
 
@@ -44,7 +41,7 @@ export default async function handler(req, res) {
   }).join('\n');
 
   res.setHeader('Content-Type', 'application/rss+xml; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, s-maxage=600');
+  await cacheProfileResponse(res, name);
   return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 <channel>
