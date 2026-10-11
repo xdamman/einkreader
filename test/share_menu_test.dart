@@ -10,6 +10,7 @@ import 'package:einkreader/screens/article_screen.dart';
 import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/share_actions.dart';
+import 'package:einkreader/services/tweet_card.dart';
 import 'package:einkreader/services/twitter_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/highlight_list.dart';
@@ -219,9 +220,10 @@ void main() {
               onPressed: () => ShareActions.onTwitter(
                 context,
                 draft: '',
-                quoteTweetId: '123',
-                quotePreview: (
-                  author: '@someone',
+                quoted: const QuotedTweet(
+                  id: '123',
+                  authorName: '@someone',
+                  username: 'someone',
                   text: 'The original tweet text',
                 ),
               ),
@@ -294,6 +296,29 @@ void main() {
     });
   });
 
+  test('a post refused for good is held, not retried', () async {
+    var posts = 0;
+    OutboxService.instance.debugTwitter = TwitterService(
+      accessToken: () async => 'token',
+      client: MockClient((request) async {
+        posts++;
+        return http.Response('{"detail": "duplicate content"}', 403);
+      }),
+    );
+    await OutboxService.instance.enqueueTweet('again', error: 'offline');
+    await OutboxService.instance.flush();
+    final item = (await OutboxService.instance.items()).single;
+    expect(item.held, isTrue);
+    expect(posts, 1);
+    // Later flushes leave it alone; it waits to be discarded.
+    final (sent, remaining) = await OutboxService.instance.flush();
+    expect((sent, remaining), (0, 0));
+    expect(posts, 1);
+    expect(OutboxService.instance.pending.value, 1);
+    await OutboxService.instance.delete(item.id!);
+    OutboxService.instance.debugTwitter = null;
+  });
+
   testWidgets('posting an empty tweet says so instead of dropping silently',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
@@ -303,7 +328,8 @@ void main() {
           builder: (context) => Center(
             child: OutlinedButton(
               onPressed: () => ShareActions.onTwitter(context,
-                  draft: '', quoteTweetId: '123'),
+                  draft: '',
+                  quoted: const QuotedTweet(id: '123', text: 'x')),
               child: const Text('open'),
             ),
           ),
@@ -405,6 +431,129 @@ void main() {
       );
       await twitter.postTweet('Great thread', quoteTweetId: '1234567890');
       expect(body, {'text': 'Great thread', 'quote_tweet_id': '1234567890'});
+    });
+
+    test('a post X won\'t let us quote goes out as a screenshot',
+        () async {
+      final paths = <String>[];
+      Map<String, dynamic>? tweet;
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        me: () async => 'xdamman',
+        client: MockClient((request) async {
+          paths.add(request.url.path);
+          if (request.url.path == '/2/media/upload') {
+            expect(request.headers['content-type'],
+                startsWith('multipart/form-data'));
+            return http.Response('{"data": {"id": "777"}}', 200);
+          }
+          tweet = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response('{"data": {"id": "1"}}', 201);
+        }),
+      );
+      await twitter.postTweet('So true',
+          quoted: const QuotedTweet(
+              id: '42',
+              authorName: 'Patrick Collison',
+              username: 'patrickc',
+              text: 'Brothers Karamazov was Einstein\'s favorite novel'));
+      // Never tried as a quote: X would refuse it.
+      expect(paths, ['/2/media/upload', '/2/tweets']);
+      expect(tweet, {
+        'text': 'So true',
+        'media': {
+          'media_ids': ['777']
+        },
+      });
+    });
+
+    test('own posts and posts mentioning the account are quoted natively',
+        () async {
+      const own = QuotedTweet(id: '1', username: 'XDamman', text: 'mine');
+      const mention =
+          QuotedTweet(id: '2', username: 'a', text: 'cc @xdamman, thoughts?');
+      const other =
+          QuotedTweet(id: '3', username: 'a', text: 'cc @xdammanfan');
+      expect(own.quotableBy('xdamman'), isTrue);
+      expect(mention.quotableBy('xdamman'), isTrue);
+      expect(other.quotableBy('xdamman'), isFalse);
+      // Unknown account: let X decide.
+      expect(other.quotableBy(null), isTrue);
+    });
+
+    test('a refused quote is retried as a screenshot of the looked-up post',
+        () async {
+      final calls = <String>[];
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async {
+          calls.add('${request.method} ${request.url.path}');
+          if (request.method == 'GET') {
+            return http.Response(
+                jsonEncode({
+                  'data': {
+                    'id': '42',
+                    'text': 'An interesting post',
+                    'author_id': 'u1',
+                    'created_at': '2026-10-10T15:34:19.000Z',
+                  },
+                  'includes': {
+                    'users': [
+                      {'id': 'u1', 'name': 'Someone', 'username': 'someone'}
+                    ]
+                  },
+                }),
+                200);
+          }
+          if (request.url.path == '/2/media/upload') {
+            return http.Response('{"data": {"id": "9"}}', 200);
+          }
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body.containsKey('quote_tweet_id')) {
+            return http.Response(
+                '{"detail":"You can only reply to or quote posts where you '
+                'are mentioned or are the author.","status":403}',
+                403);
+          }
+          expect(body['media'], {
+            'media_ids': ['9']
+          });
+          return http.Response('{"data": {"id": "1"}}', 201);
+        }),
+      );
+      await twitter.postTweet('Look', quoteTweetId: '42');
+      expect(calls, [
+        'POST /2/tweets',
+        'GET /2/tweets/42',
+        'POST /2/media/upload',
+        'POST /2/tweets',
+      ]);
+    });
+
+    test('a duplicate is refused for good', () async {
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async => http.Response(
+            '{"detail": "You are not allowed to create a Tweet with '
+            'duplicate content."}',
+            403)),
+      );
+      expect(
+        twitter.postTweet('hello'),
+        throwsA(isA<TwitterPostRefused>()
+            .having((e) => e.permanent, 'permanent', isTrue)),
+      );
+    });
+
+    test('the screenshot is a PNG of the post', () async {
+      final png = await renderTweetCard(QuotedTweet(
+          id: '42',
+          authorName: 'Patrick Collison',
+          username: 'patrickc',
+          text: 'Line one\n\nLine two',
+          createdAt: DateTime(2026, 10, 11)));
+      expect(png.sublist(1, 4), 'PNG'.codeUnits);
+      expect(png.length, greaterThan(1000));
     });
 
     test('a 403 explains the missing write permission', () async {

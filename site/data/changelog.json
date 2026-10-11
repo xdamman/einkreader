@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.14",
+    "date": "2026-10-11",
+    "title": "Fresh bookmarks always show, faster search",
+    "changes": [
+      "Every article now appears in its source's list. The home screen used to load only the 500 most recent, so a feed with items dated in the future could push new bookmarks out of sight. An item dated in the future is now listed on the day it arrived.",
+      "Search is faster: it no longer loads every matching article's full text, and it lays out only the results on screen. Results now show their date.",
+      "Sharing to X a post that X won't let apps quote (only your own posts or posts that mention you can be) now attaches a screenshot of the post instead of failing.",
+      "Posts X refuses for good, such as duplicates, are no longer retried at every sync. They wait in the outbox with the reason until you discard them."
+    ]
+  },
+  {
     "version": "0.6.13",
     "date": "2026-10-10",
     "title": "Forwarded newsletters stay readable",

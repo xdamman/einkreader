@@ -216,6 +216,13 @@ class Article {
   /// carry links, emphasis markers, heading/quote markers or raw URLs.
   String get displayTitle => plainTitle(title);
 
+  /// When the article sorts and is dated in lists: its publication date, but
+  /// never later than its arrival (see AppDatabase.listedAtSql).
+  int get listedAt {
+    final published = publishedAt ?? createdAt;
+    return published < createdAt ? published : createdAt;
+  }
+
   /// Strips Markdown markup and bare URLs from [raw], collapsing the leftover
   /// whitespace. Falls back to the trimmed original if nothing readable remains
   /// (e.g. a title that was only a link).
@@ -325,12 +332,18 @@ class OutboxItem {
   final String text;
   final String? quoteTweetId;
 
-  /// The signed Nostr event as JSON (kind 'nostr' only). Signed events can
-  /// be re-sent as-is at any time.
+  /// The signed Nostr event as JSON (kind 'nostr'; signed events can be
+  /// re-sent as-is at any time), the email (kind 'email'), or the quoted
+  /// post (kind 'tweet', a QuotedTweet, so a refused quote can become a
+  /// screenshot).
   final String? payload;
   final int createdAt;
   final int attempts;
   final String? lastError;
+
+  /// Refused for good (a duplicate post, say): kept so nothing vanishes
+  /// silently, but no longer retried.
+  final bool held;
 
   const OutboxItem({
     this.id,
@@ -341,11 +354,13 @@ class OutboxItem {
     required this.createdAt,
     this.attempts = 0,
     this.lastError,
+    this.held = false,
   });
 
   Map<String, Object?> toMap() => {
         'id': id,
         'kind': kind,
+        'held': held ? 1 : 0,
         'text': text,
         'quote_tweet_id': quoteTweetId,
         'payload': payload,
@@ -363,6 +378,7 @@ class OutboxItem {
         createdAt: m['created_at'] as int,
         attempts: (m['attempts'] as int?) ?? 0,
         lastError: m['last_error'] as String?,
+        held: (m['held'] as int?) == 1,
       );
 }
 

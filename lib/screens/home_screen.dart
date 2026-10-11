@@ -227,7 +227,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final hasInboxAddress = inbox != null &&
           await ProfileService.instance.enabled &&
           await ProfileService.instance.nip05Address != null;
-      final articles = await _db.getArticles();
+      final articles =
+          await _db.getArticles(withContent: false, limit: null);
       final highlights = await _db.getHighlights();
       final shares = await _db.getShares();
       final sources = await _db.getSources();
@@ -556,8 +557,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   subtitle: item.lastError == null
                       ? null
                       : Text(
-                          '${item.attempts} attempt'
-                          '${item.attempts == 1 ? '' : 's'} · '
+                          // Held items were refused for good: retrying
+                          // can't help, discarding is the only way out.
+                          '${item.held ? 'Not retried' : '${item.attempts} attempt'
+                              '${item.attempts == 1 ? '' : 's'}'} · '
                           '${item.lastError!.replaceFirst(RegExp(r'^Exception:\s*'), '')}',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,

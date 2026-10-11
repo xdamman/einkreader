@@ -35,13 +35,21 @@ class SourceStats {
 /// ranking computed in Dart by [AppDatabase.search].
 class SearchResults {
   final List<Highlight> highlights;
+
+  /// Matched articles WITHOUT their content (search never loads the full
+  /// text; open an article by id to read it).
   final List<Article> articles;
   final List<Source> sources;
+
+  /// Article id → a stretch of its body around the first match, for those
+  /// whose match is in the body.
+  final Map<int, String> snippets;
 
   const SearchResults({
     this.highlights = const [],
     this.articles = const [],
     this.sources = const [],
+    this.snippets = const {},
   });
 
   bool get isEmpty =>
@@ -77,7 +85,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 14,
+      version: 15,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -237,6 +245,11 @@ class AppDatabase {
       await db.execute(_createNostrEventsSql);
       await db.execute(_createNostrProfilesSql);
     }
+    if (oldVersion < 15) {
+      // Outbox items refused for good stop being retried.
+      await _addColumnIfMissing(
+          db, 'outbox', 'held', 'INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   static const _createNostrEventsSql = '''
@@ -287,7 +300,8 @@ class AppDatabase {
         payload TEXT,
         created_at INTEGER NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT
+        last_error TEXT,
+        held INTEGER NOT NULL DEFAULT 0
       )
     ''';
 
@@ -599,11 +613,29 @@ class AppDatabase {
     return rows.isNotEmpty;
   }
 
+  /// When an article sorts in lists: its publication date, but never later
+  /// than when it arrived. A feed's future-dated (or mis-dated) items would
+  /// otherwise sit on top for days and push real news out of sight.
+  static const listedAtSql =
+      'MIN(COALESCE(published_at, created_at), created_at)';
+
+  /// Every column but the full text, for lists that never show it.
+  static const _listColumns = [
+    'id', 'source_id', 'guid', 'title', 'author', 'url', 'url_key',
+    'published_at', 'summary', 'fetched', 'read', 'read_later', 'favorite',
+    'created_at', 'scroll_position', 'scrolled_at', 'via_article_id',
+    'read_at',
+  ];
+
+  /// Articles newest first (by [listedAtSql]). [withContent] false leaves
+  /// out the full text — the home screen lists every article, so it loads
+  /// them light and uncapped ([limit] null).
   Future<List<Article>> getArticles({
     int? sourceId,
     bool readLaterOnly = false,
     bool favoritesOnly = false,
-    int limit = 500,
+    bool withContent = true,
+    int? limit = 500,
   }) async {
     final db = await database;
     final where = <String>[
@@ -614,9 +646,10 @@ class AppDatabase {
     ];
     final rows = await db.query(
       'articles',
+      columns: withContent ? null : _listColumns,
       where: where.join(' AND '),
       whereArgs: [activeProfile, if (sourceId != null) sourceId],
-      orderBy: 'COALESCE(published_at, created_at) DESC',
+      orderBy: '$listedAtSql DESC',
       limit: limit,
     );
     return rows.map(Article.fromMap).toList();
@@ -967,13 +1000,15 @@ class AppDatabase {
     await db.delete('outbox', where: 'id = ?', whereArgs: [id]);
   }
 
-  /// Records one more failed send attempt for a queued item.
-  Future<void> recordOutboxAttempt(int id, String error) async {
+  /// Records one more failed send attempt for a queued item; [hold] stops
+  /// further retries (the refusal is permanent).
+  Future<void> recordOutboxAttempt(int id, String error,
+      {bool hold = false}) async {
     final db = await database;
     await db.rawUpdate(
-      'UPDATE outbox SET attempts = attempts + 1, last_error = ? '
-      'WHERE id = ?',
-      [error, id],
+      'UPDATE outbox SET attempts = attempts + 1, last_error = ?, '
+      'held = ? WHERE id = ?',
+      [error, hold ? 1 : 0, id],
     );
   }
 
@@ -1233,14 +1268,32 @@ class AppDatabase {
   /// Weighted relevance of an article for [terms]: a title hit dominates an
   /// author hit, which dominates a summary/content hit; weights sum when
   /// several fields match. Ties are broken by recency in [search].
-  static int _articleScore(Article a, List<String> terms) {
+  static int _articleScore(Article a, List<String> terms, bool bodyHit) {
     var score = 0;
     if (_anyTermIn(a.title, terms)) score += 100;
     if (_anyTermIn(a.author, terms)) score += 80;
-    if (_anyTermIn(a.summary, terms) || _anyTermIn(a.contentMarkdown, terms)) {
-      score += 10;
-    }
+    if (bodyHit) score += 10;
     return score;
+  }
+
+  /// ~80 characters of context around the first match of any of [terms] in
+  /// [raw], or null when none appears.
+  static String? snippetAround(String? raw, List<String> terms) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    final flat = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final lower = flat.toLowerCase();
+    int? at;
+    for (final term in terms) {
+      final i = lower.indexOf(term);
+      if (i >= 0 && (at == null || i < at)) at = i;
+    }
+    if (at == null) return null;
+    const pad = 40;
+    final start = (at - pad).clamp(0, flat.length);
+    final end = (at + pad).clamp(0, flat.length);
+    final prefix = start > 0 ? '…' : '';
+    final suffix = end < flat.length ? '…' : '';
+    return '$prefix${flat.substring(start, end).trim()}$suffix';
   }
 
   /// Universal search over sources, authors, article titles/content and
@@ -1270,16 +1323,43 @@ class AppDatabase {
     ''', [activeProfile, ...hArgs]);
     final highlights = highlightRows.map(Highlight.fromMap).toList();
 
-    // Articles: title, author, summary and full content.
-    final (aWhere, aArgs) = _matchClause(
-      ['title', "COALESCE(author, '')", "COALESCE(summary, '')",
-        "COALESCE(content_markdown, '')"],
-      terms,
-    );
-    final articleRows = await db.query('articles',
-        where: '$_profileSources AND ($aWhere)',
-        whereArgs: [activeProfile, ...aArgs]);
-    final articles = articleRows.map(Article.fromMap).toList();
+    // Articles: title, author, summary and full content. The full text is
+    // matched in SQL but never loaded: only a short stretch around the
+    // first match comes back, for the snippet. Plain LIKE (already
+    // case-insensitive for ASCII, like LOWER) on the body: lowercasing
+    // every article's whole text was most of the search time.
+    final aClauses = <String>[];
+    final aArgs = <String>[];
+    for (final term in terms) {
+      final arg = _likeArg(term);
+      aClauses.add("(LOWER(title) LIKE ? ESCAPE '\\' "
+          "OR LOWER(COALESCE(author, '')) LIKE ? ESCAPE '\\' "
+          "OR LOWER(COALESCE(summary, '')) LIKE ? ESCAPE '\\' "
+          "OR content_markdown LIKE ? ESCAPE '\\')");
+      aArgs.addAll([arg, arg, arg, arg]);
+    }
+    final first = terms.first;
+    final articleRows = await db.rawQuery('''
+      SELECT ${_listColumns.join(', ')},
+             CASE WHEN instr(LOWER(content_markdown), ?) > 0
+               THEN substr(content_markdown,
+                 max(1, instr(LOWER(content_markdown), ?) - 120), 300)
+             END AS body_match
+      FROM articles
+      WHERE $_profileSources AND (${aClauses.join(' AND ')})
+    ''', [first, first, activeProfile, ...aArgs]);
+    final articles = <Article>[];
+    final snippets = <int, String>{};
+    final bodyHit = <int>{};
+    for (final row in articleRows) {
+      final article = Article.fromMap(row);
+      articles.add(article);
+      final summarySnippet = snippetAround(article.summary, terms);
+      final body = row['body_match'] as String?;
+      final snippet = summarySnippet ?? snippetAround(body, terms);
+      if (snippet != null) snippets[article.id!] = snippet;
+      if (summarySnippet != null || body != null) bodyHit.add(article.id!);
+    }
 
     // Sources: title or url (a twitter username lives in the url).
     final (sWhere, sArgs) = _matchClause(['title', 'url'], terms);
@@ -1297,11 +1377,11 @@ class AppDatabase {
     });
 
     // Articles: score desc, then most recent.
+    int score(Article a) => _articleScore(a, terms, bodyHit.contains(a.id));
     articles.sort((a, b) {
-      final byScore = _articleScore(b, terms).compareTo(_articleScore(a, terms));
+      final byScore = score(b).compareTo(score(a));
       if (byScore != 0) return byScore;
-      return (b.publishedAt ?? b.createdAt)
-          .compareTo(a.publishedAt ?? a.createdAt);
+      return b.listedAt.compareTo(a.listedAt);
     });
 
     // Sources: title match before url-only match, then alphabetical (this
@@ -1317,6 +1397,7 @@ class AppDatabase {
       highlights: highlights,
       articles: articles,
       sources: sources,
+      snippets: snippets,
     );
   }
 

@@ -8,6 +8,7 @@ import 'app_log.dart';
 import 'nostr_service.dart';
 import 'profile_service.dart';
 import 'sync_service.dart';
+import 'tweet_card.dart';
 import 'twitter_service.dart';
 
 /// Queue for every outgoing event that couldn't be sent (offline, expired
@@ -58,12 +59,16 @@ class OutboxService {
     }
   }
 
-  /// Queues a tweet whose post just failed.
+  /// Queues a tweet whose post just failed. [quoted] keeps what the quoted
+  /// post says, so a quote X refuses can go out as a screenshot.
   Future<void> enqueueTweet(String text,
-      {String? quoteTweetId, required String error}) async {
+      {String? quoteTweetId,
+      QuotedTweet? quoted,
+      required String error}) async {
     await _db.insertOutboxItem(OutboxItem(
       text: text,
-      quoteTweetId: quoteTweetId,
+      quoteTweetId: quoteTweetId ?? quoted?.id,
+      payload: quoted == null ? null : jsonEncode(quoted.toJson()),
       createdAt: DateTime.now().millisecondsSinceEpoch,
       attempts: 1,
       lastError: error,
@@ -117,9 +122,12 @@ class OutboxService {
     await refreshCount();
   }
 
-  /// Tries to send everything queued. Returns (sent, stillPending).
+  /// Tries to send everything queued, except items refused for good (held:
+  /// retrying would fail the same way; they wait to be discarded). Returns
+  /// (sent, stillPending).
   Future<(int, int)> flush() async {
-    final queued = await _db.outboxItems();
+    final queued =
+        (await _db.outboxItems()).where((item) => !item.held).toList();
     var sent = 0;
     for (final item in queued) {
       try {
@@ -139,14 +147,17 @@ class OutboxService {
           );
         } else {
           await _twitter.postTweet(item.text,
-              quoteTweetId: item.quoteTweetId);
+              quoteTweetId: item.quoteTweetId,
+              quoted: QuotedTweet.tryParse(item.payload));
         }
         await _db.deleteOutboxItem(item.id!);
         sent++;
       } catch (e) {
-        await _db.recordOutboxAttempt(item.id!, '$e');
-        await AppLogService.instance
-            .warn('Outbox: retry failed for ${item.kind} #${item.id}: $e');
+        final hold = e is TwitterPostRefused && e.permanent;
+        await _db.recordOutboxAttempt(item.id!, '$e', hold: hold);
+        await AppLogService.instance.warn(
+            'Outbox: retry failed for ${item.kind} #${item.id}: $e'
+            '${hold ? ' (refused for good: no more retries)' : ''}');
       }
     }
     await refreshCount();

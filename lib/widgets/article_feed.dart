@@ -64,7 +64,7 @@ class ArticleFeed extends StatelessWidget {
     for (final article in articles) {
       final date = DateTime.fromMillisecondsSinceEpoch(dateOf != null
           ? dateOf!(article)
-          : article.publishedAt ?? article.createdAt);
+          : article.listedAt);
       final day = DateTime(date.year, date.month, date.day);
       if (day != currentDay) {
         entries.add(day);

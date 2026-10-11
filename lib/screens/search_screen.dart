@@ -220,10 +220,6 @@ class _SearchScreenState extends State<SearchScreen> {
           .toList();
     }
 
-    final terms = _query.toLowerCase().split(RegExp(r'\s+'))
-        .where((t) => t.isNotEmpty)
-        .toList();
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -266,35 +262,42 @@ class _SearchScreenState extends State<SearchScreen> {
             ],
           ),
         ),
+        // Built lazily: only the rows on screen are laid out, so a common
+        // word matching hundreds of articles still shows at once.
         Expanded(
-          child: ListView(
-            children: [
+          child: Builder(builder: (context) {
+            final rows = <Widget Function()>[
               // Highlights always render above everything else.
               if (highlights.isNotEmpty) ...[
-                const _SectionHeader('Highlights'),
+                () => const _SectionHeader('Highlights'),
                 for (final highlight in highlights)
-                  _HighlightResult(highlight: highlight, onChanged: _refresh),
+                  () => _HighlightResult(
+                      highlight: highlight, onChanged: _refresh),
               ],
               if (articles.isNotEmpty) ...[
-                const _SectionHeader('Articles'),
+                () => const _SectionHeader('Articles'),
                 for (final article in articles)
-                  _ArticleResult(
-                    article: article,
-                    sourceTitle: _sourceTitles[article.sourceId],
-                    terms: terms,
-                    onChanged: _refresh,
-                  ),
+                  () => _ArticleResult(
+                        article: article,
+                        sourceTitle: _sourceTitles[article.sourceId],
+                        snippet: results.snippets[article.id],
+                        onChanged: _refresh,
+                      ),
               ],
               if (results.sources.isNotEmpty) ...[
-                const _SectionHeader('Sources'),
+                () => const _SectionHeader('Sources'),
                 for (final source in results.sources)
-                  _SourceResult(
-                    source: source,
-                    onTap: () => setState(() => _sourceId = source.id),
-                  ),
+                  () => _SourceResult(
+                        source: source,
+                        onTap: () => setState(() => _sourceId = source.id),
+                      ),
               ],
-            ],
-          ),
+            ];
+            return ListView.builder(
+              itemCount: rows.length,
+              itemBuilder: (context, index) => rows[index](),
+            );
+          }),
         ),
       ],
     );
@@ -455,43 +458,30 @@ class _HighlightResult extends StatelessWidget {
   }
 }
 
-/// A matched article: bold title when unread, a "source · author" meta line
-/// and — when the match is in the body — a one-line context snippet. Unread
-/// rows swipe right to mark read, exactly like the feed.
+/// A matched article: bold title when unread, a "source · author · date"
+/// meta line and — when the match is in the body — a one-line context
+/// snippet. Unread rows swipe right to mark read, exactly like the feed.
 class _ArticleResult extends StatelessWidget {
   final Article article;
   final String? sourceTitle;
-  final List<String> terms;
+
+  /// Context around the body match (from the search query), if any.
+  final String? snippet;
   final VoidCallback onChanged;
 
   const _ArticleResult({
     required this.article,
     required this.sourceTitle,
-    required this.terms,
+    required this.snippet,
     required this.onChanged,
   });
 
-  /// ~80 characters of context around the first body match, or null when no
-  /// term appears in the summary/content (the title already shows those hits).
-  String? get _snippet {
-    for (final raw in [article.summary, article.contentMarkdown]) {
-      if (raw == null || raw.trim().isEmpty) continue;
-      final flat = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
-      final lower = flat.toLowerCase();
-      int? at;
-      for (final term in terms) {
-        final i = lower.indexOf(term);
-        if (i >= 0 && (at == null || i < at)) at = i;
-      }
-      if (at == null) continue;
-      const pad = 40;
-      final start = (at - pad).clamp(0, flat.length);
-      final end = (at + pad).clamp(0, flat.length);
-      final prefix = start > 0 ? '…' : '';
-      final suffix = end < flat.length ? '…' : '';
-      return '$prefix${flat.substring(start, end).trim()}$suffix';
-    }
-    return null;
+  /// "Oct 11" this year, "Oct 11, 2024" before.
+  String get _date {
+    final date = DateTime.fromMillisecondsSinceEpoch(article.listedAt);
+    return date.year == DateTime.now().year
+        ? DateFormat('MMM d').format(date)
+        : DateFormat('MMM d, y').format(date);
   }
 
   @override
@@ -500,8 +490,8 @@ class _ArticleResult extends StatelessWidget {
       if (sourceTitle != null) sourceTitle!,
       if (article.author != null && article.author!.isNotEmpty)
         article.author!,
+      _date,
     ].join(' · ');
-    final snippet = _snippet;
 
     final tile = ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -528,7 +518,7 @@ class _ArticleResult extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        snippet,
+                        snippet!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

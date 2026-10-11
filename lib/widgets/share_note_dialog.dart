@@ -42,26 +42,35 @@ class ShareNoteDialog extends StatefulWidget {
     required this.shareByDefault,
   }) : assert(highlights.length > 0);
 
-  static Future<void> open(BuildContext context,
-      {required Article article,
-      required Highlight highlight,
-      required bool shareByDefault}) =>
-      showDialog(
-        context: context,
-        builder: (_) => ShareNoteDialog(
-            article: article,
-            highlights: [highlight],
-            shareByDefault: shareByDefault),
-      );
+  static Future<void> open(
+    BuildContext context, {
+    required Article article,
+    required Highlight highlight,
+    required bool shareByDefault,
+  }) => showDialog(
+    context: context,
+    builder:
+        (_) => ShareNoteDialog(
+          article: article,
+          highlights: [highlight],
+          shareByDefault: shareByDefault,
+        ),
+  );
 
   /// Shares all of an article's [highlights] combined (always share mode).
-  static Future<void> openAll(BuildContext context,
-      {required Article article, required List<Highlight> highlights}) =>
-      showDialog(
-        context: context,
-        builder: (_) => ShareNoteDialog(
-            article: article, highlights: highlights, shareByDefault: true),
-      );
+  static Future<void> openAll(
+    BuildContext context, {
+    required Article article,
+    required List<Highlight> highlights,
+  }) => showDialog(
+    context: context,
+    builder:
+        (_) => ShareNoteDialog(
+          article: article,
+          highlights: highlights,
+          shareByDefault: true,
+        ),
+  );
 
   @override
   State<ShareNoteDialog> createState() => _ShareNoteDialogState();
@@ -69,8 +78,9 @@ class ShareNoteDialog extends StatefulWidget {
 
 class _ShareNoteDialogState extends State<ShareNoteDialog> {
   final _db = AppDatabase.instance;
-  late final TextEditingController _comment =
-      TextEditingController(text: _single?.comment ?? '');
+  late final TextEditingController _comment = TextEditingController(
+    text: _single?.comment ?? '',
+  );
 
   bool _loaded = false;
   bool _hasProfile = false;
@@ -119,7 +129,9 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     final comment = _comment.text.trim();
     if (comment != (single.comment ?? '')) {
       await _db.updateHighlightComment(
-          single.id!, comment.isEmpty ? null : comment);
+        single.id!,
+        comment.isEmpty ? null : comment,
+      );
     }
     return [
       Highlight(
@@ -129,19 +141,25 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
         comment: comment.isEmpty ? null : comment,
         shared: _anyChannel ? 1 : single.shared,
         createdAt: single.createdAt,
-      )
+      ),
     ];
   }
 
-  Future<void> _record(String medium, Highlight highlight,
-      {String? recipient, String? ref}) async {
-    await _db.insertShare(Share(
-      highlightId: highlight.id!,
-      medium: medium,
-      recipient: recipient,
-      ref: ref,
-      createdAt: DateTime.now().millisecondsSinceEpoch,
-    ));
+  Future<void> _record(
+    String medium,
+    Highlight highlight, {
+    String? recipient,
+    String? ref,
+  }) async {
+    await _db.insertShare(
+      Share(
+        highlightId: highlight.id!,
+        medium: medium,
+        recipient: recipient,
+        ref: ref,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
   }
 
   /// Ensures a highlight is published to the profile; returns the event id
@@ -149,8 +167,10 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   Future<String> _ensurePublished(Highlight highlight) async {
     final existing = await _db.profileShareRef(highlight.id!);
     if (existing != null) return existing;
-    final result = await ProfileService.instance
-        .publishHighlight(widget.article, highlight);
+    final result = await ProfileService.instance.publishHighlight(
+      widget.article,
+      highlight,
+    );
     return result.eventId;
   }
 
@@ -164,8 +184,9 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
       if (url == null) return;
       await Clipboard.setData(ClipboardData(text: url));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Article link copied')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Article link copied')));
       return;
     }
     final highlight = (await _withComment()).first;
@@ -175,8 +196,9 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     await _record('link', highlight, ref: eventId);
     await Clipboard.setData(ClipboardData(text: link));
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('Link copied: $link')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Link copied: $link')));
   }
 
   /// Opens the mail app pre-filled — an immediate hand-off, not a channel.
@@ -185,8 +207,10 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     if (!mounted) return;
     await ShareActions.byEmail(
       context,
-      subject:
-          ShareActions.highlightsSubject(widget.article, highlights.length),
+      subject: ShareActions.highlightsSubject(
+        widget.article,
+        highlights.length,
+      ),
       body: ShareActions.highlightsBody(widget.article, highlights),
     );
     for (final highlight in highlights) {
@@ -215,13 +239,15 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
       return;
     }
     messenger.showSnackBar(const SnackBar(content: Text('Sharing…')));
-    unawaited(_shareInBackground(
-      highlights: highlights,
-      toProfile: toProfile,
-      toTwitter: toTwitter,
-      messenger: messenger,
-      navigator: navigator,
-    ));
+    unawaited(
+      _shareInBackground(
+        highlights: highlights,
+        toProfile: toProfile,
+        toTwitter: toTwitter,
+        messenger: messenger,
+        navigator: navigator,
+      ),
+    );
   }
 
   /// The slow part of sharing, detached from the (already closed) dialog.
@@ -250,57 +276,79 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
               await _db.profileShareRef(highlight.id!) != null) {
             continue;
           }
-          final result = await ProfileService.instance
-              .publishHighlight(article, highlight);
+          final result = await ProfileService.instance.publishHighlight(
+            article,
+            highlight,
+          );
           await _record('profile', highlight, ref: result.eventId);
           published++;
           accepted += result.accepted;
         }
         done.add(
-            published > 0 && accepted == 0 ? 'profile (queued)' : 'profile');
+          published > 0 && accepted == 0 ? 'profile (queued)' : 'profile',
+        );
       } catch (e) {
         failed.add(friendlyError(e, doing: 'publishing to your profile'));
       }
     }
 
     if (toTwitter) {
-      final quoteId = TwitterService.tweetIdFromUrl(article.url);
-      final text = ShareActions.highlightsBody(article, highlights,
-          withAttribution: quoteId == null);
+      final quoted = ShareActions.quotedTweetOf(article);
+      final text = ShareActions.highlightsBody(
+        article,
+        highlights,
+        withAttribution: quoted == null,
+      );
       try {
-        await SyncService.instance.twitter
-            .postTweet(text, quoteTweetId: quoteId);
+        await SyncService.instance.twitter.postTweet(text, quoted: quoted);
         for (final highlight in highlights) {
           await _record('twitter', highlight);
         }
         done.add('twitter');
       } catch (e) {
-        reconnect = needsTwitterReconnect(e);
-        await OutboxService.instance
-            .enqueueTweet(text, quoteTweetId: quoteId, error: '$e');
-        for (final highlight in highlights) {
-          await _record('twitter', highlight);
+        if (e is TwitterPostRefused && e.permanent) {
+          // Resending would be refused the same way: report, queue nothing.
+          failed.add(e.message);
+        } else {
+          reconnect = needsTwitterReconnect(e);
+          await OutboxService.instance.enqueueTweet(
+            text,
+            quoted: quoted,
+            error: '$e',
+          );
+          for (final highlight in highlights) {
+            await _record('twitter', highlight);
+          }
+          done.add(
+            reconnect
+                ? 'twitter (queued — reconnect Twitter to send)'
+                : 'twitter (queued)',
+          );
         }
-        done.add(reconnect
-            ? 'twitter (queued — reconnect Twitter to send)'
-            : 'twitter (queued)');
       }
     }
 
     // Report the outcome via the app-level messenger — the dialog is long
     // gone. "queued" entries go out with the outbox on the next sync.
-    final message = failed.isEmpty
-        ? 'Shared: ${done.join(', ')}'
-        : done.isEmpty
+    final message =
+        failed.isEmpty
+            ? 'Shared: ${done.join(', ')}'
+            : done.isEmpty
             ? failed.join('; ')
             : 'Shared: ${done.join(', ')} — failed: ${failed.join('; ')}';
     messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(
-      content: Text(message),
-      action: reconnect
-          ? reconnectTwitterAction(messenger: messenger, navigator: navigator)
-          : null,
-    ));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action:
+            reconnect
+                ? reconnectTwitterAction(
+                  messenger: messenger,
+                  navigator: navigator,
+                )
+                : null,
+      ),
+    );
   }
 
   Widget _actionRow({
@@ -317,8 +365,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
           children: [
             Icon(icon, size: 22),
             const SizedBox(width: 10),
-            Expanded(
-                child: Text(label, style: const TextStyle(fontSize: 15))),
+            Expanded(child: Text(label, style: const TextStyle(fontSize: 15))),
             Icon(trailing, size: 16, color: Colors.grey),
           ],
         ),
@@ -348,14 +395,19 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 15,
-                      color: enabled ? Colors.black : Colors.grey)),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  color: enabled ? Colors.black : Colors.grey,
+                ),
+              ),
             ),
             if (trailing != null)
-              Text(trailing,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              Text(
+                trailing,
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
           ],
         ),
       ),
@@ -368,8 +420,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     final single = _single;
     return Dialog(
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-      insetPadding:
-          const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
         child: SingleChildScrollView(
@@ -388,22 +439,21 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                        widget.highlights
-                            .map((h) => h.text)
-                            .join('\n\n'),
-                        maxLines: single == null ? 8 : 5,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 15, height: 1.4)),
+                      widget.highlights.map((h) => h.text).join('\n\n'),
+                      maxLines: single == null ? 8 : 5,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15, height: 1.4),
+                    ),
                     const SizedBox(height: 4),
                     Text(
-                        single == null
-                            ? '${widget.highlights.length} highlights · '
-                                '${widget.article.displayTitle}'
-                            : widget.article.displayTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.grey)),
+                      single == null
+                          ? '${widget.highlights.length} highlights · '
+                              '${widget.article.displayTitle}'
+                          : widget.article.displayTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                   ],
                 ),
               ),
@@ -437,25 +487,29 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    border:
-                        Border.all(width: 1.5, style: BorderStyle.solid),
+                    border: Border.all(width: 1.5, style: BorderStyle.solid),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Create your public profile',
-                          style: TextStyle(fontWeight: FontWeight.w700)),
                       const Text(
-                          'A page people can follow — your highlights and '
-                          'comments at einkreader.app/you. Free.',
-                          style: TextStyle(fontSize: 12.5)),
+                        'Create your public profile',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const Text(
+                        'A page people can follow — your highlights and '
+                        'comments at einkreader.app/you. Free.',
+                        style: TextStyle(fontSize: 12.5),
+                      ),
                       const SizedBox(height: 8),
                       OutlinedButton(
                         onPressed: () async {
                           await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                  builder: (_) => const ProfileScreen()));
+                            MaterialPageRoute(
+                              builder: (_) => const ProfileScreen(),
+                            ),
+                          );
                           _load();
                         },
                         child: const Text('Create profile'),
@@ -468,12 +522,13 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                 onChanged: (v) => setState(() => _toTwitter = v),
                 label: 'Tweet it',
                 enabled: _twitterConnected,
-                trailing: _twitterConnected
-                    ? (TwitterService.tweetIdFromUrl(widget.article.url) !=
-                            null
-                        ? 'quote-tweet'
-                        : null)
-                    : 'connect Twitter in Settings',
+                trailing:
+                    _twitterConnected
+                        ? (TwitterService.tweetIdFromUrl(widget.article.url) !=
+                                null
+                            ? 'quote-tweet'
+                            : null)
+                        : 'connect Twitter in Settings',
               ),
               const SizedBox(height: 14),
               OutlinedButton(
@@ -483,19 +538,21 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                   side: const BorderSide(width: 2),
                 ),
                 child: Text(
-                    _sharing
-                        ? 'Sharing…'
-                        : (_anyChannel ? 'Share' : 'Save'),
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w700)),
+                  _sharing ? 'Sharing…' : (_anyChannel ? 'Share' : 'Save'),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
               // Not channels — immediate hand-offs, below the button.
               const Divider(height: 28),
               _actionRow(
                 icon: Icons.link,
-                label: _hasProfile && single != null
-                    ? 'Copy link to this quote'
-                    : 'Copy article link',
+                label:
+                    _hasProfile && single != null
+                        ? 'Copy link to this quote'
+                        : 'Copy article link',
                 trailing: Icons.copy,
                 onTap: _copyLink,
               ),

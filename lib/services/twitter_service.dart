@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
 
 import 'app_log.dart';
+import 'tweet_card.dart';
 import 'twitter_markdown.dart';
 
 /// A tweet reduced to what the reader needs.
@@ -87,10 +89,12 @@ class TwitterService {
   static const _authorizeUrl = 'https://x.com/i/oauth2/authorize';
   static const _tokenUrl = 'https://api.x.com/2/oauth2/token';
   static const _apiBase = 'https://api.x.com/2';
-  // tweet.write enables "Share on Twitter" from the reader; connections made
-  // before it was added must be reconnected in Settings to grant it.
+  // tweet.write enables "Share on Twitter" from the reader, media.write the
+  // screenshot of a post X won't let us quote; connections made before
+  // either was added must be reconnected to grant it.
   static const _scopes =
-      'tweet.read tweet.write users.read bookmark.read offline.access';
+      'tweet.read tweet.write users.read bookmark.read media.write '
+      'offline.access';
 
   static const _storage = FlutterSecureStorage();
   static const _kAccessToken = 'twitter_access_token';
@@ -106,9 +110,16 @@ class TwitterService {
   /// layer can be driven by a fake [http.Client] without a real connection.
   final Future<String> Function()? _accessTokenOverride;
 
-  TwitterService({http.Client? client, Future<String> Function()? accessToken})
+  /// Test seam for the connected account's handle.
+  final Future<String?> Function()? _usernameOverride;
+
+  TwitterService(
+      {http.Client? client,
+      Future<String> Function()? accessToken,
+      Future<String?> Function()? me})
       : _client = client ?? http.Client(),
-        _accessTokenOverride = accessToken;
+        _accessTokenOverride = accessToken,
+        _usernameOverride = me;
 
   Future<bool> get isConnected async =>
       (await _storage.read(key: _kRefreshToken)) != null;
@@ -522,11 +533,19 @@ class TwitterService {
     return RegExp(r'^\d+$').hasMatch(id) ? id : null;
   }
 
-  /// Posts a tweet, optionally as a native quote of [quoteTweetId]. Needs the
+  /// Posts a tweet, optionally as a native quote of [quoteTweetId] (or of
+  /// [quoted], which also carries what the post says). Needs the
   /// tweet.write scope: accounts connected before that scope was requested
   /// get a 403 until reconnected. Every step logs with a "Twitter:" prefix so
   /// the debug screen's search surfaces the whole story of a post.
-  Future<void> postTweet(String text, {String? quoteTweetId}) async {
+  ///
+  /// X's API only lets an app quote posts by the connected account or that
+  /// mention it. Any other post is attached as a screenshot instead: up
+  /// front when [quoted] shows it isn't quotable, or after X refuses the
+  /// quote (the post is then looked up to draw it).
+  Future<void> postTweet(String text,
+      {String? quoteTweetId, QuotedTweet? quoted}) async {
+    quoteTweetId ??= quoted?.id;
     await AppLogService.instance.info(
       'Twitter: posting tweet (${text.length} chars'
       '${quoteTweetId != null ? ', quoting $quoteTweetId' : ''})',
@@ -539,6 +558,69 @@ class TwitterService {
           .error('Twitter: no valid access token for posting: $e');
       rethrow;
     }
+    if (quoted != null && !quoted.quotableBy(await _me())) {
+      await AppLogService.instance.info(
+          'Twitter: X only allows quoting your own posts or posts that '
+          'mention you; attaching a screenshot of ${quoted.id} instead');
+      return _postWithScreenshot(token, text, quoted);
+    }
+    try {
+      await _createTweet(token, {
+        'text': text,
+        if (quoteTweetId != null) 'quote_tweet_id': quoteTweetId,
+      });
+    } on _QuoteNotAllowed {
+      await AppLogService.instance.info(
+          'Twitter: X refused to quote $quoteTweetId; attaching a '
+          'screenshot of it instead');
+      final card = quoted ?? await _quotedFromApi(quoteTweetId!);
+      await _postWithScreenshot(token, text, card);
+    }
+  }
+
+  /// The connected account's handle; null when unknown (tests, or storage
+  /// unavailable), in which case X decides whether a quote is allowed.
+  Future<String?> _me() async {
+    final override = _usernameOverride;
+    if (override != null) return override();
+    try {
+      return await username;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<QuotedTweet> _quotedFromApi(String id) async {
+    try {
+      final tweet = await _fetchTweet(id);
+      return QuotedTweet(
+        id: tweet.id,
+        authorName: tweet.authorName,
+        username: tweet.authorUsername,
+        text: tweet.text,
+        createdAt: tweet.createdAt,
+      );
+    } catch (e) {
+      throw Exception("Twitter doesn't allow quoting this post, and it "
+          "couldn't be loaded to attach a screenshot instead: $e");
+    }
+  }
+
+  Future<void> _postWithScreenshot(
+      String token, String text, QuotedTweet quoted) async {
+    final png = await renderTweetCard(quoted);
+    final mediaId = await _uploadImage(token, png);
+    await _createTweet(token, {
+      'text': text,
+      'media': {
+        'media_ids': [mediaId]
+      },
+    });
+  }
+
+  /// POST /2/tweets. Throws [_QuoteNotAllowed] when X refuses a quote, and
+  /// [TwitterPostRefused] for any other refusal.
+  Future<void> _createTweet(String token, Map<String, Object?> body) async {
     // Timeout so a dead connection fails fast into the outbox instead of
     // hanging the caller.
     final response = await _client
@@ -548,16 +630,18 @@ class TwitterService {
             'Authorization': 'Bearer $token',
             'Content-Type': 'application/json',
           },
-          body: jsonEncode({
-            'text': text,
-            if (quoteTweetId != null) 'quote_tweet_id': quoteTweetId,
-          }),
+          body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 20));
     if (response.statusCode == 403) {
+      if (body.containsKey('quote_tweet_id') &&
+          isQuoteRefusal(response.body)) {
+        throw const _QuoteNotAllowed();
+      }
       await AppLogService.instance
           .error('Twitter: post refused (403): ${response.body}');
-      throw Exception(refusalMessage(response.body));
+      throw TwitterPostRefused(refusalMessage(response.body),
+          permanent: isPermanentRefusal(response.body));
     }
     if (response.statusCode != 201) {
       await _throwApiError(response, 'posting a tweet');
@@ -566,6 +650,55 @@ class TwitterService {
         ((jsonDecode(response.body) as Map<String, dynamic>?)?['data']
             as Map<String, dynamic>?)?['id'];
     await AppLogService.instance.info('Twitter: tweet posted, id $id');
+  }
+
+  /// Uploads a PNG for a post (POST /2/media/upload); returns its media id.
+  /// Needs the media.write scope, which connections made before screenshots
+  /// existed lack: X's 403 then asks to reconnect.
+  Future<String> _uploadImage(String token, Uint8List png) async {
+    final request =
+        http.MultipartRequest('POST', Uri.parse('$_apiBase/media/upload'))
+          ..headers['Authorization'] = 'Bearer $token'
+          ..fields['media_category'] = 'tweet_image'
+          ..fields['media_type'] = 'image/png'
+          ..files.add(http.MultipartFile.fromBytes('media', png,
+              filename: 'post.png'));
+    final response = await http.Response.fromStream(
+        await _client.send(request).timeout(const Duration(seconds: 60)));
+    if (response.statusCode == 403) {
+      await AppLogService.instance
+          .error('Twitter: image upload refused (403): ${response.body}');
+      throw const TwitterPostRefused(
+          'Twitter refused the screenshot upload — reconnect Twitter to '
+          'grant the image permission');
+    }
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      await _throwApiError(response, 'uploading an image');
+    }
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final id = (json['data'] as Map<String, dynamic>?)?['id'] ??
+        json['media_id_string'];
+    if (id == null) {
+      throw Exception('Twitter accepted the image but returned no id');
+    }
+    await AppLogService.instance
+        .info('Twitter: screenshot uploaded (${png.length}B), media $id');
+    return '$id';
+  }
+
+  /// X's 403 for quoting (or replying to) a post the account may not:
+  /// "You can only reply to or quote posts where you are mentioned or are
+  /// the author."
+  static bool isQuoteRefusal(String body) {
+    final lower = body.toLowerCase();
+    return lower.contains('quote') &&
+        (lower.contains('mentioned') || lower.contains('author'));
+  }
+
+  /// Refusals that resending the same post can never fix.
+  static bool isPermanentRefusal(String body) {
+    final lower = body.toLowerCase();
+    return lower.contains('duplicate') || isQuoteRefusal(body);
   }
 
   /// What to tell the reader when X refuses a post (HTTP 403). X uses 403
@@ -705,4 +838,20 @@ class TwitterService {
     return List.generate(length, (_) => chars[random.nextInt(chars.length)])
         .join();
   }
+}
+
+/// X refused a post. [permanent] refusals (a duplicate, a quote X won't
+/// allow) would fail the same way on every retry.
+class TwitterPostRefused implements Exception {
+  final String message;
+  final bool permanent;
+
+  const TwitterPostRefused(this.message, {this.permanent = false});
+
+  @override
+  String toString() => message;
+}
+
+class _QuoteNotAllowed implements Exception {
+  const _QuoteNotAllowed();
 }

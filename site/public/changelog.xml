@@ -4,8 +4,15 @@
   <title>einkreader changelog</title>
   <link href="https://einkreader.app/changelog"/>
   <link rel="self" href="https://einkreader.app/changelog.xml"/>
-  <updated>2026-10-10T12:00:00Z</updated>
+  <updated>2026-10-11T12:00:00Z</updated>
   <author><name>einkreader</name></author>
+  <entry>
+    <id>https://einkreader.app/changelog#v0.6.14</id>
+    <title>einkreader 0.6.14: Fresh bookmarks always show, faster search</title>
+    <link href="https://einkreader.app/changelog#v0.6.14"/>
+    <updated>2026-10-11T12:00:00Z</updated>
+    <content type="html">&lt;ul&gt;&lt;li&gt;Every article now appears in its source's list. The home screen used to load only the 500 most recent, so a feed with items dated in the future could push new bookmarks out of sight. An item dated in the future is now listed on the day it arrived.&lt;/li&gt;&lt;li&gt;Search is faster: it no longer loads every matching article's full text, and it lays out only the results on screen. Results now show their date.&lt;/li&gt;&lt;li&gt;Sharing to X a post that X won't let apps quote (only your own posts or posts that mention you can be) now attaches a screenshot of the post instead of failing.&lt;/li&gt;&lt;li&gt;Posts X refuses for good, such as duplicates, are no longer retried at every sync. They wait in the outbox with the reason until you discard them.&lt;/li&gt;&lt;/ul&gt;</content>
+  </entry>
   <entry>
     <id>https://einkreader.app/changelog#v0.6.13</id>
     <title>einkreader 0.6.13: Forwarded newsletters stay readable</title>
@@ -208,12 +215,5 @@
     <link href="https://einkreader.app/changelog#v0.4.10"/>
     <updated>2026-08-13T12:00:00Z</updated>
     <content type="html">&lt;ul&gt;&lt;li&gt;Clear messages when you're offline, everywhere; an Advanced section in Settings.&lt;/li&gt;&lt;/ul&gt;</content>
-  </entry>
-  <entry>
-    <id>https://einkreader.app/changelog#v0.4.9</id>
-    <title>einkreader 0.4.9: Cleaner articles</title>
-    <link href="https://einkreader.app/changelog#v0.4.9"/>
-    <updated>2026-08-13T12:00:00Z</updated>
-    <content type="html">&lt;ul&gt;&lt;li&gt;Stray style code no longer shows up as text in articles.&lt;/li&gt;&lt;/ul&gt;</content>
   </entry>
 </feed>

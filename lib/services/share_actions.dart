@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
 import 'outbox_service.dart';
 import 'sync_service.dart';
+import 'tweet_card.dart';
 import 'twitter_service.dart';
 import '../widgets/reconnect_twitter.dart';
 
@@ -76,32 +77,50 @@ class ShareActions {
     return 'My highlights from ${attribution(article)}:\n\n$quotes';
   }
 
-  /// Preview card content for a quoted tweet, from the article's own stored
-  /// text (works offline; the tweet IS the article).
-  static ({String? author, String text}) _quotePreviewOf(Article article) {
-    final raw =
-        article.contentMarkdown ?? article.summary ?? article.displayTitle;
-    final plain = Article.plainTitle(raw);
-    return (
-      author: article.author,
-      text: plain.length > 280 ? '${plain.substring(0, 280)}…' : plain,
+  /// The post an article quotes when shared to Twitter — the article itself
+  /// when it is a tweet — from the article's own stored text (works
+  /// offline; the tweet IS the article). Null for any other article.
+  static QuotedTweet? quotedTweetOf(Article article) {
+    final id = TwitterService.tweetIdFromUrl(article.url);
+    if (id == null) return null;
+    final handle = Uri.parse(article.url!).pathSegments.first;
+    final username = handle == 'i' || handle == 'status' ? null : handle;
+    final raw = article.summary ?? article.contentMarkdown ?? '';
+    return QuotedTweet(
+      id: id,
+      authorName: article.author,
+      username: username,
+      text: plainTweetText(raw),
+      createdAt: article.publishedAt == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(article.publishedAt!),
     );
   }
+
+  /// A stored tweet's Markdown as the plain text a screenshot shows: images
+  /// and rules dropped, links reduced to their text, line breaks kept.
+  static String plainTweetText(String markdown) => markdown
+      .replaceAll(RegExp(r'!\[[^\]]*\]\([^)]*\)'), '')
+      .replaceAllMapped(
+          RegExp(r'\[([^\]]*)\]\([^)]*\)'), (m) => m.group(1)!)
+      .replaceAll(RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$', multiLine: true), '')
+      .replaceAll(RegExp(r'(\*\*|__)'), '')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
 
   /// Tweets the article: a native quote tweet when the article itself is a
   /// tweet (the comment starts empty), otherwise title + link.
   static Future<void> tweetArticle(BuildContext context, Article article) {
-    final quoteTweetId = TwitterService.tweetIdFromUrl(article.url);
+    final quoted = quotedTweetOf(article);
     return onTwitter(
       context,
-      draft: quoteTweetId != null
+      draft: quoted != null
           ? ''
           : [
               article.displayTitle,
               if (article.url != null) article.url!,
             ].join('\n'),
-      quoteTweetId: quoteTweetId,
-      quotePreview: quoteTweetId == null ? null : _quotePreviewOf(article),
+      quoted: quoted,
     );
   }
 
@@ -109,13 +128,12 @@ class ShareActions {
   /// is one (no textual attribution needed — the quote embeds it).
   static Future<void> tweetHighlights(
       BuildContext context, Article article, List<Highlight> highlights) {
-    final quoteTweetId = TwitterService.tweetIdFromUrl(article.url);
+    final quoted = quotedTweetOf(article);
     return onTwitter(
       context,
       draft: highlightsBody(article, highlights,
-          withAttribution: quoteTweetId == null),
-      quoteTweetId: quoteTweetId,
-      quotePreview: quoteTweetId == null ? null : _quotePreviewOf(article),
+          withAttribution: quoted == null),
+      quoted: quoted,
     );
   }
 
@@ -154,12 +172,12 @@ class ShareActions {
   /// Edit-then-post tweet dialog. Shows which account will post (so there's
   /// no doubt which connection is active), adapts the character budget to
   /// the account's plan (see TwitterService.tweetMaxLength), and posts as a
-  /// native quote tweet when [quoteTweetId] is given — with a preview card
-  /// of the quoted post, like on twitter.com.
+  /// native quote tweet of [quoted] when given — with a preview card of the
+  /// quoted post, like on twitter.com. X only lets apps quote the account's
+  /// own posts or posts mentioning it; any other post is attached as a
+  /// screenshot, and the dialog says so.
   static Future<void> onTwitter(BuildContext context,
-      {required String draft,
-      String? quoteTweetId,
-      ({String? author, String text})? quotePreview}) async {
+      {required String draft, QuotedTweet? quoted}) async {
     final twitter = SyncService.instance.twitter;
     final accountInfo = _accountInfo(twitter);
     final controller = TextEditingController(text: draft);
@@ -172,6 +190,12 @@ class ShareActions {
           future: accountInfo,
           builder: (context, snapshot) {
             final username = snapshot.data?.username;
+            final quoteMode = quoted == null
+                ? ''
+                : quoted.quotableBy(username)
+                    ? ' · quoting the original post'
+                    : ' · the post goes as a screenshot (X only lets apps '
+                        'quote your own posts or posts that mention you)';
             return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -180,8 +204,7 @@ class ShareActions {
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Text(
-                  'Posting as @$username'
-                  '${quoteTweetId != null ? ' · quoting the original post' : ''}',
+                  'Posting as @$username$quoteMode',
                   style: const TextStyle(
                       fontSize: 13, fontStyle: FontStyle.italic),
                 ),
@@ -195,12 +218,12 @@ class ShareActions {
               decoration: InputDecoration(
                 border: const OutlineInputBorder(),
                 hintText:
-                    quoteTweetId != null ? 'Add your comment…' : null,
+                    quoted != null ? 'Add your comment…' : null,
               ),
             ),
             // Rendered like a quote card on twitter.com: rounded bordered
             // box, author on top, tweet text below the comment field.
-            if (quotePreview != null)
+            if (quoted != null)
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.only(top: 12),
@@ -212,18 +235,18 @@ class ShareActions {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (quotePreview.author != null &&
-                        quotePreview.author!.isNotEmpty)
+                    if (quoted.authorName != null &&
+                        quoted.authorName!.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Text(
-                          quotePreview.author!,
+                          quoted.authorName!,
                           style: const TextStyle(
                               fontSize: 13, fontWeight: FontWeight.w700),
                         ),
                       ),
                     Text(
-                      quotePreview.text,
+                      quoted.text,
                       maxLines: 6,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 13, height: 1.35),
@@ -256,8 +279,16 @@ class ShareActions {
     String message = 'Posted to Twitter';
     SnackBarAction? action;
     try {
-      await twitter.postTweet(text, quoteTweetId: quoteTweetId);
+      await twitter.postTweet(text, quoted: quoted);
     } catch (e) {
+      if (e is TwitterPostRefused && e.permanent) {
+        // Resending would be refused the same way: say why, queue nothing.
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.message)));
+        }
+        return;
+      }
       if (needsTwitterReconnect(e) && context.mounted) {
         action = reconnectTwitterAction(
             messenger: ScaffoldMessenger.of(context),
@@ -266,7 +297,7 @@ class ShareActions {
       // Keep the tweet: it lands in the outbox (icon on the home screen)
       // and is retried on the next sync or manually.
       await OutboxService.instance
-          .enqueueTweet(text, quoteTweetId: quoteTweetId, error: '$e');
+          .enqueueTweet(text, quoted: quoted, error: '$e');
       message = action != null
           ? 'Twitter needs reconnecting — the post waits in the outbox'
           : 'Couldn\'t post now — kept in the outbox for retry';
