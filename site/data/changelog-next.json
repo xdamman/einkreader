@@ -1,5 +1,13 @@
 [
   {
+    "date": "2026-10-11",
+    "title": "Saturday morning digests",
+    "changes": [
+      "Email digests arrive on Saturday at 7am in your own time zone, only in weeks with new highlights.",
+      "Subscriber email addresses are stored encrypted."
+    ]
+  },
+  {
     "version": "0.6.16",
     "date": "2026-10-11",
     "title": "Instant search, a cleaner profile editor",
