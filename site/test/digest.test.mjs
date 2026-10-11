@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { schnorr } from '@noble/curves/secp256k1';
 import { bytesToHex } from '@noble/hashes/utils';
 import { buildDigest, highlightsSince } from '../lib/digest.js';
-import { mergeEvents, validEvent } from '../lib/profile_cache.js';
+import { mergeEvents, profileMeta, validEvent } from '../lib/profile_cache.js';
 import { eventId } from '../lib/registry.js';
 import { actionUrl, checkToken, decryptEmail, digestDue, encryptEmail,
   linkToken, storageKey, subscriberId, validTimeZone }
@@ -91,5 +91,13 @@ const p2 = sign({ kind: 0, created_at: 200, content: '{"name":"New"}' });
 const merged = mergeEvents([h1, p1], [h1, h2, p2]);
 assert.equal(merged.added, 2);
 assert.deepEqual(merged.events.map((e) => e.id), [h2.id, h1.id, p2.id]);
+
+// Profile links: the website, then the other links published as "r" tags.
+const meta = profileMeta([{ kind: 0, created_at: 1, tags: [
+  ['r', 'https://x.com/xdamman'], ['r', 'javascript:alert(1)'],
+  ['r', 'https://xavierdamman.com']],
+content: JSON.stringify({ name: 'Xavier', website: 'https://xavierdamman.com' }) }]);
+assert.deepEqual(meta.links, ['https://xavierdamman.com', 'https://x.com/xdamman']);
+assert.deepEqual(profileMeta([]).links, []);
 
 console.log('digest tests passed');

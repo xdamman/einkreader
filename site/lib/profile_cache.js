@@ -125,15 +125,20 @@ export async function eventsFor(pubkey, { background, onRefreshed } = {}) {
   return cached.events;
 }
 
-/// The newest kind-0 profile metadata in [events] (parsed), or {}.
+/// The newest kind-0 profile metadata in [events] (parsed), or {}, with
+/// `links`: the website first, then the other links the app publishes as
+/// "r" tags (e.g. an x.com profile).
 export function profileMeta(events) {
-  const meta = events.filter((e) => e.kind === 0)
+  const event = events.filter((e) => e.kind === 0)
       .sort((a, b) => b.created_at - a.created_at)[0];
+  let meta = {};
   try {
-    return JSON.parse(meta?.content ?? '{}') ?? {};
-  } catch {
-    return {};
-  }
+    meta = JSON.parse(event?.content ?? '{}') ?? {};
+  } catch {}
+  const links = [meta.website,
+    ...(event?.tags ?? []).filter((t) => t[0] === 'r').map((t) => t[1])]
+      .filter((l) => typeof l === 'string' && /^https?:\/\/\S+$/i.test(l));
+  return { ...meta, links: [...new Set(links)] };
 }
 
 /// Edge caching for a profile's pages: served from Vercel's CDN for an hour

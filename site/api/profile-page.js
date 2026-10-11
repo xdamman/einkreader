@@ -266,12 +266,12 @@ export default async function handler(req, res) {
   }
 
   const sid = String(req.query.sid ?? '').toLowerCase();
-  const links = (meta.website ? [meta.website] : []);
+  const links = meta.links;
   const masthead = `<div class="masthead">
     <div class="who"><a href="/${esc(name)}">${esc(displayName)}</a></div>
     ${meta.about ? `<div class="bio">${esc(meta.about)}</div>` : ''}
     ${links.length ? `<div class="links">${links.map((l) =>
-        `<a href="${esc(l)}" rel="nofollow noopener">${esc(l).replace(/^https?:\/\//, '')}</a>`)
+        `<a href="${esc(l)}" rel="nofollow noopener me">${esc(l.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))}</a>`)
         .join('')}</div>` : ''}
   </div>`;
   const opts = {
