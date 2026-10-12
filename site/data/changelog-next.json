@@ -10,6 +10,14 @@
     ]
   },
   {
+    "version": "0.6.19",
+    "date": "2026-10-12",
+    "title": "Lighter avatar picking",
+    "changes": [
+      "Choosing a profile photo no longer loads the full-resolution image twice, which could run low-memory e-ink devices out of memory."
+    ]
+  },
+  {
     "version": "0.6.18",
     "date": "2026-10-12",
     "title": "Suggested reads from around the world",
