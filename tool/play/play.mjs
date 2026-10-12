@@ -68,7 +68,21 @@ async function call(method, url, body, contentType = 'application/json') {
 }
 
 const openEdit = async () => (await call('POST', `${API}/edits`, {})).id;
-const commit = (edit) => call('POST', `${API}/edits/${edit}:commit`);
+// After a rejection (or with managed publishing), Play won't take a commit
+// that sends itself for review: it's committed as pending, and someone
+// clicks "Send for review" in Publishing overview.
+async function commit(edit) {
+  try {
+    return await call('POST', `${API}/edits/${edit}:commit`);
+  } catch (e) {
+    if (!/changesNotSentForReview/.test(e.message)) throw e;
+    const result = await call('POST',
+        `${API}/edits/${edit}:commit?changesNotSentForReview=true`);
+    console.log('Committed, not yet sent for review: Play Console → ' +
+        'Publishing overview → Send changes for review.');
+    return result;
+  }
+}
 const discard = (edit) => call('DELETE', `${API}/edits/${edit}`).catch(() => {});
 
 function notes(file) {
