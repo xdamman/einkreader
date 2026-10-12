@@ -8,6 +8,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../db/app_database.dart';
@@ -41,7 +42,9 @@ enum SettingsSection {
   storage('Storage', 'Where your library lives', Icons.folder_open),
   backup('Backup', 'Save and restore everything', Icons.backup_outlined),
   developer('Developer', 'Debug tools and updates', Icons.code),
-  advanced('Advanced', 'Relays, storage, developer', Icons.tune);
+  advanced('Advanced', 'Relays, storage, developer', Icons.tune),
+  about('About & contact', 'Email us, website, privacy, changelog',
+      Icons.info_outline);
 
   final String title;
   final String subtitle;
@@ -428,6 +431,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SettingsSection.storage => _storageSection(),
             SettingsSection.backup => _backupSection(),
             SettingsSection.developer => _developerSection(),
+            SettingsSection.about => _aboutSection(),
             SettingsSection.advanced => [
                 for (final sub in _advancedSections)
                   ListTile(
@@ -462,6 +466,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     SettingsSection.profiles,
     SettingsSection.backup,
     SettingsSection.advanced,
+    SettingsSection.about,
   ];
 
   List<SettingsSection> get _advancedSections => [
@@ -506,6 +511,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  /// Who makes the app and how to reach them (Play requires an in-app
+  /// contact with an email address).
+  static const contactEmail = 'einkreader@collective.email';
+
+  List<Widget> _aboutSection() {
+    Widget link(IconData icon, String label, String url) => ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(icon),
+          title: Text(label, style: const TextStyle(fontSize: 16)),
+          onTap: () => launchUrl(Uri.parse(url),
+              mode: LaunchMode.externalApplication),
+        );
+    return [
+      const Text(
+        'einkreader is a calm reader for e-ink devices: the articles, '
+        'newsletters and bookmarks you choose, downloaded for offline '
+        'reading. Made by Xavier Damman.',
+        style: TextStyle(fontSize: 14),
+      ),
+      const SizedBox(height: 12),
+      link(Icons.mail_outline, 'Contact: $contactEmail',
+          'mailto:$contactEmail?subject=einkreader'),
+      link(Icons.public, 'einkreader.app', 'https://einkreader.app'),
+      link(Icons.history, 'Changelog', 'https://einkreader.app/changelog'),
+      link(Icons.lock_outline, 'Privacy policy',
+          'https://einkreader.app/privacy'),
+      const SizedBox(height: 12),
+      FutureBuilder<PackageInfo>(
+        future: PackageInfo.fromPlatform(),
+        builder: (context, snapshot) => Text(
+          snapshot.hasData ? 'Version ${snapshot.data!.version}' : '',
+          style: const TextStyle(fontSize: 13),
+        ),
+      ),
+    ];
   }
 
   List<Widget> _sourcesSection() => [

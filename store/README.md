@@ -31,7 +31,8 @@ installed side by side (each with its own library).
 
 ## 2. One-time Play Console setup
 
-1. App: einkreader · App · Free · category News & Magazines.
+1. App: einkreader · App · Free · category Productivity (not News &
+   Magazines: see listing.md).
 2. **Store listing**: paste from `listing.md`; upload `icon_512.png`,
    `feature_graphic.png`, `screenshots/phone/*` and `screenshots/tablet/*`.
 3. **App content**: privacy policy URL; data safety (table in

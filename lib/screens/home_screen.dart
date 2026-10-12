@@ -666,6 +666,25 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
   }
 
+  /// A first library in one tap, for readers who'd like to see the app
+  /// with something in it before adding their own sources.
+  static const suggestedFeeds = [
+    ('Aeon', 'https://aeon.co/feed.rss'),
+    ('Hacker News', 'https://hnrss.org/frontpage'),
+    ('The Marginalian', 'https://www.themarginalian.org/feed/'),
+  ];
+
+  Future<void> _addSuggestedSources() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final sources = [
+      for (final (title, url) in suggestedFeeds)
+        await _db.insertSource(Source(
+            type: SourceType.rss, title: title, url: url, createdAt: now)),
+    ];
+    await _load();
+    unawaited(SyncService.instance.syncSources(sources).then((_) => _load()));
+  }
+
   bool _reconnectingTwitter = false;
 
   /// Re-runs the Twitter OAuth flow right from the feed's error banner (the
@@ -709,7 +728,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final inboxId = _inboxSourceId;
     if (_sourceTitles.keys.every((id) => id == inboxId) &&
         !total.containsKey(inboxId)) {
-      return _EmptySourcesView(onAdd: _openAddSource);
+      return _EmptySourcesView(
+          onAdd: _openAddSource, onSuggested: _addSuggestedSources);
     }
     int compareFilters(_SourceFilter a, _SourceFilter b) =>
         a.title.toLowerCase().compareTo(b.title.toLowerCase());
@@ -929,8 +949,9 @@ class _HomeScreenState extends State<HomeScreen> {
 /// Centered call-to-action shown on the Feed tab when no sources exist yet.
 class _EmptySourcesView extends StatelessWidget {
   final VoidCallback onAdd;
+  final VoidCallback onSuggested;
 
-  const _EmptySourcesView({required this.onAdd});
+  const _EmptySourcesView({required this.onAdd, required this.onSuggested});
 
   @override
   Widget build(BuildContext context) {
@@ -963,6 +984,20 @@ class _EmptySourcesView extends StatelessWidget {
                 side: const BorderSide(width: 1.5),
               ),
               onPressed: onAdd,
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: onSuggested,
+              child: const Text(
+                'Or start with a few suggested reads',
+                style: TextStyle(
+                    fontSize: 15, decoration: TextDecoration.underline),
+              ),
+            ),
+            Text(
+              _HomeScreenState.suggestedFeeds.map((f) => f.$1).join(' · '),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13),
             ),
           ],
         ),

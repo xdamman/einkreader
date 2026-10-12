@@ -10,6 +10,15 @@
     ]
   },
   {
+    "version": "0.6.17",
+    "date": "2026-10-12",
+    "title": "About & contact, suggested reads",
+    "changes": [
+      "Settings → About & contact: our email address, the website, the privacy policy and the changelog.",
+      "A fresh install can start with a few suggested reads (Aeon, Hacker News, The Marginalian) in one tap, instead of an empty screen."
+    ]
+  },
+  {
     "version": "0.6.16",
     "date": "2026-10-11",
     "title": "Instant search, a cleaner profile editor",

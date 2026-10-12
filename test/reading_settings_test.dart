@@ -87,6 +87,20 @@ void main() {
         reason: 'at least 240px of text remain');
   });
 
+  testWidgets('About & contact gives an email address (Play requires it)',
+      (tester) async {
+    tester.view.physicalSize = const Size(1000, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: const SettingsScreen()));
+    await settle(tester);
+    await tester.tap(find.text('About & contact'));
+    await settle(tester);
+    expect(find.text('Contact: einkreader@collective.email'), findsOneWidget);
+    expect(find.text('Privacy policy'), findsOneWidget);
+  });
+
   testWidgets('the Reading section changes font, margins and paging',
       (tester) async {
     tester.view.physicalSize = const Size(1000, 1600);

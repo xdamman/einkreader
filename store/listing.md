@@ -75,7 +75,10 @@ einkreader.app — the RSS reader made for your e-ink device.
 ## Category & tags
 
 - Application type: App
-- Category: **News & Magazines** (alternative: Productivity)
+- Category: **Productivity**. Not News & Magazines: Play holds that
+  category to its News policy (publisher contact, fresh original
+  content), and rejected 0.6.10 under it because a fresh install opens
+  empty. einkreader reads the user's own sources; it publishes no news.
 - Tags: RSS, reader, e-ink, offline, highlights
 
 ## Contact details
