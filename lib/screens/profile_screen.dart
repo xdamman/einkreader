@@ -413,8 +413,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _pickAvatar() async {
     if (_uploading) return;
-    final picked = await FilePicker.platform
-        .pickFiles(type: FileType.image, withData: true);
+    // No compression in the picker: it would decode the full-resolution
+    // photo into a bitmap (costly on e-ink devices' small RAM) only to
+    // re-encode it; _shrink below makes the small avatar from the bytes.
+    final picked = await FilePicker.platform.pickFiles(
+        type: FileType.image, withData: true, allowCompression: false);
     final bytes = picked?.files.single.bytes;
     if (bytes == null || !mounted) return;
     setState(() => _uploading = true);
