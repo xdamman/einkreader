@@ -363,6 +363,10 @@ export default async function handler(req, res) {
   // One month, with links to the months around it that have stories.
   if (year && month) {
     const i = months.findIndex((m) => m.year === year && m.month === month);
+    if (month > 12) {
+      return shell(`${displayName} — einkreader`,
+          `<p class="empty">There's no month ${month}.</p>`, 404);
+    }
     if (i < 0) {
       return shell(`${displayName} — einkreader`,
           `<p class="empty">Nothing shared in ${monthName({ year, month })}.</p>
