@@ -2,8 +2,8 @@
 // from a registered author: added to the server's event cache, and the
 // author's cached pages regenerated. Fed by infra/profile-listener, which
 // follows every registered author on the relays. No secret needed: events
-// are signed, only registered authors' profile (kind 0) and highlight
-// (kind 9802) events are accepted, and they are public anyway.
+// are signed, only registered authors' profile (kind 0), highlight
+// (kind 9802) and page-note (kind 1111) events are accepted, and they are public anyway.
 import { addEvents, invalidateProfile, validEvent }
   from '../lib/profile_cache.js';
 import { entryForPubkey, loadRegistry } from '../lib/registry.js';

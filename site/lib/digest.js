@@ -2,7 +2,7 @@
 // (HTML and plain text), grouped by story exactly like the public page.
 import { groupStories } from './profile_render.js';
 
-const sharedOn = (seconds) => 'Shared ' +
+const sharedOn = (seconds) =>
     new Date(seconds * 1000).toLocaleDateString('en-US',
         { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
 
@@ -10,9 +10,9 @@ const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
-/// Highlight events shared after [sinceSeconds].
+/// Highlights and notes about an article shared after [sinceSeconds].
 export function highlightsSince(events, sinceSeconds) {
-  return events.filter((e) => e.kind === 9802 &&
+  return events.filter((e) => (e.kind === 9802 || e.kind === 1111) &&
       (e.created_at ?? 0) > sinceSeconds);
 }
 
@@ -34,6 +34,7 @@ export function buildDigest({ name, displayName, about, events,
         <a href="${base}/s/${g.id}" style="color:#111;text-decoration:none">${esc(g.title)}</a></h2>
       ${g.url ? `<div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#888;margin-bottom:8px">
         <a href="${esc(g.url)}" style="color:#888">${esc(g.domain ?? 'original')}</a></div>` : ''}
+      ${g.note ? `<p style="font-size:16px;margin:6px 0 0">${esc(g.note)}</p>` : ''}
       ${g.quotes.map((q) => `
       <blockquote style="border-left:3px solid #111;margin:12px 0 6px;padding:2px 0 2px 14px;font-style:italic;font-size:17px;color:#333">${esc(q.text)}</blockquote>
       ${q.comment ? `<p style="font-size:16px;margin:6px 0 0">${esc(q.comment)}</p>` : ''}`).join('')}
@@ -63,6 +64,7 @@ export function buildDigest({ name, displayName, about, events,
       g.title.toUpperCase(),
       `${base}/s/${g.id}`,
       '',
+      ...(g.note ? [g.note, ''] : []),
       ...g.quotes.flatMap((q) => [
         `> ${q.text.replace(/\n/g, '\n> ')}`,
         ...(q.comment ? [q.comment] : []),

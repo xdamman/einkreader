@@ -177,4 +177,27 @@ assert.equal(groups[0].domain, 'x.com');
 assert.equal(groups[0].id, storyId('https://x.com/a', 'Story A'));
 assert.equal(storyForQuote(groups, 'cccccccc').title, 'Story B');
 assert.equal(storyForQuote(groups, 'ffffffff'), null);
+// A note about the article (NIP-22 kind 1111) joins its story; the
+// newest note wins. Months group stories by their latest share.
+{
+  const { byMonth, monthName } = await import('../lib/profile_render.js');
+  const url = 'https://example.com/a';
+  const hl = (id, at) => ({ id, kind: 9802, content: 'q' + id, created_at: at,
+    tags: [['r', url], ['title', 'A']] });
+  const note = (id, at, text) => ({ id, kind: 1111, content: text,
+    created_at: at, tags: [['I', url], ['K', 'web'], ['r', url],
+      ['title', 'A'], ['client', 'einkreader']] });
+  const sep1 = Date.UTC(2026, 8, 1) / 1000;
+  const oct5 = Date.UTC(2026, 9, 5) / 1000;
+  const [story] = groupStories([hl('h1', sep1), note('n1', sep1, 'old'),
+    note('n2', sep1 + 5, 'newer')]);
+  assert.equal(story.note, 'newer');
+  assert.equal(story.quotes.length, 1);
+  const other = { id: 'h2', kind: 9802, content: 'x', created_at: oct5,
+    tags: [['r', 'https://example.com/b'], ['title', 'B']] };
+  const months = byMonth(groupStories([hl('h1', sep1), other]));
+  assert.deepEqual(months.map((m) => [m.year, m.month, m.groups.length]),
+      [[2026, 10, 1], [2026, 9, 1]]);
+  assert.equal(monthName(months[1]), 'September 2026');
+}
 console.log('profile grouping tests passed');

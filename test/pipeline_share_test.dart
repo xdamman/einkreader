@@ -119,7 +119,8 @@ void main() {
     await settle(tester);
     await settle(tester);
 
-    expect(find.text('Your profile'), findsOneWidget);
+    expect(find.text('Your profile: https://einkreader.app/xavier'),
+        findsOneWidget);
     expect(find.text('Compose an email…'), findsOneWidget);
     expect(find.text('Copy link to this quote'), findsOneWidget);
     expect(find.text('Tweet it'), findsOneWidget);
@@ -299,9 +300,10 @@ void main() {
     await settle(tester);
     await settle(tester);
 
-    // Both quotes in the preview, no per-quote note field.
+    // Both quotes in the preview.
     expect(find.textContaining('2 highlights ·'), findsOneWidget);
-    expect(find.text('Your note (optional)'), findsNothing);
+    // The note field is there: a note about the highlights together.
+    expect(find.text('Your note (optional)'), findsOneWidget);
 
     await tester.ensureVisible(find.text('Share'));
     await tester.tap(find.text('Share'), warnIfMissed: false);
@@ -372,6 +374,73 @@ void main() {
     await settle(tester);
     expect(find.text('Unread Story'), findsOneWidget,
         reason: 'the feed appears directly');
+  });
+
+  testWidgets('sharing several highlights takes a note about them together',
+      (tester) async {
+    final second = (await tester.runAsync(() async {
+      await db.insertHighlight(Highlight(
+          articleId: article.id!, text: 'another passage', createdAt: 2));
+      return (await db.getHighlights())
+          .firstWhere((h) => h.text == 'another passage');
+    }))!;
+    final published = <Map<String, dynamic>>[];
+    ProfileService.instance.debugPublish = (event) async {
+      published.add(event);
+      return 1;
+    };
+    addTearDown(
+        () => ProfileService.instance.debugPublish = (event) async => 1);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+          body: ShareNoteDialog(
+              article: article,
+              highlights: [highlight, second],
+              shareByDefault: true)),
+    ));
+    await settle(tester);
+    await settle(tester);
+    expect(find.text('Shared with these highlights'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Your note (optional)'),
+        'both say the same thing');
+    await tester.ensureVisible(find.text('Share'));
+    await tester.tap(find.text('Share'), warnIfMissed: false);
+    for (var i = 0; i < 4; i++) {
+      await settle(tester);
+    }
+    final note = published.where((e) => e['kind'] == 1111).single;
+    expect(note['content'], 'both say the same thing');
+    expect(note['tags'], anyElement(equals(['K', 'web'])));
+    expect(published.where((e) => e['kind'] == 9802), isNotEmpty);
+    await tester.runAsync(() => db.deleteHighlight(second.id!));
+  });
+
+  testWidgets('the share channels start as they were last time',
+      (tester) async {
+    await tester.runAsync(() async => (await SharedPreferences.getInstance())
+        .setBool('share_last_profile', false));
+    addTearDown(() async => (await SharedPreferences.getInstance())
+        .remove('share_last_profile'));
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+          body: ShareNoteDialog(
+              article: article,
+              highlights: [highlight],
+              shareByDefault: true)),
+    ));
+    await settle(tester);
+    await settle(tester);
+    expect(
+        find.descendant(
+            of: find.ancestor(
+                of: find.textContaining('Your profile'),
+                matching: find.byType(Row)),
+            matching: find.byIcon(Icons.check_box_outline_blank)),
+        findsOneWidget,
+        reason: 'unchecked last time, unchecked now');
   });
 
   test('offline profile update waits in the outbox', () async {

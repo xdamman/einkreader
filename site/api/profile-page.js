@@ -1,11 +1,14 @@
 // Public profile pages, blog-simple (one column of type, no chrome):
-//   /:name           — the stream, grouped by story
+//   /:name           — the latest stories, under a header per month
+//   /:name/2026/9    — one month
+//   /:name/2025      — a year: its months, linked
 //   /:name/s/:sid    — one story: every shared quote from it
 //   /:name/q/:qid    — quote permalink → 302 to its story page, anchored
 // Story titles link to the LOCAL story permalink; the source domain under
 // them links to the original. Quotes render as blockquotes with the
 // reader's commentary after each; a quote without a comment stands alone.
-import { groupStories, storyForQuote } from '../lib/profile_render.js';
+import { byMonth, groupStories, monthName, storyForQuote }
+  from '../lib/profile_render.js';
 import { background, cacheProfileResponse, eventsFor, invalidateProfile,
   profileMeta } from '../lib/profile_cache.js';
 import { loadRegistry, pubkeyOf } from '../lib/registry.js';
@@ -33,7 +36,25 @@ const page = (title, body, { name, displayName, feedTitle }) => `<!doctype html>
   .masthead .bio { font-size:14px; color:#444; margin-top:2px; }
   .masthead .links { font-size:13px; margin-top:6px; }
   .masthead .links a { margin:0 7px; }
-  .shared { font-size:12px; letter-spacing:.09em; text-transform:uppercase;
+  html { scroll-behavior:smooth; }
+  .masthead .sub { display:inline-block; margin-top:12px; font-size:14px;
+                   padding:5px 16px; border:1.5px solid #111;
+                   border-radius:16px; text-decoration:none; }
+  .month { font-size:13px; letter-spacing:.12em; text-transform:uppercase;
+           font-weight:700; margin:38px 0 -12px; padding-bottom:6px;
+           border-bottom:1px solid #111; }
+  .month a { text-decoration:none; }
+  .pager { display:flex; justify-content:space-between; gap:12px;
+           margin-top:34px; font-size:15px; }
+  .pager a { text-decoration:none; }
+  .months { list-style:none; margin-top:24px; font-size:18px; }
+  .months a { text-decoration:none; }
+  .months li { display:flex; justify-content:space-between;
+               align-items:baseline;
+               border-bottom:1px solid #ddd; padding:10px 2px; }
+  .months .n { color:#888; font-size:14px; }
+  .story .note { font-size:16px; margin:8px 0 4px; }
+  .date { font-size:12px; letter-spacing:.09em; text-transform:uppercase;
             color:#888; margin-bottom:2px; }
   .more { margin:26px 0 0; font-size:16px; }
   .crumb { font-size:12px; letter-spacing:.09em; text-transform:uppercase;
@@ -150,13 +171,15 @@ the RSS reader made for your e-ink device.</footer>
 </script>
 </body></html>`;
 
-/// "Shared October 11, 2026".
-export function sharedOn(seconds) {
-  return 'Shared ' + new Date(seconds * 1000).toLocaleDateString('en-US',
-      { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+/// "October 11, 2026", or "October 11" under a month header.
+export function sharedOn(seconds, { year = true } = {}) {
+  return new Date(seconds * 1000).toLocaleDateString('en-US', {
+    ...(year ? { year: 'numeric' } : {}),
+    month: 'long', day: 'numeric', timeZone: 'UTC',
+  });
 }
 
-function storyHtml(name, group, { headingLink = true } = {}) {
+function storyHtml(name, group, { headingLink = true, year = true } = {}) {
   const quotes = group.quotes.map((quote) => {
     const anchor = `q-${String(quote.id ?? '').slice(0, 12)}`;
     return `
@@ -167,7 +190,7 @@ function storyHtml(name, group, { headingLink = true } = {}) {
   }).join('\n');
   // When the reader shared it (newest quote in the story), shown above the
   // title so it can't be mistaken for the source's publication date.
-  const date = group.latest ? sharedOn(group.latest) : '';
+  const date = group.latest ? sharedOn(group.latest, { year }) : '';
   const title = headingLink
       ? `<a href="/${esc(name)}/s/${group.id}">${esc(group.title)}</a>`
       : esc(group.title);
@@ -175,16 +198,17 @@ function storyHtml(name, group, { headingLink = true } = {}) {
       ? `<a href="${esc(group.url)}" rel="nofollow noopener">${esc(group.domain ?? 'original')}</a>`
       : (group.domain ? esc(group.domain) : '');
   return `<article class="story">
-    ${date ? `<div class="shared">${date}</div>` : ''}
+    ${date ? `<div class="date">${date}</div>` : ''}
     <h2>${title}</h2>
     ${source ? `<div class="meta">${source}</div>` : ''}
+    ${group.note ? `<p class="note">${esc(group.note)}</p>` : ''}
     ${quotes}
   </article>`;
 }
 
 function subscribeHtml(name, displayName) {
   const first = esc(displayName.split(' ')[0] || displayName);
-  return `<div class="subscribe">
+  return `<div class="subscribe" id="subscribe">
     <p class="lead">Subscribe to ${first}'s feed</p>
     <button class="chan" data-modal="m-email">By email</button>
     <button class="chan" data-modal="m-rss">RSS</button>
@@ -273,6 +297,7 @@ export default async function handler(req, res) {
     ${links.length ? `<div class="links">${links.map((l) =>
         `<a href="${esc(l)}" rel="nofollow noopener me">${esc(l.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))}</a>`)
         .join('')}</div>` : ''}
+    <div><a class="sub" href="#subscribe">Subscribe</a></div>
   </div>`;
   const opts = {
     name,
@@ -302,10 +327,74 @@ export default async function handler(req, res) {
         opts));
   }
 
-  const stream = groups.length
-      ? groups.map((g) => storyHtml(name, g))
-          .join('\n<div class="dots">· · ·</div>\n')
-      : '<p class="empty">No shared highlights yet.</p>';
-  return res.status(200).send(page(`${displayName} — einkreader`,
-      `${masthead}${stream}${subscribeHtml(name, displayName)}`, opts));
+  const months = byMonth(groups);
+  const path = (m) => `/${name}/${m.year}/${m.month}`;
+  const section = (m, { link = true } = {}) => `<h2 class="month">${link
+      ? `<a href="${path(m)}">${monthName(m)}</a>` : monthName(m)}</h2>
+    ${m.groups.map((g) => storyHtml(name, g, { year: false }))
+        .join('\n<div class="dots">· · ·</div>\n')}`;
+  const shell = (title, body, status = 200) => res.status(status).send(page(
+      title, `${masthead}${body}${subscribeHtml(name, displayName)}`, opts));
+  const pager = (older, middle, newer) => `<div class="pager">
+      ${older ?? '<span></span>'}${middle ?? ''}${newer ?? '<span></span>'}
+    </div>`;
+
+  // A year: its months, each linked, with the story count.
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (year && !month) {
+    const inYear = months.filter((m) => m.year === year);
+    const years = [...new Set(months.map((m) => m.year))];
+    const older = years.find((y) => y < year);
+    const newer = years.filter((y) => y > year).pop();
+    const list = inYear.length
+        ? `<ul class="months">${inYear.map((m) => `<li>
+            <a href="${path(m)}">${monthName(m).replace(` ${year}`, '')}</a>
+            <span class="n">${m.groups.length} ${m.groups.length === 1
+                ? 'story' : 'stories'}</span></li>`).join('')}</ul>`
+        : '<p class="empty">Nothing shared that year.</p>';
+    return shell(`${year} — ${displayName}`,
+        `<h2 class="month">${year}</h2>${list}
+         ${pager(older && `<a href="/${name}/${older}">← ${older}</a>`, null,
+             newer && `<a href="/${name}/${newer}">${newer} →</a>`)}`,
+        inYear.length ? 200 : 404);
+  }
+
+  // One month, with links to the months around it that have stories.
+  if (year && month) {
+    const i = months.findIndex((m) => m.year === year && m.month === month);
+    if (i < 0) {
+      return shell(`${displayName} — einkreader`,
+          `<p class="empty">Nothing shared in ${monthName({ year, month })}.</p>
+           <p style="text-align:center;margin-top:14px">
+           <a href="/${name}">← all highlights</a></p>`, 404);
+    }
+    const m = months[i];
+    const older = months[i + 1];
+    const newer = months[i - 1];
+    return shell(`${monthName(m)} — ${displayName}`,
+        `${section(m, { link: false })}
+         ${pager(older && `<a href="${path(older)}">← ${monthName(older)}</a>`,
+             `<a href="/${name}/${m.year}">${m.year}</a>`,
+             newer && `<a href="${path(newer)}">${monthName(newer)} →</a>`)}`);
+  }
+
+  // The stream: the latest month, plus the ones before it until there's a
+  // page's worth to read; then a link to the month before those.
+  if (!months.length) {
+    return shell(`${displayName} — einkreader`,
+        '<p class="empty">No shared highlights yet.</p>');
+  }
+  const shown = [];
+  let stories = 0;
+  for (const m of months) {
+    if (shown.length && stories >= 8) break;
+    shown.push(m);
+    stories += m.groups.length;
+  }
+  const before = months[shown.length];
+  return shell(`${displayName} — einkreader`,
+      `${shown.map((m) => section(m)).join('\n')}
+       ${before ? pager(
+           `<a href="${path(before)}">← ${monthName(before)}</a>`) : ''}`);
 }

@@ -14,6 +14,14 @@
       "destination": "/api/profile-feed?name=:name"
     },
     {
+      "source": "/:name([a-z0-9_]{5,20})/:year(\\d{4})",
+      "destination": "/api/profile-page?name=:name&year=:year"
+    },
+    {
+      "source": "/:name([a-z0-9_]{5,20})/:year(\\d{4})/:month(\\d{1,2})",
+      "destination": "/api/profile-page?name=:name&year=:year&month=:month"
+    },
+    {
       "source": "/:name([a-z0-9_]{5,20})/s/:sid([0-9a-f]{6,64})",
       "destination": "/api/profile-page?name=:name&sid=:sid"
     },

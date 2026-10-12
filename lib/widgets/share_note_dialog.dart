@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
 import '../models.dart';
@@ -22,8 +23,10 @@ import 'reconnect_twitter.dart';
 ///
 /// With several highlights ([ShareNoteDialog.openAll]) the same overlay
 /// shares them combined: one tweet / email with every quote, each published
-/// to the profile. The note field is hidden — notes belong to a single
-/// highlight.
+/// to the profile. The optional note is then about the highlights together:
+/// it leads the tweet / email and is published as a note on the article.
+///
+/// When sharing, the channels start as they were last time (remembered).
 class ShareNoteDialog extends StatefulWidget {
   final Article article;
 
@@ -84,6 +87,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
 
   bool _loaded = false;
   bool _hasProfile = false;
+  String? _profileUrl;
   bool _twitterConnected = false;
 
   bool _toProfile = false;
@@ -106,16 +110,44 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     super.dispose();
   }
 
+  static const _kLastProfile = 'share_last_profile';
+  static const _kLastTwitter = 'share_last_twitter';
+
   Future<void> _load() async {
     final hasProfile = await ProfileService.instance.enabled;
     final twitterConnected = await ShareActions.twitterConnected();
+    final profileUrl =
+        hasProfile ? await ProfileService.instance.profileUrl : null;
+    final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
       _hasProfile = hasProfile;
+      _profileUrl = profileUrl;
       _twitterConnected = twitterConnected;
-      _toProfile = widget.shareByDefault && hasProfile;
+      // Sharing starts from last time's channels (the profile by default);
+      // a private note starts with none.
+      _toProfile = widget.shareByDefault &&
+          hasProfile &&
+          (prefs.getBool(_kLastProfile) ?? true);
+      _toTwitter = widget.shareByDefault &&
+          twitterConnected &&
+          (prefs.getBool(_kLastTwitter) ?? false);
       _loaded = true;
     });
+  }
+
+  Future<void> _remember({required bool profile, required bool twitter}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLastProfile, profile);
+    await prefs.setBool(_kLastTwitter, twitter);
+  }
+
+  /// The note about several highlights together (null when empty, or when
+  /// sharing a single highlight: that note is the highlight's comment).
+  String? get _groupNote {
+    if (_single != null) return null;
+    final note = _comment.text.trim();
+    return note.isEmpty ? null : note;
   }
 
   bool get _anyChannel =>
@@ -211,7 +243,8 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
         widget.article,
         highlights.length,
       ),
-      body: ShareActions.highlightsBody(widget.article, highlights),
+      body: ShareActions.highlightsBody(widget.article, highlights,
+          note: _groupNote),
     );
     for (final highlight in highlights) {
       await _record('email', highlight);
@@ -228,6 +261,10 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     final highlights = await _withComment();
     final toProfile = _toProfile && _hasProfile;
     final toTwitter = _toTwitter && _twitterConnected;
+    final note = _groupNote;
+    if (toProfile || toTwitter) {
+      await _remember(profile: toProfile, twitter: toTwitter);
+    }
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     // The root navigator outlives this dialog: needed if the share ends
@@ -242,6 +279,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     unawaited(
       _shareInBackground(
         highlights: highlights,
+        note: note,
         toProfile: toProfile,
         toTwitter: toTwitter,
         messenger: messenger,
@@ -255,6 +293,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   /// messenger it was handed.
   Future<void> _shareInBackground({
     required List<Highlight> highlights,
+    required String? note,
     required bool toProfile,
     required bool toTwitter,
     required ScaffoldMessengerState messenger,
@@ -284,6 +323,12 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
           published++;
           accepted += result.accepted;
         }
+        if (note != null) {
+          final result =
+              await ProfileService.instance.publishArticleNote(article, note);
+          published++;
+          accepted += result.accepted;
+        }
         done.add(
           published > 0 && accepted == 0 ? 'profile (queued)' : 'profile',
         );
@@ -298,6 +343,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
         article,
         highlights,
         withAttribution: quoted == null,
+        note: note,
       );
       try {
         await SyncService.instance.twitter.postTweet(text, quoted: quoted);
@@ -459,29 +505,30 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
               ),
               const SizedBox(height: 16),
               // Roomy on purpose: notes are written here, not in a slit.
-              // Only for a single highlight — a note belongs to one quote.
-              if (single != null) ...[
-                TextField(
-                  controller: _comment,
-                  autofocus: !widget.shareByDefault,
-                  minLines: 6,
-                  maxLines: 14,
-                  style: const TextStyle(fontSize: 15, height: 1.4),
-                  decoration: const InputDecoration(
-                    labelText: 'Your note (optional)',
-                    helperText: 'Stays private unless you share it',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
+              // For several highlights, the note is about them together.
+              TextField(
+                controller: _comment,
+                autofocus: !widget.shareByDefault,
+                minLines: single == null ? 3 : 6,
+                maxLines: 14,
+                style: const TextStyle(fontSize: 15, height: 1.4),
+                decoration: InputDecoration(
+                  labelText: 'Your note (optional)',
+                  helperText: single == null
+                      ? 'Shared with these highlights'
+                      : 'Stays private unless you share it',
+                  border: const OutlineInputBorder(),
+                  alignLabelWithHint: true,
                 ),
-                const SizedBox(height: 14),
-              ],
+              ),
+              const SizedBox(height: 14),
               if (_hasProfile)
                 _checkRow(
                   value: _toProfile,
                   onChanged: (v) => setState(() => _toProfile = v),
-                  label: 'Your profile',
-                  trailing: 'einkreader.app',
+                  label: _profileUrl == null
+                      ? 'Your profile'
+                      : 'Your profile: $_profileUrl',
                 )
               else
                 Container(
@@ -532,13 +579,18 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
               ),
               const SizedBox(height: 14),
               OutlinedButton(
-                onPressed: _sharing ? null : _save,
+                // Several highlights: nothing to save privately, so the
+                // button needs a channel.
+                onPressed:
+                    _sharing || (single == null && !_anyChannel) ? null : _save,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   side: const BorderSide(width: 2),
                 ),
                 child: Text(
-                  _sharing ? 'Sharing…' : (_anyChannel ? 'Share' : 'Save'),
+                  _sharing
+                      ? 'Sharing…'
+                      : (_anyChannel || single == null ? 'Share' : 'Save'),
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,

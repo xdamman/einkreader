@@ -1,5 +1,5 @@
 // Follows every einkreader.app author on the relays and forwards their new
-// profile (kind 0) and highlight (kind 9802) events to
+// profile (kind 0), highlight (kind 9802) and page-note (kind 1111) events to
 // https://einkreader.app/api/profile-event, which updates the server-side
 // event cache and regenerates only that author's pages. Without it the
 // pages still refresh from the relays, just up to an hour late.
@@ -9,6 +9,8 @@
 const SITE = process.env.SITE ?? 'https://einkreader.app';
 const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 const KINDS = [0, 9802];
+// Notes about a web page (NIP-22, root kind "web"), shared with highlights.
+const NOTES = { kinds: [1111], '#K': ['web'] };
 
 const log = (...args) => console.log(new Date().toISOString(), ...args);
 let authors = [];
@@ -68,7 +70,8 @@ function connect(url) {
   ws.onopen = () => {
     // A little overlap with the last connection: duplicates are dropped.
     const since = Math.floor(Date.now() / 1000) - 600;
-    ws.send(JSON.stringify(['REQ', 'einkreader', { kinds: KINDS, authors, since }]));
+    ws.send(JSON.stringify(['REQ', 'einkreader', { kinds: KINDS, authors, since },
+        { ...NOTES, authors, since }]));
   };
   ws.onmessage = (message) => {
     try {

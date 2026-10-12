@@ -642,6 +642,40 @@ class ProfileService {
     return (accepted: accepted, eventId: event['id'] as String);
   }
 
+  /// Publishes a note about an article as a whole, written when sharing
+  /// several of its highlights together: a NIP-22 comment (kind 1111) on
+  /// the article's web page, which the profile page shows with the story.
+  Future<({int accepted, String eventId})> publishArticleNote(
+      Article article, String note) async {
+    final url = article.url;
+    final event = await signEvent(
+      kind: 1111,
+      content: note,
+      tags: [
+        if (url != null) ...[
+          ['I', url],
+          ['i', url],
+          ['r', url],
+        ],
+        ['K', 'web'],
+        ['k', 'web'],
+        ['title', article.displayTitle],
+        ['client', 'einkreader'],
+      ],
+    );
+    final accepted = await _publishOrQueue(
+        event, 'Note on "${article.displayTitle}"');
+    await AppLogService.instance
+        .info('Profile: article note published to $accepted relay(s)');
+    return (accepted: accepted, eventId: event['id'] as String);
+  }
+
+  /// The public profile page, e.g. https://einkreader.app/xavier.
+  Future<String?> get profileUrl async {
+    final name = await username ?? await pendingUsername;
+    return name == null ? null : 'https://$nip05Domain/$name';
+  }
+
   /// The public permalink for a highlight shared to the profile.
   Future<String?> quoteLink(String eventId) async {
     final name = await username ?? await pendingUsername;

@@ -18,7 +18,13 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { queryRelays } from './relay.js';
 import { eventId } from './registry.js';
 
-export const KINDS = [0, 9802];
+export const KINDS = [0, 9802, 1111];
+
+/// Kind 1111 (NIP-22 comments) only when it's einkreader's note about a
+/// web page: the author's comments elsewhere aren't page content.
+const isPageNote = (event) =>
+  (event.tags ?? []).some((t) => t[0] === 'K' && t[1] === 'web') &&
+  (event.tags ?? []).some((t) => t[0] === 'client' && t[1] === 'einkreader');
 export const STALE_MS = 15 * 60 * 1000;
 const MAX_EVENTS = 1000;
 
@@ -55,6 +61,7 @@ async function writeCache(pubkey, cache) {
 export function validEvent(event, pubkey) {
   if (!event || typeof event !== 'object') return false;
   if (event.pubkey !== pubkey || !KINDS.includes(event.kind)) return false;
+  if (event.kind === 1111 && !isPageNote(event)) return false;
   if (typeof event.content !== 'string' || !Array.isArray(event.tags)) {
     return false;
   }
@@ -99,8 +106,14 @@ export async function addEvents(pubkey, incoming) {
 /// Asks the relays for the author's events and merges them in. Returns the
 /// updated cache and how many events were new.
 export async function refreshFromRelays(pubkey, cached) {
-  const fetched = await queryRelays(
-      { kinds: KINDS, authors: [pubkey], limit: 500 });
+  // Notes in a query of their own: an author's many comments elsewhere
+  // must not crowd highlights out of the 500.
+  const [fetched, notes] = await Promise.all([
+    queryRelays({ kinds: [0, 9802], authors: [pubkey], limit: 500 }),
+    queryRelays({ kinds: [1111], authors: [pubkey], '#K': ['web'],
+      limit: 200 }),
+  ]);
+  fetched.push(...notes);
   const valid = fetched.filter((e) => validEvent(e, pubkey));
   const base = cached ?? (await readCache(pubkey)) ?? { events: [] };
   const { events, added } = mergeEvents(base.events, valid);

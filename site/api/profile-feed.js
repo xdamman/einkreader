@@ -25,7 +25,8 @@ export default async function handler(req, res) {
   const base = `https://einkreader.app/${name}`;
 
   const items = groupStories(events).slice(0, 30).map((group) => {
-    const description = group.quotes.map((quote) =>
+    const description = (group.note ? `<p>${esc(group.note)}</p>` : '') +
+        group.quotes.map((quote) =>
         `<blockquote>${esc(quote.text)}</blockquote>` +
         (quote.comment ? `<p>${esc(quote.comment)}</p>` : '')).join('');
     const source = group.url

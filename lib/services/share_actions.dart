@@ -64,17 +64,19 @@ class ShareActions {
   /// the destination already shows the source (a native quote tweet embeds
   /// the original).
   static String highlightsBody(Article article, List<Highlight> highlights,
-      {bool withAttribution = true}) {
+      {bool withAttribution = true, String? note}) {
     // A highlight's own comment travels with its quote.
     final quotes = inReadingOrder(article, highlights)
         .map((h) => '"${h.text}"'
             '${(h.comment ?? '').isEmpty ? '' : '\n\n${h.comment}'}')
         .join('\n\n');
-    if (!withAttribution) return quotes;
+    // A note about the highlights together leads.
+    final lead = (note ?? '').trim().isEmpty ? '' : '${note!.trim()}\n\n';
+    if (!withAttribution) return '$lead$quotes';
     if (highlights.length == 1) {
-      return '$quotes\n\n— ${attribution(article)}';
+      return '$lead$quotes\n\n— ${attribution(article)}';
     }
-    return 'My highlights from ${attribution(article)}:\n\n$quotes';
+    return '${lead}My highlights from ${attribution(article)}:\n\n$quotes';
   }
 
   /// The post an article quotes when shared to Twitter — the article itself

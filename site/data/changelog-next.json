@@ -10,6 +10,25 @@
     ]
   },
   {
+    "version": "0.6.20",
+    "date": "2026-10-12",
+    "title": "A note with your highlights",
+    "changes": [
+      "Sharing all of an article's highlights at once takes an optional note about them together: it leads the tweet and email, and appears with the story on your public page.",
+      "The share window shows your public page's address next to \"Your profile\".",
+      "The share window remembers which channels you used last time (your profile, Twitter)."
+    ]
+  },
+  {
+    "date": "2026-10-12",
+    "title": "Public pages by month",
+    "changes": [
+      "Public pages group stories under a header per month, with a link to the month before. Each month has its own address (einkreader.app/name/2026/9), and each year a page listing its months (einkreader.app/name/2025).",
+      "Dates above each story are just the date, without \"Shared\".",
+      "A Subscribe button in the page header jumps to the subscription options."
+    ]
+  },
+  {
     "version": "0.6.19",
     "date": "2026-10-12",
     "title": "Lighter avatar picking",
