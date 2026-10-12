@@ -10,6 +10,14 @@
     ]
   },
   {
+    "version": "0.6.18",
+    "date": "2026-10-12",
+    "title": "Suggested reads from around the world",
+    "changes": [
+      "\"Start with suggested reads\" opens a picker of 40 or so feeds: essays and long reads for everyone, plus picks for your language or country (French, German, Spanish, Italian, Portuguese, the UK, North America, South Asia, East Asia, Africa, Australia). Your own region comes first and is pre-selected."
+    ]
+  },
+  {
     "version": "0.6.17",
     "date": "2026-10-12",
     "title": "About & contact, suggested reads",

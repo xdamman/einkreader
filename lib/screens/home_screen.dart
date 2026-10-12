@@ -25,6 +25,7 @@ import 'feedback_screen.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
+import 'suggested_sources_screen.dart';
 
 enum _HomeTab {
   feed('Feed'),
@@ -666,23 +667,16 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
   }
 
-  /// A first library in one tap, for readers who'd like to see the app
+  /// The suggested-reads picker, for readers who'd like to see the app
   /// with something in it before adding their own sources.
-  static const suggestedFeeds = [
-    ('Aeon', 'https://aeon.co/feed.rss'),
-    ('Hacker News', 'https://hnrss.org/frontpage'),
-    ('The Marginalian', 'https://www.themarginalian.org/feed/'),
-  ];
-
   Future<void> _addSuggestedSources() async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final sources = [
-      for (final (title, url) in suggestedFeeds)
-        await _db.insertSource(Source(
-            type: SourceType.rss, title: title, url: url, createdAt: now)),
-    ];
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => const SuggestedSourcesScreen()));
     await _load();
-    unawaited(SyncService.instance.syncSources(sources).then((_) => _load()));
+    // The feeds land over the next seconds; refresh as they do.
+    Future.delayed(const Duration(seconds: 8), () {
+      if (mounted) _load();
+    });
   }
 
   bool _reconnectingTwitter = false;
@@ -989,15 +983,10 @@ class _EmptySourcesView extends StatelessWidget {
             TextButton(
               onPressed: onSuggested,
               child: const Text(
-                'Or start with a few suggested reads',
+                'Or start with suggested reads',
                 style: TextStyle(
-                    fontSize: 15, decoration: TextDecoration.underline),
+                    fontSize: 16, decoration: TextDecoration.underline),
               ),
-            ),
-            Text(
-              _HomeScreenState.suggestedFeeds.map((f) => f.$1).join(' · '),
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13),
             ),
           ],
         ),
