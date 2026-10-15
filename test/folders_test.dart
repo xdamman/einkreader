@@ -3,7 +3,8 @@
 //     move-to-top-level (default) vs delete-sources-too
 //   - feed strip: All, then folders, then top-level sources; a folder chip
 //     opens a menu with the whole folder and its member sources
-//   - sources screen: add/rename/remove folders, move a source into one
+//   - sources screen: add/rename/remove folders, move a source into one,
+//     rename a source
 import 'dart:io';
 
 import 'package:einkreader/db/app_database.dart';
@@ -150,6 +151,33 @@ void main() {
     expect(find.text('Beta'), findsOneWidget);
   });
 
+  testWidgets('sources screen: rename a source from its options menu',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: const SourcesScreen(),
+    ));
+    await settle(tester);
+
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Gamma'),
+        matching: find.byTooltip('Source options')));
+    await settle(tester);
+    await tester.tap(find.text('Rename'));
+    await settle(tester);
+    expect(find.text('Rename source'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '  Gamma Weekly ');
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+    expect(find.text('Gamma Weekly'), findsOneWidget);
+    final renamed = (await tester.runAsync(() => db.getSources()))!
+        .firstWhere((s) => s.id == gamma.id);
+    expect(renamed.title, 'Gamma Weekly');
+
+    // Restore for later tests.
+    await tester.runAsync(() => db.updateSourceTitle(gamma.id!, 'Gamma'));
+  });
+
   testWidgets('sources screen: rename folder, move source, delete folder',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
@@ -173,7 +201,7 @@ void main() {
     // lists the destinations directly.
     await tester.tap(find.descendant(
         of: find.widgetWithText(ListTile, 'Gamma'),
-        matching: find.byTooltip('Move to folder')));
+        matching: find.byTooltip('Source options')));
     await settle(tester);
     await tester.tap(find.text('Move to "Press"'));
     await settle(tester);

@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.6.21",
+    "date": "2026-10-15",
+    "title": "Rename your sources",
+    "changes": [
+      "Any source can be renamed from its ⋮ menu in Sources. The new name stays, even when the feed refreshes."
+    ],
+    "feedback": [
+      {
+        "id": "9c5f766a237f152ffb2e50f01fe8e449e35305170085a22b4e18b90b4fdb23ba",
+        "title": "Add ability to edit feed name"
+      }
+    ]
+  },
+  {
     "date": "2026-10-11",
     "title": "Saturday morning digests",
     "changes": [

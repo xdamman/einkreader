@@ -206,7 +206,11 @@ void main() {
     expect(find.byTooltip('Remove Alpha'), findsOneWidget);
     expect(find.byTooltip('Remove Inbox'), findsNothing,
         reason: 'the built-in Inbox cannot be removed');
-    expect(find.byIcon(Icons.more_vert), findsNothing,
-        reason: 'no folders: nothing to move to, so no menu');
+    expect(
+        find.descendant(
+            of: find.widgetWithText(ListTile, 'Alpha'),
+            matching: find.byIcon(Icons.more_vert)),
+        findsOneWidget,
+        reason: 'even without folders, the menu offers Rename');
   });
 }

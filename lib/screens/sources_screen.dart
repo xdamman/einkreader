@@ -9,8 +9,8 @@ import 'article_list_screen.dart';
 /// their sources indented, then top-level sources. Add RSS feeds and folders
 /// below. Each source row shows the feed's description (when its XML
 /// provides one) and stats, and has an anchored ⋮ menu — kept next to its
-/// trigger so it also works on tablets, unlike a bottom sheet — that lists
-/// the folders to move to directly. Sources can also be dragged onto a
+/// trigger so it also works on tablets, unlike a bottom sheet — to rename
+/// the source and to move it to a folder directly. Sources can also be dragged onto a
 /// folder (long-press, then drag). Twitter/Nostr sources are added from
 /// Settings.
 class SourcesScreen extends StatefulWidget {
@@ -234,11 +234,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Moving between folders (also possible by long-press drag) only
-          // when there is somewhere to move to.
-          if (_folders.any((f) => f.id != source.folderId) ||
-              source.folderId != null)
-            _sourceMenu(source),
+          _sourceMenu(source),
           // The built-in Inbox can't be removed (it would come right back).
           if (source.type != SourceType.email)
             IconButton(
@@ -277,19 +273,25 @@ class _SourcesScreenState extends State<SourcesScreen> {
   }
 
   /// Anchored options menu (⋮): opens next to its trigger — a bottom sheet
-  /// would put the choices a tablet's height away — and lists the move
-  /// destinations directly, saving the "Move to folder…" hop.
+  /// would put the choices a tablet's height away. Rename comes first, then
+  /// the move destinations directly (also possible by long-press drag),
+  /// saving the "Move to folder…" hop.
   Widget _sourceMenu(Source source) {
     return PopupMenuButton<String>(
-      tooltip: 'Move to folder',
+      tooltip: 'Source options',
       icon: const Icon(Icons.more_vert),
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
       onSelected: (choice) async {
+        if (choice == 'rename') return _renameSource(source);
         await _db.setSourceFolder(
             source.id!, choice == 'top' ? null : int.parse(choice));
         _load();
       },
       itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'rename',
+          child: Text('Rename'),
+        ),
         // Plain text items: fixed-width Rows overflow while the menu's
         // open/close animation is mid-width.
         for (final folder in _folders)
@@ -304,7 +306,6 @@ class _SourcesScreenState extends State<SourcesScreen> {
             value: 'top',
             child: Text('Move to top level'),
           ),
-
       ],
     );
   }
@@ -323,7 +324,17 @@ class _SourcesScreenState extends State<SourcesScreen> {
     _load();
   }
 
-  Future<String?> _promptForTitle(String prompt, {String? initial}) {
+  /// Feeds keep a custom name: refreshing only fills in a missing title.
+  Future<void> _renameSource(Source source) async {
+    final title = await _promptForTitle('Rename source',
+        initial: source.title, hint: 'Source name');
+    if (title == null || title.isEmpty || title == source.title) return;
+    await _db.updateSourceTitle(source.id!, title);
+    _load();
+  }
+
+  Future<String?> _promptForTitle(String prompt,
+      {String? initial, String hint = 'Folder name'}) {
     final controller = TextEditingController(text: initial);
     return showDialog<String>(
       context: context,
@@ -333,7 +344,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Folder name'),
+          decoration: InputDecoration(hintText: hint),
           onSubmitted: (value) => Navigator.pop(context, value.trim()),
         ),
         actions: [

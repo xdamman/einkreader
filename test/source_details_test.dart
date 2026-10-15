@@ -120,7 +120,9 @@ void main() {
         findsOneWidget);
 
     // The options menu lists the folder directly.
-    await tester.tap(find.byTooltip('Move to folder'));
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Local Paper'),
+        matching: find.byTooltip('Source options')));
     await settle(tester);
     expect(find.text('Move to "News"'), findsOneWidget);
     await tester.tap(find.text('Move to "News"'));
@@ -129,7 +131,9 @@ void main() {
         .firstWhere((s) => s.id == local.id);
     expect(moved.folderId, news.id);
     // Now inside the folder, the menu offers the way back out.
-    await tester.tap(find.byTooltip('Move to folder'));
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Local Paper'),
+        matching: find.byTooltip('Source options')));
     await settle(tester);
     await tester.tap(find.text('Move to top level'));
     await settle(tester);
