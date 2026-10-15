@@ -250,6 +250,99 @@ void main() {
     expect(reaction['tags'], anyElement(equals(['e', note.id])));
   });
 
+  testWidgets('a long press on a reaction shows who reacted, and when',
+      (tester) async {
+    const ada =
+        '1111111111111111111111111111111111111111111111111111111111111111';
+    NostrProfileCache.debugPut(
+        const NostrProfile(pubkey: ada, name: 'Ada', about: ''));
+    await tester.runAsync(() => ProfileService.instance.createIdentity());
+    final note = (await tester.runAsync(() => service.post('Night mode')))!;
+    relay.events.add({
+      'id': 'r1',
+      'pubkey': ada,
+      'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000 - 7200,
+      'kind': 7,
+      'tags': [
+        ['e', note.id]
+      ],
+      'content': '👍',
+    });
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
+    await settle(tester);
+
+    await tester.longPress(find.text('👍 1'));
+    await settle(tester);
+    expect(find.text('👍  1 reaction'), findsOneWidget);
+    expect(find.text('Ada'), findsWidgets);
+    expect(find.text(relativeTime(DateTime.now()
+            .subtract(const Duration(hours: 2))
+            .copyWith(millisecond: 0, microsecond: 0))),
+        findsOneWidget);
+    expect(relay.events.where((e) => e['kind'] == 7), hasLength(1),
+        reason: 'a long press does not react');
+  });
+
+  test('mentions: typed @names become NIP-27 links, p-tagged in replies',
+      () async {
+    const ada =
+        '1111111111111111111111111111111111111111111111111111111111111111';
+    final npub = NostrService.npubEncode(ada);
+    final text = FeedbackNote.encodeMentions(
+        'Thanks @Ada Lovelace, and @Ada again', {'Ada Lovelace': ada});
+    expect(text, 'Thanks nostr:$npub, and @Ada again');
+    expect(FeedbackNote.mentionedIn(text), {ada});
+    expect(FeedbackNote.linkMentions(text, (_) => 'Ada Lovelace'),
+        'Thanks [@Ada Lovelace](nostr:$npub), and @Ada again');
+
+    await ProfileService.instance.createIdentity();
+    final note = await service.post('Night mode');
+    await service.reply(note, text);
+    final tags = relay.events.last['tags'] as List;
+    expect(tags, anyElement(equals(['p', ada])));
+    expect(tags.where((t) => (t as List)[0] == 'p' && t[1] == ada),
+        hasLength(1));
+  });
+
+  testWidgets('replying: @ suggests people, and the mention is sent',
+      (tester) async {
+    const ada =
+        '1111111111111111111111111111111111111111111111111111111111111111';
+    NostrProfileCache.debugPut(
+        const NostrProfile(pubkey: ada, name: 'Ada', about: ''));
+    NostrProfileCache.debugPut(const NostrProfile(
+        pubkey:
+            '2222222222222222222222222222222222222222222222222222222222222222',
+        name: 'Bob',
+        about: ''));
+    await tester.runAsync(() => ProfileService.instance.createIdentity());
+    final note = (await tester.runAsync(() => service.post('Night mode')))!;
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(),
+        home: FeedbackThreadScreen(root: note, service: service)));
+    await settle(tester);
+
+    await tester.enterText(find.byType(TextField), 'Thanks @ad');
+    await tester.pump();
+    expect(find.text('Ada'), findsOneWidget);
+    expect(find.text('Bob'), findsNothing);
+    await tester.tap(find.text('Ada'));
+    await tester.pump();
+    expect(find.text('Thanks @Ada '), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Thanks @Ada for this');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+
+    final sent = relay.events.last;
+    expect(sent['content'],
+        'Thanks nostr:${NostrService.npubEncode(ada)} for this');
+    expect(sent['tags'], anyElement(equals(['p', ada])));
+    expect(find.text('Thanks @Ada for this', findRichText: true),
+        findsOneWidget,
+        reason: 'shown with the name, not the npub');
+  });
+
   test('subject, link and screenshot travel as tags and in the text',
       () async {
     await ProfileService.instance.createIdentity();

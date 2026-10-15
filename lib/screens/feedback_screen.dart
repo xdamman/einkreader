@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/errors.dart';
 import '../services/feedback_service.dart';
@@ -225,10 +226,70 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
   bool _sending = false;
   bool _loading = true;
 
+  /// "@Name" picked from the suggestions → pubkey (hex); sent as NIP-27
+  /// mentions.
+  final Map<String, String> _picked = {};
+
+  /// What follows the "@" being typed, or null when not typing a mention.
+  String? _mentionQuery;
+
   @override
   void initState() {
     super.initState();
+    _controller.addListener(_onTextChanged);
     _load();
+  }
+
+  void _onTextChanged() {
+    final value = _controller.value;
+    final cursor = value.selection.baseOffset;
+    String? query;
+    if (cursor >= 0 && cursor <= value.text.length) {
+      final m = RegExp(r'(?:^|\s)@([^\s@]{0,30})$')
+          .firstMatch(value.text.substring(0, cursor));
+      query = m?.group(1);
+    }
+    if (query != _mentionQuery) setState(() => _mentionQuery = query);
+  }
+
+  /// People to @mention for [query]: those in this thread first, then
+  /// everyone else known; names starting with the query before the rest.
+  List<NostrProfile> _mentionCandidates(String query) {
+    final q = query.toLowerCase();
+    final inThread = {
+      for (final n in _notes) n.pubkey,
+      ..._notes.expand((n) => n.mentioned),
+    };
+    final seen = <String>{};
+    final matches = [
+      for (final pubkey in inThread)
+        if (NostrProfileCache.get(pubkey) case final p?) p,
+      ...NostrProfileCache.all,
+    ].where((p) =>
+        p.pubkey != _me &&
+        p.name.trim().isNotEmpty &&
+        p.name.toLowerCase().contains(q) &&
+        seen.add(p.pubkey));
+    final list = matches.toList();
+    final starts = list.where((p) => p.name.toLowerCase().startsWith(q));
+    return [...starts, ...list.where((p) => !starts.contains(p))]
+        .take(5)
+        .toList();
+  }
+
+  void _pickMention(NostrProfile profile) {
+    final value = _controller.value;
+    final cursor = value.selection.baseOffset;
+    final before = value.text.substring(0, cursor);
+    final at = before.lastIndexOf('@');
+    final name = profile.name.trim();
+    final inserted = '@$name ';
+    final text =
+        before.substring(0, at) + inserted + value.text.substring(cursor);
+    _picked[name] = profile.pubkey;
+    _controller.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: at + inserted.length));
   }
 
   @override
@@ -244,7 +305,8 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
       final me = await _service.myPubkey;
       // Stored replies first (instant), then whatever is new.
       final cached = await _service.cachedThread(widget.root.id);
-      await NostrProfileCache.load(cached.map((n) => n.pubkey),
+      await NostrProfileCache.load(
+          cached.expand((n) => [n.pubkey, ...n.mentioned]),
           nostr: _service.nostr);
       if (!mounted) return;
       setState(() {
@@ -253,7 +315,8 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
         if (cached.isNotEmpty) _notes = cached;
       });
       final notes = await _service.thread(widget.root.id);
-      await NostrProfileCache.load(notes.map((n) => n.pubkey),
+      await NostrProfileCache.load(
+          notes.expand((n) => [n.pubkey, ...n.mentioned]),
           nostr: _service.nostr);
       if (!mounted) return;
       setState(() {
@@ -271,12 +334,14 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
   }
 
   Future<void> _send() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
+    final typed = _controller.text.trim();
+    if (typed.isEmpty) return;
+    final text = FeedbackNote.encodeMentions(typed, _picked);
     setState(() => _sending = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
       final note = await _service.reply(_replyTo, text);
+      _picked.clear();
       // Fetched in the background: the reply shows at once.
       NostrProfileCache.load([note.pubkey], nostr: _service.nostr).then((_) {
         if (mounted) setState(() {});
@@ -398,6 +463,25 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
                   ),
                 ],
               ),
+            if (_mentionQuery != null)
+              for (final profile in _mentionCandidates(_mentionQuery!))
+                InkWell(
+                  onTap: () => _pickMention(profile),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        NostrAvatar(pubkey: profile.pubkey, size: 28),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(profile.name.trim(),
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 16)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             Row(
               children: [
                 Expanded(
@@ -407,7 +491,7 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
                     maxLines: 5,
                     textCapitalization: TextCapitalization.sentences,
                     decoration: const InputDecoration(
-                      hintText: 'Write a reply…',
+                      hintText: 'Write a reply… (@ to mention)',
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
@@ -481,22 +565,78 @@ class FeedbackNoteTile extends StatelessWidget {
     final myKey = me ?? await service.myPubkey;
     // Optimistic: the chip updates at once; undone if no relay accepts it.
     if (myKey != null) {
-      note.reactions.putIfAbsent(emoji, () => <String>{}).add(myKey);
+      note.addReaction(emoji, myKey, DateTime.now());
       onChanged();
     }
     try {
       await service.react(note, emoji);
     } catch (e) {
       if (myKey != null) {
-        note.reactions[emoji]?.remove(myKey);
-        if (note.reactions[emoji]?.isEmpty ?? false) {
-          note.reactions.remove(emoji);
-        }
+        note.removeReaction(emoji, myKey);
         onChanged();
       }
       messenger.showSnackBar(SnackBar(
           content: Text(friendlyError(e, doing: 'sending your reaction'))));
     }
+  }
+
+  /// Long press on a reaction: who reacted with it and when, newest
+  /// first; tapping someone opens their profile.
+  Future<void> _showReactors(BuildContext context, String emoji) async {
+    final times = note.reactedAt[emoji] ?? const <String, DateTime>{};
+    final people = (note.reactions[emoji] ?? const <String>{}).toList()
+      ..sort((a, b) =>
+          (times[b] ?? DateTime(0)).compareTo(times[a] ?? DateTime(0)));
+    // Names from the store at once; unknown ones fetched (briefly).
+    await NostrProfileCache.load(people, nostr: service.nostr)
+        .timeout(const Duration(seconds: 3), onTimeout: () {});
+    if (!context.mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: Text(
+                  people.length == 1
+                      ? '$emoji  1 reaction'
+                      : '$emoji  ${people.length} reactions',
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w700)),
+            ),
+            for (final pubkey in people)
+              ListTile(
+                leading: NostrAvatar(pubkey: pubkey, size: 36),
+                title: Text(pubkey == me
+                    ? '${nostrDisplayName(pubkey)} (you)'
+                    : nostrDisplayName(pubkey)),
+                trailing: times[pubkey] == null
+                    ? null
+                    : Text(relativeTime(times[pubkey]!),
+                        style: const TextStyle(fontSize: 13)),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  openNostrProfile(context, pubkey, me: me);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openLink(BuildContext context, String url) {
+    final mention = FeedbackNote.mentionPattern.matchAsPrefix(url);
+    if (mention != null) {
+      openNostrProfile(context, NostrService.decodeNpub(mention.group(1)!),
+          me: me);
+      return;
+    }
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   /// The emoji picker: a small menu at the button with the reader's most
@@ -601,7 +741,9 @@ class FeedbackNoteTile extends StatelessWidget {
                     ),
                   if (compact) ...[
                     if (note.displayText.isNotEmpty)
-                      Text(plainPreview(note.displayText),
+                      Text(
+                          plainPreview(FeedbackNote.linkMentions(
+                              note.displayText, nostrDisplayName)),
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 16, height: 1.4)),
@@ -618,8 +760,10 @@ class FeedbackNoteTile extends StatelessWidget {
                       ),
                   ] else if (note.displayText.isNotEmpty)
                     MarkdownView(
-                        markdown: note.displayText,
-                        fontSize: large ? 18 : 16),
+                        markdown: FeedbackNote.linkMentions(
+                            note.displayText, nostrDisplayName),
+                        fontSize: large ? 18 : 16,
+                        onLinkTap: (url, _, __) => _openLink(context, url)),
                   if (!compact)
                     for (final image in note.images)
                       Padding(
@@ -664,6 +808,8 @@ class FeedbackNoteTile extends StatelessWidget {
                             count: entry.value.length,
                             mine: me != null && entry.value.contains(me),
                             onTap: () => _react(context, entry.key),
+                            onLongPress: () =>
+                                _showReactors(context, entry.key),
                           ),
                         Builder(
                           builder: (buttonContext) => IconButton(
@@ -713,17 +859,22 @@ class _ReactionChip extends StatelessWidget {
   final bool mine;
   final VoidCallback onTap;
 
+  /// Shows who reacted, and when.
+  final VoidCallback onLongPress;
+
   const _ReactionChip({
     required this.emoji,
     required this.count,
     required this.mine,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(

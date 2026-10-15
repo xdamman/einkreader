@@ -30,6 +30,9 @@ class FeedbackNote {
   /// emoji → pubkeys (hex) that reacted with it.
   final Map<String, Set<String>> reactions;
 
+  /// emoji → pubkey → when they reacted, for "who reacted" (long press).
+  final Map<String, Map<String, DateTime>> reactedAt;
+
   /// NIP-14 subject, when the note has one.
   final String? subject;
 
@@ -47,7 +50,73 @@ class FeedbackNote {
     this.images = const [],
     this.sending = false,
     Map<String, Set<String>>? reactions,
-  }) : reactions = reactions ?? {};
+    Map<String, Map<String, DateTime>>? reactedAt,
+  })  : reactions = reactions ?? {},
+        reactedAt = reactedAt ?? {};
+
+  /// Adds one reaction (the earliest time wins if they reacted twice).
+  void addReaction(String emoji, String pubkey, DateTime at) {
+    reactions.putIfAbsent(emoji, () => <String>{}).add(pubkey);
+    final times = reactedAt.putIfAbsent(emoji, () => {});
+    final known = times[pubkey];
+    if (known == null || at.isBefore(known)) times[pubkey] = at;
+  }
+
+  void removeReaction(String emoji, String pubkey) {
+    reactions[emoji]?.remove(pubkey);
+    reactedAt[emoji]?.remove(pubkey);
+    if (reactions[emoji]?.isEmpty ?? false) {
+      reactions.remove(emoji);
+      reactedAt.remove(emoji);
+    }
+  }
+
+  /// NIP-27 mentions in the text: `nostr:npub1…`.
+  static final mentionPattern =
+      RegExp(r'nostr:(npub1[02-9ac-hj-np-z]{58})');
+
+  /// Pubkeys (hex) @mentioned in the text.
+  Set<String> get mentioned => mentionedIn(content);
+
+  static Set<String> mentionedIn(String text) => {
+        for (final m in mentionPattern.allMatches(text))
+          if (_tryDecode(m.group(1)!) case final hex?) hex,
+      };
+
+  static String? _tryDecode(String npub) {
+    try {
+      return NostrService.decodeNpub(npub);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// [text] with each mention as a markdown link, `[@Name](nostr:npub1…)`,
+  /// named by [nameOf] (pubkey hex → display name).
+  static String linkMentions(String text, String Function(String) nameOf) =>
+      text.replaceAllMapped(mentionPattern, (m) {
+        final hex = _tryDecode(m.group(1)!);
+        if (hex == null) return m.group(0)!;
+        final name = nameOf(hex).replaceAll(RegExp(r'[\[\]]'), '');
+        return '[@$name](${m.group(0)})';
+      });
+
+  /// What the reader typed, with each "@Name" they picked from the
+  /// suggestions ([picked]: name → pubkey hex) turned into a NIP-27
+  /// mention.
+  static String encodeMentions(String typed, Map<String, String> picked) {
+    var text = typed;
+    // Longest names first, so "@Ann Lee" isn't eaten by "@Ann".
+    final names = picked.keys.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    for (final name in names) {
+      final token = '@$name';
+      if (!text.contains(token)) continue;
+      text = text.replaceAll(
+          token, 'nostr:${NostrService.npubEncode(picked[name]!)}');
+    }
+    return text;
+  }
 
   /// A just-written note still on its way (screenshot uploading, relays
   /// not answered yet): shown in the list, not yet something to open,
@@ -310,6 +379,7 @@ class FeedbackService {
     final byId = {for (final n in notes) n.id: n};
     for (final note in notes) {
       note.reactions.clear();
+      note.reactedAt.clear();
     }
     for (final event in await _db.nostrEvents([7])) {
       final tags = (event['tags'] as List? ?? const [])
@@ -323,9 +393,11 @@ class FeedbackService {
       var emoji = ((event['content'] as String?) ?? '').trim();
       if (emoji.isEmpty || emoji == '+') emoji = '❤️';
       if (emoji == '-') continue; // a dislike, not shown
-      note.reactions
-          .putIfAbsent(emoji, () => <String>{})
-          .add(event['pubkey'] as String);
+      note.addReaction(
+          emoji,
+          event['pubkey'] as String,
+          DateTime.fromMillisecondsSinceEpoch(
+              ((event['created_at'] as int?) ?? 0) * 1000));
     }
   }
 
@@ -569,14 +641,18 @@ class FeedbackService {
       );
 
   /// Replies inside a thread (NIP-10 marked e-tags), notifying the author
-  /// of the note answered and the official account.
+  /// of the note answered, the official account and anyone @mentioned
+  /// (NIP-27 `nostr:npub1…` in [text]).
   Future<FeedbackNote> reply(FeedbackNote to, String text) {
     final root = to.rootId ?? to.id;
+    final notified = {to.pubkey, officialHex};
     return _publish(content: text, tags: [
       ['e', root, '', 'root'],
       if (to.id != root) ['e', to.id, '', 'reply'],
       ['p', to.pubkey],
       if (to.pubkey != officialHex) ['p', officialHex],
+      for (final pubkey in FeedbackNote.mentionedIn(text))
+        if (notified.add(pubkey)) ['p', pubkey],
     ]);
   }
 

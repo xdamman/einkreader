@@ -28,6 +28,10 @@ class NostrProfileCache {
 
   static NostrProfile? get(String pubkey) => _profiles[pubkey];
 
+  /// Every profile known so far (stored or fetched), for @mention
+  /// suggestions.
+  static Iterable<NostrProfile> get all => _profiles.values;
+
   /// Makes [pubkeys]' profiles available: stored ones immediately, missing
   /// ones fetched (one query), and every one refreshed once per session.
   /// Returns once the stored and missing ones are in.
