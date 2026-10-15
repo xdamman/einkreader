@@ -6,7 +6,8 @@ Watches public Nostr feedback addressed to einkreader's official account
 that Xavier approved — written by him, or reacted to with 👍 by one of his
 identities — it:
 
-  1. reacts 👀 as the official account (seen, being worked on),
+  1. reacts 👀 as the official account, or xavier's agent until
+     its key is imported (seen, being worked on),
   2. runs Claude Code (Opus) headless in the repo to implement the feedback,
      test it and ship a release,
   3. drafts a reply saying what changed. Patch releases are iterations, so
@@ -43,8 +44,10 @@ LOG_DIR = Path.home() / ".local/state/einkreader-feedback/runs"
 # The official account (feedback is addressed to it; the bot signs as it).
 OFFICIAL_HEX = "6823118eaab2720840f6905affd57353c2101528e524a3e1e767e00974433ae8"
 OFFICIAL_NPUB = "npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7"
-# The nostr CLI account (alias or npub) holding the official key.
-BOT_ACCOUNT = os.environ.get("FEEDBACK_BOT_ACCOUNT", OFFICIAL_NPUB)
+# Until the official key is imported, the bot signs as xavier's agent.
+AGENT_NPUB = "npub1wdd74eufn75vr6lqaqgg0t4wwu7n07ar7xyl9sh8szx8uyu8kk8sf56g62"
+BOT_ACCOUNTS = [a for a in (os.environ.get("FEEDBACK_BOT_ACCOUNT"),
+                            OFFICIAL_NPUB, AGENT_NPUB) if a]
 
 # Xavier's identities: feedback they write is approved; their 👍 approves
 # anyone's feedback.
@@ -149,34 +152,46 @@ def reacted_note(event):
     return e_tags[-1][1] if e_tags else None
 
 
-def bot_account_ready():
+def bot_account():
+    """The first of BOT_ACCOUNTS the nostr CLI holds a key for, or None.
+    `nostr accounts` shortens npubs to npub1xxxxxxx…xxxx."""
     out = subprocess.run([NOSTR, "accounts"], capture_output=True,
                          text=True).stdout
-    short = OFFICIAL_NPUB[:12]
-    return short in out or BOT_ACCOUNT in out
+    for account in BOT_ACCOUNTS:
+        short = f"{account[:12]}…{account[-4:]}" if account.startswith(
+            "npub1") else account
+        if short in out or account in out:
+            return account
+    return None
+
+
+def bot_account_ready():
+    return bot_account() is not None
 
 
 def post(state, kind, note, content):
-    """Reaction or reply as the official account; queued if its key isn't
-    available yet (retried every poll)."""
+    """Reaction or reply as the official account (or xavier's agent until
+    that key is imported); queued if neither key is available (retried
+    every poll)."""
     entry = {"kind": kind, "note": note["id"], "author": note["pubkey"],
              "content": content}
     if not bot_account_ready() or not _send(entry):
         state["pending_posts"].append(entry)
-        log(f"queued {kind} on {note['id'][:12]} (official account not ready)")
+        log(f"queued {kind} on {note['id'][:12]} (no bot account key)")
         return False
     return True
 
 
 def _send(entry):
+    account = bot_account()
     if entry["kind"] == "reaction":
         cmd = [NOSTR, "event", "new", "--kind", "7",
                "--content", entry["content"],
                "--tag", f"e={entry['note']}", "--tag", f"p={entry['author']}",
-               "--tag", "k=1", "--account", BOT_ACCOUNT, "--jsonl"]
+               "--tag", "k=1", "--account", account, "--jsonl"]
         stdin = None
     else:
-        cmd = [NOSTR, "reply", entry["note"], "--account", BOT_ACCOUNT,
+        cmd = [NOSTR, "reply", entry["note"], "--account", account,
                "--jsonl"]
         stdin = entry["content"]
     result = subprocess.run(cmd, input=stdin, capture_output=True, text=True,

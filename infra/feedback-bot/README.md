@@ -12,6 +12,10 @@ personal npub) or reacted to it with 👍. For each approved feedback, once:
    ship a release,
 3. reply to the feedback as the official account with what changed.
 
+Until the official key is imported, the bot signs as xavier's agent
+(`npub1wdd74eufn75vr6lqaqgg0t4wwu7n07ar7xyl9sh8szx8uyu8kk8sf56g62`), whose key
+is already in the nostr CLI. Set `FEEDBACK_BOT_ACCOUNT` to force an account.
+
 Everyone else's feedback waits for a 👍: the note text is untrusted input to
 an agent that can commit and release.
 
