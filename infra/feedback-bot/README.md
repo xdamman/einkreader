@@ -5,16 +5,24 @@ Turns approved public feedback into releases. Every minute it asks Nostr
 official account, `npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7`.
 
 Feedback is **approved** when Xavier wrote it (xavier@einkreader.app or his
-personal npub) or reacted to it with 👍. For each approved feedback, once:
+personal npub) or reacted to it with 👍. Nothing is released until Xavier
+approves a **proposal**:
 
-1. react 👀 as the official account,
-2. run Claude Code (Opus, headless) in this repo to implement it, test it and
-   ship a release,
-3. reply to the feedback as the official account with what changed.
+1. react 👀 to the feedback,
+2. run Claude Code (Opus, headless) in a git worktree of its own
+   (`~/.local/state/einkreader-feedback/worktrees/<id>`, branch
+   `feedback/<id>`) to implement it, test it and take screenshots; nothing
+   is pushed,
+3. reply in the thread with the proposal and the screenshots,
+4. Xavier 👍s the proposal, or replies in the thread with more details or
+   other ideas: Claude reworks the branch and the bot posts an updated
+   proposal, as many rounds as needed (only a 👍 on the latest proposal
+   counts),
+5. on the 👍, Claude rebases the branch, ships a patch release, and the
+   reply saying what changed waits for the next minor version on the
+   changelog.
 
-Until the official key is imported, the bot signs as xavier's agent
-(`npub1wdd74eufn75vr6lqaqgg0t4wwu7n07ar7xyl9sh8szx8uyu8kk8sf56g62`), whose key
-is already in the nostr CLI. Set `FEEDBACK_BOT_ACCOUNT` to force an account.
+Feedback that needs no change gets an answer right away and no proposal.
 
 Everyone else's feedback waits for a 👍: the note text is untrusted input to
 an agent that can commit and release.
