@@ -14,11 +14,10 @@ released without Xavier approving a proposal:
   4. Xavier either 👍s the proposal, or replies in the thread with more
      details or other ideas: Claude then reworks the branch and the bot
      posts an updated proposal. Repeat until a 👍.
-  5. On the 👍, Claude merges the branch and ships a patch release. The
-     reply saying what changed waits for the next minor version on the
-     changelog (site/data/changelog.json) and goes out with the link to
-     that version's entry. Feedback that needs no change is answered right
-     away, with no proposal.
+  5. On the 👍, Claude merges the branch and ships a patch release, and the
+     bot replies with what changed and a link to that version's release
+     page (notes and download). Feedback that needs no change is answered
+     right away, with no proposal.
 
 Other people's feedback, and other people's replies in a thread, are never
 acted on: the note text is untrusted input for an agent that can commit
@@ -37,6 +36,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import urllib.request
 import subprocess
@@ -63,6 +63,8 @@ OFFICIAL_HEX = "6823118eaab2720840f6905affd57353c2101528e524a3e1e767e00974433ae8
 OFFICIAL_NPUB = "npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7"
 # Until the official key is imported, the bot signs as xavier's agent.
 AGENT_NPUB = "npub1wdd74eufn75vr6lqaqgg0t4wwu7n07ar7xyl9sh8szx8uyu8kk8sf56g62"
+AGENT_HEX = "735beae7899fa8c1ebe0e81087aeae773d37fba3f189f2c2e7808c7e1387b58f"
+BOT_PUBKEYS = {OFFICIAL_HEX, AGENT_HEX}
 BOT_ACCOUNTS = [a for a in (os.environ.get("FEEDBACK_BOT_ACCOUNT"),
                             OFFICIAL_NPUB, AGENT_NPUB) if a]
 
@@ -96,39 +98,14 @@ def load_state():
                 "threads": {}}
 
 
-CHANGELOG = REPO / "site/data/changelog.json"
+RELEASES = "https://github.com/xdamman/einkreader/releases/tag"
 
 
-def latest_minor():
-    """The newest version published on the changelog (minor versions only)."""
-    try:
-        entries = json.loads(CHANGELOG.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-    return next((e["version"] for e in entries if e.get("version")), None)
-
-
-def release_deferred(state):
-    """Once a new minor version is on the changelog, sends every reply that
-    waited for it, ending with the link to its entry."""
-    minor = latest_minor()
-    if minor is None:
-        return
-    if "announced_minor" not in state:
-        # First run: only minors published from now on release replies.
-        state["announced_minor"] = minor
-        save_state(state)
-        return
-    if minor == state["announced_minor"]:
-        return
-    link = f"https://einkreader.app/changelog#v{minor}"
-    for entry in state.pop("deferred_replies", []):
-        content = f"{entry['content'].rstrip()}\n\nIn version {minor}: {link}"
-        post(state, "reply", {"id": entry["note"], "pubkey": entry["author"]},
-             content)
-    log(f"version {minor} published: waiting replies sent")
-    state["announced_minor"] = minor
-    save_state(state)
+def released_version(cwd):
+    """The version the release job shipped (pubspec.yaml, without build)."""
+    m = re.search(r"^version:\s*([\d.]+)", (cwd / "pubspec.yaml").read_text(),
+                  re.M)
+    return m.group(1) if m else None
 
 
 def save_state(state):
@@ -204,7 +181,7 @@ def post(state, kind, note, content, tags=None, thread=None):
     event = _send(entry) if bot_account_ready() else None
     if event is None:
         state["pending_posts"].append(entry)
-        log(f"queued {kind} on {note['id'][:12]} (no bot account key)")
+        log(f"queued {kind} on {note['id'][:12]} (retried every poll)")
         return None
     _posted(state, entry, event)
     return event
@@ -361,9 +338,9 @@ screenshots. Make it only that: plain text, friendly, under 600
 characters, describing what the change will do for the reader, plus any
 open question for Xavier. Don't say how to approve (the bot adds that),
 and no markdown headings, file paths or version numbers. If nothing should
-change (e.g. it's already possible, or not actionable), start the message
-with the line NO_RELEASE, then the reply explaining why; it is sent right
-away and the thread is closed.
+change (e.g. it's already possible, not actionable, or Xavier only asked
+you a question), don't change any code: start the message with the line
+NO_RELEASE, then your answer; it is sent right away.
 """
 
 RELEASE = INTRO + """
@@ -383,11 +360,11 @@ describes, which is committed on this branch.
   the site.
 
 Your FINAL message becomes the public reply to the feedback, from
-einkreader's account, sent once the next minor version is published with
-that version's changelog link appended automatically. Make it only that
-reply: plain text, friendly, under 500 characters, saying what changed for
-the reader. Don't mention version numbers or links. No markdown headings,
-no internal details, no file paths.
+einkreader's account, sent as soon as you finish with the link to the
+release page (what changed, and the download) appended automatically. Make
+it only that reply: plain text, friendly, under 500 characters, saying what
+changed for the reader. Don't mention version numbers or links. No markdown
+headings, no internal details, no file paths.
 """
 
 
@@ -395,7 +372,8 @@ def thread_text(thread):
     parts = []
     for item in thread["history"]:
         who = {"feedback": "feedback", "xavier": "Xavier",
-               "proposal": "your proposal"}[item["who"]]
+               "proposal": "your proposal", "bot": "einkreader (you)",
+               "other": "someone else"}[item["who"]]
         parts.append(f"[{who}]\n{item['text'].strip()}")
     return "\n\n".join(parts)
 
@@ -475,10 +453,12 @@ def run_job(state, root_id):
     elif job == "propose":
         propose(state, root_id, thread, reply, shots)
     else:
-        # Shipped as a patch: the reply waits for the next minor version.
-        state.setdefault("deferred_replies", []).append(
-            {"note": root_id, "author": thread["author"], "content": reply})
-        log(f"released {root_id[:12]}; reply waits for the next minor")
+        version = released_version(cwd)
+        if version:
+            reply = (f"{reply.rstrip()}\n\nIn version {version}: "
+                     f"{RELEASES}/v{version}")
+        post(state, "reply", root, reply)
+        log(f"released {root_id[:12]} as {version}")
         thread["status"] = "released"
         state["handled"][root_id] = "done"
         drop_worktree(root_id)
@@ -524,10 +504,62 @@ def start(state, note):
     state["handled"][root_id] = "working"
     state["threads"][root_id] = {
         "author": note["pubkey"], "status": "working", "job": "propose",
-        "round": 1, "seen": [],
+        "round": 1, "seen": [root_id],
         "history": [{"who": "feedback", "text": note["content"]}]}
     save_state(state)
     post(state, "reaction", note, "👀")
+    save_state(state)
+
+
+def mentions_bot(event):
+    """An explicit @mention (NIP-27 nostr:npub… in the text) of the bot.
+    Replies p-tag the people above them automatically, so a p tag alone
+    doesn't count."""
+    content = event.get("content", "")
+    return any(f"nostr:{npub}" in content
+               for npub in (OFFICIAL_NPUB, AGENT_NPUB)) or \
+        "nostr:nprofile" in content and any(
+            len(t) >= 2 and t[0] == "p" and t[1] in BOT_PUBKEYS
+            for t in event.get("tags", []))
+
+
+def join(state, root_id, mention, notes):
+    """Opens (or reopens) a thread for Xavier's mention: the whole
+    conversation so far, then a proposal round (or just an answer)."""
+    root = notes.get(root_id)
+    if root is None and root_id != mention["id"]:
+        root = next((e for e in nostr_events(
+            "--kinds", "1", "--filter", f"p={OFFICIAL_HEX}",
+            "--since", "365d", "--limit", "1000") if e["id"] == root_id),
+            None)
+    if root is None:
+        root = mention
+    replies = [] if root is mention else sorted(
+        (e for e in nostr_events("--kinds", "1", "--filter", f"e={root_id}",
+                                 "--since", "365d", "--limit", "500")
+         if e["created_at"] <= mention["created_at"]
+         and e["id"] != mention["id"]),
+        key=lambda e: e["created_at"])
+
+    def who(e):
+        if e["pubkey"] in TRUSTED:
+            return "xavier"
+        return "bot" if e["pubkey"] in BOT_PUBKEYS else "other"
+
+    old = state["threads"].get(root_id, {})
+    history = [{"who": "feedback" if root["pubkey"] not in TRUSTED
+                else "xavier", "text": root["content"]}]
+    history += [{"who": who(e), "text": e["content"]} for e in replies]
+    if root is not mention:
+        history.append({"who": "xavier", "text": mention["content"]})
+    state["threads"][root_id] = {
+        "author": root["pubkey"], "status": "working", "job": "propose",
+        "round": old.get("round", 0) + 1,
+        "seen": old.get("seen", []) + [mention["id"]],
+        "history": history,
+        "reply_to": {"id": mention["id"], "pubkey": mention["pubkey"]}}
+    state["handled"][root_id] = "working"
+    post(state, "reaction", mention, "👀")
     save_state(state)
 
 
@@ -597,6 +629,23 @@ def poll(state):
         thread.update(job="propose", status="working",
                       round=thread["round"] + 1)
         state["handled"][root_id] = "working"
+    # Xavier @mentioning the bot anywhere else: it joins that thread.
+    for e in sorted(trusted_notes, key=lambda e: e["created_at"]):
+        if e["id"] in state.setdefault("mentions_seen", []) or \
+                not mentions_bot(e):
+            continue
+        root_id = root_of(e) or e["id"]
+        thread = state["threads"].get(root_id)
+        if thread and e["id"] in thread["seen"]:
+            continue  # already taken in, as feedback or a reply
+        if thread and (thread["status"] in ("proposed", "failed", "posting")
+                       or thread.get("job")):
+            continue  # an open thread takes it as a reply (above)
+        log(f"Xavier mentioned the bot in {root_id[:12]}")
+        if DRY_RUN:
+            continue
+        state["mentions_seen"].append(e["id"])
+        join(state, root_id, e, notes)
     if not DRY_RUN:
         save_state(state)
         for root_id, thread in list(state["threads"].items()):
@@ -614,12 +663,10 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--once":
         poll(state)
-        release_deferred(state)
         flush_pending(state)
         return
     while True:
         try:
-            release_deferred(state)
             flush_pending(state)
             poll(state)
         except Exception as e:  # never let one bad event kill the service

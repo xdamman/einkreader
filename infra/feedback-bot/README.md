@@ -18,11 +18,15 @@ approves a **proposal**:
    other ideas: Claude reworks the branch and the bot posts an updated
    proposal, as many rounds as needed (only a 👍 on the latest proposal
    counts),
-5. on the 👍, Claude rebases the branch, ships a patch release, and the
-   reply saying what changed waits for the next minor version on the
-   changelog.
+5. on the 👍, Claude rebases the branch and ships a patch release; the
+   bot replies with what changed and a link to that version's GitHub
+   release page (its notes, from the changelog files, and the APK).
 
 Feedback that needs no change gets an answer right away and no proposal.
+
+Xavier can also @mention the bot (`nostr:npub…` in the text) in any
+thread, including someone else's: it reads the conversation and proposes a
+change, or just answers. Mentions and replies from anyone else are ignored.
 
 Everyone else's feedback waits for a 👍: the note text is untrusted input to
 an agent that can commit and release.
