@@ -5,6 +5,11 @@ class FeedItem {
   final String guid;
   final String title;
   final String? link;
+
+  /// The post's own page when [link] points elsewhere: linked-list blogs
+  /// (Daring Fireball…) link an entry to the page it comments on and give
+  /// their post as Atom `rel="related"`.
+  final String? pageUrl;
   final String? author;
   final DateTime? published;
   final String? summaryHtml;
@@ -16,6 +21,7 @@ class FeedItem {
     required this.guid,
     required this.title,
     this.link,
+    this.pageUrl,
     this.author,
     this.published,
     this.summaryHtml,
@@ -87,6 +93,7 @@ class FeedParser {
 
   static ParsedFeed _parseAtom(XmlElement feed) {
     final feedTitle = _text(feed, 'title') ?? 'Untitled feed';
+    final site = _host(_atomLink(feed));
     final items = <FeedItem>[];
     for (final entry in feed.findElements('entry')) {
       final id = _text(entry, 'id');
@@ -96,6 +103,7 @@ class FeedParser {
         guid: id ?? link!,
         title: _text(entry, 'title') ?? link ?? 'Untitled',
         link: link,
+        pageUrl: _ownPage(entry, link, site),
         author: entry
             .findElements('author')
             .firstOrNull
@@ -126,6 +134,26 @@ class FeedParser {
       fallback ??= href;
     }
     return fallback;
+  }
+
+  /// The entry's `related` link when it is on the feed's own [site] and
+  /// its main [link] is not: the blog post about that link.
+  static String? _ownPage(XmlElement entry, String? link, String? site) {
+    if (site == null || link == null || _host(link) == site) return null;
+    for (final l in entry.findElements('link')) {
+      final href = l.getAttribute('href');
+      if (l.getAttribute('rel') == 'related' && _host(href) == site) {
+        return href;
+      }
+    }
+    return null;
+  }
+
+  /// Host without "www.", to compare sites.
+  static String? _host(String? url) {
+    final host = url == null ? null : Uri.tryParse(url)?.host;
+    if (host == null || host.isEmpty) return null;
+    return host.startsWith('www.') ? host.substring(4) : host;
   }
 
   static String? _text(XmlElement parent, String name) {

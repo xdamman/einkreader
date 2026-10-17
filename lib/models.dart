@@ -133,6 +133,10 @@ class Article {
   final String title;
   final String? author;
   final String? url;
+
+  /// The feed post's own page when [url] is the page it links to (a
+  /// linked-list blog like Daring Fireball): what sharing points at.
+  final String? pageUrl;
   final int? publishedAt;
   final String? summary;
 
@@ -170,6 +174,7 @@ class Article {
     required this.title,
     this.author,
     this.url,
+    this.pageUrl,
     this.publishedAt,
     this.summary,
     this.contentMarkdown,
@@ -192,6 +197,7 @@ class Article {
         title: title ?? this.title,
         author: author,
         url: url,
+        pageUrl: pageUrl,
         publishedAt: publishedAt,
         summary: summary,
         contentMarkdown: contentMarkdown ?? this.contentMarkdown,
@@ -210,6 +216,10 @@ class Article {
   /// different sources (e.g. an RSS item and a tweet linking to it). Null when
   /// there is no URL to compare.
   String? get urlKey => canonicalUrl(url);
+
+  /// The link to share, copy or open as "the article": the feed post's own
+  /// page when known ([pageUrl]), else [url].
+  String? get shareUrl => pageUrl ?? url;
 
   /// [title] with Markdown syntax and bare URLs removed, for plain-text display
   /// in the feed. Titles are derived from RSS/tweet/note bodies, so they may
@@ -252,6 +262,7 @@ class Article {
         'author': author,
         'url': url,
         'url_key': urlKey,
+        'page_url': pageUrl,
         'published_at': publishedAt,
         'summary': summary,
         'content_markdown': contentMarkdown,
@@ -305,6 +316,7 @@ class Article {
         title: m['title'] as String,
         author: m['author'] as String?,
         url: m['url'] as String?,
+        pageUrl: m['page_url'] as String?,
         publishedAt: m['published_at'] as int?,
         summary: m['summary'] as String?,
         contentMarkdown: m['content_markdown'] as String?,

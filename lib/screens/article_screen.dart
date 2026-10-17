@@ -491,7 +491,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (article.url != null) ...[
+            if (article.shareUrl != null) ...[
               ListTile(
                 leading: const Icon(Icons.open_in_browser),
                 title: const Text('Open in browser'),
@@ -537,10 +537,10 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (!mounted || action == null) return;
     switch (action) {
       case 'browser':
-        await launchUrl(Uri.parse(article.url!),
+        await launchUrl(Uri.parse(article.shareUrl!),
             mode: LaunchMode.externalApplication);
       case 'copy-url':
-        await Clipboard.setData(ClipboardData(text: article.url!));
+        await Clipboard.setData(ClipboardData(text: article.shareUrl!));
         if (!mounted) return;
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Url copied')));
@@ -552,7 +552,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
             article.displayTitle,
             if (article.author != null && article.author!.isNotEmpty)
               'by ${article.author}',
-            if (article.url != null) article.url!,
+            if (article.shareUrl != null) article.shareUrl!,
           ].join('\n'),
         );
       case 'highlights-email':

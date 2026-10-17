@@ -26,9 +26,9 @@ class ShareActions {
   }
 
   /// "Title (url)" — how the shared article is attributed, exactly once.
-  static String attribution(Article article) => article.url == null
+  static String attribution(Article article) => article.shareUrl == null
       ? article.displayTitle
-      : '${article.displayTitle} (${article.url})';
+      : '${article.displayTitle} (${article.shareUrl})';
 
   /// [highlights] reordered as they appear in the article text (unlocatable
   /// ones keep their relative order, after the located ones). The highlights
@@ -83,9 +83,9 @@ class ShareActions {
   /// when it is a tweet — from the article's own stored text (works
   /// offline; the tweet IS the article). Null for any other article.
   static QuotedTweet? quotedTweetOf(Article article) {
-    final id = TwitterService.tweetIdFromUrl(article.url);
+    final id = TwitterService.tweetIdFromUrl(article.shareUrl);
     if (id == null) return null;
-    final handle = Uri.parse(article.url!).pathSegments.first;
+    final handle = Uri.parse(article.shareUrl!).pathSegments.first;
     final username = handle == 'i' || handle == 'status' ? null : handle;
     final raw = article.summary ?? article.contentMarkdown ?? '';
     return QuotedTweet(
@@ -120,7 +120,7 @@ class ShareActions {
           ? ''
           : [
               article.displayTitle,
-              if (article.url != null) article.url!,
+              if (article.shareUrl != null) article.shareUrl!,
             ].join('\n'),
       quoted: quoted,
     );

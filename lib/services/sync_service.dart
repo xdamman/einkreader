@@ -566,6 +566,8 @@ class SyncService {
       // so skip them before the expensive steps instead of at insert time.
       if (await _db.articleExists(
           sourceId: source.id!, guid: item.guid, url: item.link)) {
+        await _db.updateFeedItemPage(
+            sourceId: source.id!, guid: item.guid, pageUrl: item.pageUrl);
         skipped++;
         continue;
       }
@@ -587,6 +589,7 @@ class SyncService {
         title: item.title,
         author: item.author,
         url: item.link,
+        pageUrl: item.pageUrl,
         publishedAt: published,
         summary: _plainSummary(item.summaryHtml),
         contentMarkdown: markdown,

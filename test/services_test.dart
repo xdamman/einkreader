@@ -50,6 +50,44 @@ void main() {
       expect(feed.items.single.link, 'https://example.com/1');
       expect(feed.items.single.published, DateTime.utc(2026, 6, 1, 10));
     });
+
+    test("linked-list posts keep the linked page and give the blog's own",
+        () {
+      const xml = '''
+<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Daring Fireball</title>
+  <link rel="alternate" type="text/html" href="https://daringfireball.net/"/>
+  <entry>
+    <id>urn:1</id>
+    <title>Linked</title>
+    <link rel="alternate" href="https://x.com/finkd/status/2110778025629347999"/>
+    <link rel="shorturl" href="http://df4.us/xnc"/>
+    <link rel="related" href="https://daringfireball.net/linked/2026/10/16/x"/>
+  </entry>
+  <entry>
+    <id>urn:2</id>
+    <title>Own article</title>
+    <link rel="alternate" href="https://daringfireball.net/2026/10/own"/>
+    <link rel="related" href="https://daringfireball.net/2026/10/other"/>
+  </entry>
+  <entry>
+    <id>urn:3</id>
+    <title>Related elsewhere</title>
+    <link rel="alternate" href="https://example.com/a"/>
+    <link rel="related" href="https://example.org/b"/>
+  </entry>
+</feed>''';
+      final items = FeedParser.parse(xml).items;
+      expect(items.map((i) => i.link), [
+        'https://x.com/finkd/status/2110778025629347999',
+        'https://daringfireball.net/2026/10/own',
+        'https://example.com/a',
+      ]);
+      expect(items.map((i) => i.pageUrl),
+          ['https://daringfireball.net/linked/2026/10/16/x', null, null]);
+    });
+
   });
 
   group('NostrService', () {

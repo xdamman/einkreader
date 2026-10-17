@@ -212,7 +212,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   Future<void> _copyLink() async {
     final single = _single;
     if (!_hasProfile || single == null) {
-      final url = widget.article.url;
+      final url = widget.article.shareUrl;
       if (url == null) return;
       await Clipboard.setData(ClipboardData(text: url));
       if (!mounted) return;
@@ -571,7 +571,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                 enabled: _twitterConnected,
                 trailing:
                     _twitterConnected
-                        ? (TwitterService.tweetIdFromUrl(widget.article.url) !=
+                        ? (TwitterService.tweetIdFromUrl(widget.article.shareUrl) !=
                                 null
                             ? 'quote-tweet'
                             : null)
