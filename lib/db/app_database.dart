@@ -87,7 +87,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 15,
+      version: 16,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -254,6 +254,11 @@ class AppDatabase {
       await _addColumnIfMissing(
           db, 'outbox', 'held', 'INTEGER NOT NULL DEFAULT 0');
     }
+    if (oldVersion < 16) {
+      // A linked-list post's own page, shared instead of the page it links
+      // to; filled in by the next sync of the feed.
+      await _addColumnIfMissing(db, 'articles', 'page_url', 'TEXT');
+    }
   }
 
   static const _createNostrEventsSql = '''
@@ -353,6 +358,7 @@ class AppDatabase {
         scrolled_at INTEGER,
         via_article_id INTEGER,
         read_at INTEGER,
+        page_url TEXT,
         UNIQUE(source_id, guid)
       )
     ''');
@@ -617,6 +623,21 @@ class AppDatabase {
     return rows.isNotEmpty;
   }
 
+  /// Records a stored feed item's own page ([Article.pageUrl]) as the feed
+  /// now gives it. No-op when unchanged.
+  Future<void> updateFeedItemPage(
+      {required int sourceId,
+      required String guid,
+      required String? pageUrl}) async {
+    final db = await database;
+    await db.update(
+      'articles',
+      {'page_url': pageUrl},
+      where: 'source_id = ? AND guid = ? AND page_url IS NOT ?',
+      whereArgs: [sourceId, guid, pageUrl],
+    );
+  }
+
   /// When an article sorts in lists: its publication date, but never later
   /// than when it arrived. A feed's future-dated (or mis-dated) items would
   /// otherwise sit on top for days and push real news out of sight.
@@ -628,7 +649,7 @@ class AppDatabase {
     'id', 'source_id', 'guid', 'title', 'author', 'url', 'url_key',
     'published_at', 'summary', 'fetched', 'read', 'read_later', 'favorite',
     'created_at', 'scroll_position', 'scrolled_at', 'via_article_id',
-    'read_at',
+    'read_at', 'page_url',
   ];
 
   /// Articles newest first (by [listedAtSql]). [withContent] false leaves

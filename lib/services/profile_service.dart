@@ -625,7 +625,7 @@ class ProfileService {
       kind: 9802,
       content: highlight.text,
       tags: [
-        if (article.url != null) ['r', article.url!],
+        if (article.shareUrl != null) ['r', article.shareUrl!],
         ['title', article.displayTitle],
         if ((highlight.comment ?? '').isNotEmpty)
           ['comment', highlight.comment!],
@@ -647,7 +647,7 @@ class ProfileService {
   /// the article's web page, which the profile page shows with the story.
   Future<({int accepted, String eventId})> publishArticleNote(
       Article article, String note) async {
-    final url = article.url;
+    final url = article.shareUrl;
     final event = await signEvent(
       kind: 1111,
       content: note,

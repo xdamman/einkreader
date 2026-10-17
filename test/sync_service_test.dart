@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/models.dart';
 import 'package:einkreader/services/archive_store.dart';
+import 'package:einkreader/services/share_actions.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/services/twitter_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -209,6 +210,68 @@ void main() {
     final reprocessed = await db.getArticle(article.id!);
     expect(reprocessed!.contentMarkdown, contains('# The Story'));
     expect(reprocessed.contentMarkdown, isNot(contains('Could not extract')));
+  });
+
+  test('a linked-list post is shared as the blog post, even when stored '
+      'before the feed was read that way', () async {
+    useArchive(_no);
+    final source = await db.insertSource(Source(
+      type: SourceType.rss,
+      title: 'Daring Fireball',
+      url: 'https://daringfireball.net/feeds/main',
+      createdAt: DateTime(2026, 10, 1).millisecondsSinceEpoch,
+    ));
+    // Stored by an older version: no page of its own yet.
+    await db.insertArticleIfNew(Article(
+      sourceId: source.id!,
+      guid: 'tag:daringfireball.net,2026:/linked//6.43608',
+      title: 'Strange Times Make for Strange Bedfellows',
+      url: 'https://x.com/finkd/status/2110778025629347999',
+      fetched: 1,
+      createdAt: DateTime(2026, 10, 16).millisecondsSinceEpoch,
+    ));
+    const feed = '''<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Daring Fireball</title>
+  <link rel="alternate" href="https://daringfireball.net/"/>
+  <entry>
+    <id>tag:daringfireball.net,2026:/linked//6.43608</id>
+    <title>Strange Times Make for Strange Bedfellows</title>
+    <link rel="alternate" href="https://x.com/finkd/status/2110778025629347999"/>
+    <link rel="related" href="https://daringfireball.net/linked/2026/10/16/strange-times"/>
+  </entry>
+  <entry>
+    <id>tag:daringfireball.net,2026:/linked//6.43611</id>
+    <title>Munger on Musk</title>
+    <link rel="alternate" href="https://cnbc.example/munger"/>
+    <link rel="related" href="https://daringfireball.net/linked/2026/10/16/munger-on-musk"/>
+    <published>2026-10-16T20:00:00Z</published>
+  </entry>
+</feed>''';
+    final sync = SyncService.forTest(
+      http: MockClient((request) async => request.url.path == '/feeds/main'
+          ? http.Response(feed, 200,
+              headers: {'content-type': 'application/atom+xml'})
+          : http.Response('no', 404)),
+      twitter: TwitterService(client: _no, accessToken: () async => 'tok'),
+    );
+    await sync.syncAll();
+
+    final articles = {
+      for (final a in await db.getArticles(sourceId: source.id))
+        a.title: a
+    };
+    final old = articles['Strange Times Make for Strange Bedfellows']!;
+    expect(old.url, 'https://x.com/finkd/status/2110778025629347999',
+        reason: 'the post is still read from the page it links to');
+    expect(old.shareUrl,
+        'https://daringfireball.net/linked/2026/10/16/strange-times');
+    expect(articles['Munger on Musk']!.shareUrl,
+        'https://daringfireball.net/linked/2026/10/16/munger-on-musk');
+    expect(ShareActions.attribution(old),
+        contains('(https://daringfireball.net/linked/2026/10/16/'));
+    expect(ShareActions.quotedTweetOf(old), isNull,
+        reason: 'shared to X as a link to the post, not a quote tweet');
   });
 
   test('a feed item linking to an X post reads the post, not the login wall',
