@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.6.22",
+    "date": "2026-10-17",
+    "title": "Who reacted, @mentions, and the right link for linked posts",
+    "changes": [
+      "In Feedback, a long press on a reaction shows who reacted and when.",
+      "Type @ in a reply to mention someone: people in the thread are suggested first. Mentions show as names that open the profile, and notify the person on any Nostr app.",
+      "Linked posts from blogs like Daring Fireball are shared, copied and opened as the blog's own post, not the page they link to. You still read the linked page with the blog's comment on top."
+    ]
+  },
+  {
     "version": "0.6.21",
     "date": "2026-10-15",
     "title": "Rename your sources",
