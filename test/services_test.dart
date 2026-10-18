@@ -194,6 +194,38 @@ void main() {
   });
 
   group('ArticleExtractor', () {
+    test("a Substack embedded post becomes a quote, not loose lines", () {
+      const html = '<p>As Ernesto wrote:</p>'
+          '<div class="embedded-post-wrap"><a class="embedded-post" '
+          'native="true" href="https://e.substack.com/p/uprising?utm_source=substack&amp;utm_medium=web">'
+          '<div class="embedded-post-header"><img src="https://x/w_56,h_56/l.png"/>'
+          '<span class="embedded-post-publication-name">Ernesto’s Substack</span></div>'
+          '<div class="embedded-post-title-wrapper"><div class="embedded-post-title">'
+          'The Uprising Beneath Everything</div></div>'
+          '<div class="embedded-post-body">On Thursday my city filled with students…</div>'
+          '<div class="embedded-post-cta-wrapper"><span class="embedded-post-cta">Read more</span></div>'
+          '<div class="embedded-post-meta">a day ago · 22 likes</div></a></div>'
+          '<p>My takeaway.</p>';
+      final md = ArticleExtractor.convertHtmlToMarkdown(html);
+      expect(
+          md,
+          contains('> [The Uprising Beneath Everything]'
+              '(https://e.substack.com/p/uprising) · Ernesto’s Substack'));
+      expect(md, contains('> On Thursday my city filled with students…'));
+      expect(md, isNot(contains('](https://e.substack.com/p/uprising?')));
+      expect(md, isNot(contains('Read more')));
+      expect(md, isNot(contains('22 likes')));
+    });
+
+    test('a link around paragraphs keeps them, linking the first', () {
+      const html = '<a href="https://example.com/post">'
+          '<div><h3>Other post</h3><p>Its summary.</p></div></a>';
+      final md = ArticleExtractor.convertHtmlToMarkdown(html);
+      expect(md, contains('[Other post](https://example.com/post)'));
+      expect(md, contains('Its summary.'));
+      expect(md.split('\n').where((l) => l.startsWith('](')), isEmpty);
+    });
+
     test('extracts the article body and converts it to markdown', () {
       final paragraph = 'Sentence with enough length to count. ' * 5;
       final html = '''

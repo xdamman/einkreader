@@ -73,6 +73,7 @@ class ArticleExtractor {
         el.remove();
       }
     }
+    _unwrapBlockLinks(frag);
     // Links with nothing to show — a heading's self-link, or a share button
     // whose SVG icon was stripped — would render as empty "[ ](url)" text.
     for (final a in frag.querySelectorAll('a')) {
@@ -111,6 +112,59 @@ class ArticleExtractor {
       if (tiny || avatarish) img.remove();
     }
     return frag.outerHtml;
+  }
+
+  static const _blocks =
+      'div, p, h1, h2, h3, h4, h5, h6, ul, ol, figure, blockquote, table';
+
+  /// Markdown links can't hold paragraphs: a link wrapped around blocks (a
+  /// card linking to another post) came out as loose lines ending in a
+  /// stray "](url)". Substack's embedded posts become a quote of the
+  /// post's title, linked, and its opening; other such links keep their
+  /// blocks with the link on the first one.
+  static void _unwrapBlockLinks(dom.DocumentFragment frag) {
+    for (final a in frag.querySelectorAll('a')) {
+      if (a.querySelector(_blocks) == null) continue;
+      final href = a.attributes['href'];
+      if (a.classes.contains('embedded-post')) {
+        final title = a.querySelector('.embedded-post-title')?.text.trim();
+        final from =
+            a.querySelector('.embedded-post-publication-name')?.text.trim();
+        final body = a.querySelector('.embedded-post-body')?.text.trim();
+        final quote = dom.Element.tag('blockquote');
+        final head = dom.Element.tag('p');
+        // The post itself, without the embed's tracking parameters.
+        final url = href?.split('?').first ?? '';
+        final link = dom.Element.tag('a')
+          ..attributes['href'] = url
+          ..text = title ?? from ?? url;
+        head.append(link);
+        if (title != null && from != null && from.isNotEmpty) {
+          head.append(dom.Text(' · $from'));
+        }
+        quote.append(head);
+        if (body != null && body.isNotEmpty) {
+          quote.append(dom.Element.tag('p')..text = body);
+        }
+        a.replaceWith(quote);
+        continue;
+      }
+      final wrapper = dom.Element.tag('div');
+      wrapper.nodes.addAll(a.nodes.toList());
+      if (href != null) {
+        final first = wrapper
+            .querySelectorAll('p, h1, h2, h3, h4, h5, h6, div')
+            .where((e) =>
+                e.text.trim().isNotEmpty && e.querySelector(_blocks) == null)
+            .firstOrNull;
+        if (first != null) {
+          final link = dom.Element.tag('a')..attributes['href'] = href;
+          link.nodes.addAll(first.nodes.toList());
+          first.append(link);
+        }
+      }
+      a.replaceWith(wrapper);
+    }
   }
 
   /// Converts an HTML fragment (e.g. content:encoded from a feed) to Markdown.
