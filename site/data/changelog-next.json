@@ -1,5 +1,12 @@
 [
   {
+    "date": "2026-10-18",
+    "title": "einkreader is on Google Play",
+    "changes": [
+      "einkreader.app now links to the app on Google Play. Signed APKs stay available from the open source page."
+    ]
+  },
+  {
     "version": "0.6.25",
     "date": "2026-10-18",
     "title": "The article menu opens below the top bar",
