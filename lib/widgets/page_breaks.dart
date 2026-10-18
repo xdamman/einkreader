@@ -13,9 +13,12 @@ typedef LineExtent = (double top, double bottom);
 /// paragraph of one line). A page ends after its last whole line, never
 /// through one, and preferably at the end of a paragraph: a paragraph is
 /// split between pages only when moving it whole would leave more than a
-/// third of the page empty. Only something taller than a page is cut.
+/// third of the page empty. A page never ends with a paragraph's first line
+/// alone, nor with a heading (one of [headings]): those move to the next
+/// page with what follows them. Only something taller than a page is cut.
 List<double> pageBreaks(List<List<LineExtent>> paragraphs, double pageHeight,
-    double contentHeight) {
+    double contentHeight,
+    {Set<int> headings = const {}}) {
   final lines = <(double, double, int)>[
     for (var p = 0; p < paragraphs.length; p++)
       for (final (top, bottom) in paragraphs[p])
@@ -57,6 +60,7 @@ List<double> pageBreaks(List<List<LineExtent>> paragraphs, double pageHeight,
         y = clear(first);
       }
     }
+    y = _keepTogether(paragraphs, headings, start, y, clear);
     // Nothing fits whole (a line or an image taller than the page): cut.
     if (y <= start + eps) y = limit;
     starts.add(y);
@@ -65,11 +69,66 @@ List<double> pageBreaks(List<List<LineExtent>> paragraphs, double pageHeight,
   return starts;
 }
 
+/// Moves the break [y] up so the page doesn't end with a paragraph's first
+/// line alone, or with a heading cut off from its text. Leaves [y] alone
+/// when that would empty the page.
+double _keepTogether(List<List<LineExtent>> paragraphs, Set<int> headings,
+    double start, double y, double Function(double) clear) {
+  const eps = 0.5;
+  var moved = y;
+  // A paragraph split with only its first line on this page: move it all.
+  for (final lines in paragraphs) {
+    final first = lines.first.$1;
+    if (first < moved - eps && lines.last.$2 > moved + eps) {
+      if (lines.where((l) => l.$2 <= moved + eps).length < 2) {
+        moved = clear(first);
+      }
+      break;
+    }
+  }
+  // A heading (or a few stacked) right above the break goes with it.
+  while (true) {
+    int? before;
+    for (var i = 0; i < paragraphs.length; i++) {
+      final lines = paragraphs[i];
+      if (lines.last.$2 <= moved + eps && lines.first.$1 >= start - eps) {
+        if (before == null ||
+            lines.last.$2 > paragraphs[before].last.$2) {
+          before = i;
+        }
+      }
+    }
+    if (before == null || !headings.contains(before)) break;
+    final top = clear(paragraphs[before].first.$1);
+    if (top >= moved - eps) break;
+    moved = top;
+  }
+  return moved > start + eps ? moved : y;
+}
+
+/// Whether a paragraph's text is all bold: a heading (or a bold line
+/// standing in for one) that belongs with what follows.
+bool _allBold(InlineSpan span, [FontWeight inherited = FontWeight.normal]) {
+  final weight = span.style?.fontWeight ?? inherited;
+  if (span is TextSpan) {
+    final text = span.text ?? '';
+    if (text.trim().isNotEmpty && weight.value < FontWeight.w600.value) {
+      return false;
+    }
+    return (span.children ?? const <InlineSpan>[])
+        .every((c) => _allBold(c, weight));
+  }
+  return true;
+}
+
 /// The lines of every paragraph and image laid out under [content], in the
 /// coordinates of [scrollBox] scrolled by [scrollOffset].
-List<List<LineExtent>> collectLines(
+///
+/// Short paragraphs whose text is all bold are listed in `headings`.
+({List<List<LineExtent>> paragraphs, Set<int> headings}) collectLines(
     RenderObject content, RenderBox scrollBox, double scrollOffset) {
   final paragraphs = <List<LineExtent>>[];
+  final headings = <int>{};
   void visit(RenderObject node) {
     if (node is RenderParagraph) {
       final length = node.text.toPlainText().length;
@@ -90,7 +149,11 @@ List<List<LineExtent>> collectLines(
           lines.add((top, bottom));
         }
       }
-      if (lines.isNotEmpty) paragraphs.add(lines);
+      if (lines.isEmpty) return;
+      if (lines.length <= 3 && _allBold(node.text)) {
+        headings.add(paragraphs.length);
+      }
+      paragraphs.add(lines);
       return;
     }
     if (node is RenderImage && node.hasSize) {
@@ -103,5 +166,5 @@ List<List<LineExtent>> collectLines(
   }
 
   visit(content);
-  return paragraphs;
+  return (paragraphs: paragraphs, headings: headings);
 }
