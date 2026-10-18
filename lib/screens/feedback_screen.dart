@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/errors.dart';
 import '../services/feedback_service.dart';
 import '../services/nostr_service.dart';
+import '../widgets/filter_pill.dart';
 import '../widgets/markdown_view.dart';
 import '../widgets/profile_switcher.dart';
 import 'nostr_profile_screen.dart';
@@ -39,6 +40,9 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
 
   /// A refresh from the relays is running (the app-bar icon spins).
   bool _loading = false;
+
+  /// Only feedback tagged with this kind; null shows all.
+  FeedbackKind? _kind;
 
   /// Newest feedback keeps arriving while the screen is open.
   Timer? _poll;
@@ -136,12 +140,29 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final notes = _notes;
+    final all = _notes;
+    final counts = {
+      for (final kind in FeedbackKind.values)
+        kind: all?.where((n) => n.tags.contains(kind.tag)).length ?? 0,
+    };
+    final notes = _kind == null
+        ? all
+        : all?.where((n) => n.tags.contains(_kind!.tag)).toList();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Feedback'),
+        // No refresh button: the list fetches what's new on opening and
+        // every minute while open.
         actions: [
-          RefreshAction(loading: _loading, onPressed: _load),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TextButton.icon(
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('New feedback',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              onPressed: _newFeedback,
+            ),
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -159,17 +180,34 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                     'suggest an idea, or reply to others.',
                     style: TextStyle(fontSize: 15, height: 1.4),
                   ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('New feedback'),
-                    style: OutlinedButton.styleFrom(
-                        side: const BorderSide(width: 1.5)),
-                    onPressed: _newFeedback,
-                  ),
                 ],
               ),
             ),
+            // The same pills as on the form: tap one to see only that
+            // kind, again (or All) to see everything.
+            if (counts.values.any((c) => c > 0))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilterPill(
+                      label: 'All',
+                      selected: _kind == null,
+                      onTap: () => setState(() => _kind = null),
+                    ),
+                    for (final kind in FeedbackKind.values)
+                      if (counts[kind]! > 0 || _kind == kind)
+                        FilterPill(
+                          label: '${kind.label} ${counts[kind]}',
+                          selected: _kind == kind,
+                          onTap: () => setState(
+                              () => _kind = _kind == kind ? null : kind),
+                        ),
+                  ],
+                ),
+              ),
             const Divider(height: 1),
             if (_error != null)
               Padding(padding: const EdgeInsets.all(24), child: Text(_error!))
@@ -177,9 +215,11 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
               // Loading is shown by the app-bar icon, not a big spinner.
               const SizedBox.shrink()
             else if (notes.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('No feedback yet — be the first.'),
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(_kind == null
+                    ? 'No feedback yet — be the first.'
+                    : 'No ${_kind!.label.toLowerCase()} yet.'),
               )
             else
               for (final note in notes) ...[
@@ -719,6 +759,12 @@ class FeedbackNoteTile extends StatelessWidget {
                       ),
                       Text('  ·  ${relativeTime(note.createdAt)}',
                           style: const TextStyle(fontSize: 13)),
+                      // Its kinds, as tagged when written.
+                      for (final kind in FeedbackKind.values)
+                        if (note.tags.contains(kind.tag))
+                          Text('  ·  ${kind.label}',
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.w600)),
                     ],
                   ),
                   if (replyingTo != null)
@@ -1021,6 +1067,9 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
   /// Off by default: the page is captured just in case, and attached only
   /// when the reader asks (instantly — it's already there).
   bool _includeScreenshot = false;
+
+  /// What it's about (bug, feature request, rendering issue), any number.
+  final Set<FeedbackKind> _kinds = {};
   ({String name, String? address, String npub, String picture})? _identity;
   bool _posting = false;
 
@@ -1068,7 +1117,8 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
       final posting = await widget.service.submit(_body.text,
           subject: _subject.text,
           url: _url.text,
-          screenshot: _includeScreenshot ? widget.screenshot : null);
+          screenshot: _includeScreenshot ? widget.screenshot : null,
+          kinds: _kinds);
       // Our own name and picture are already known: no relay round trip.
       final me = await widget.service.identity();
       NostrProfileCache.put(NostrProfile(
@@ -1158,6 +1208,22 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: 16),
+          // One tap tags it; tap again to untag.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final kind in FeedbackKind.values)
+                FilterPill(
+                  label: kind.label,
+                  selected: _kinds.contains(kind),
+                  onTap: () => setState(() => _kinds.contains(kind)
+                      ? _kinds.remove(kind)
+                      : _kinds.add(kind)),
+                ),
+            ],
           ),
           const SizedBox(height: 16),
           TextField(

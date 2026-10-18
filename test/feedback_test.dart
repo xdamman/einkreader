@@ -14,6 +14,7 @@ import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/markdown_view.dart';
 import 'package:flutter/material.dart';
+import 'package:einkreader/widgets/filter_pill.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
@@ -422,6 +423,13 @@ void main() {
         reason: 'no screenshot unless asked for');
     expect(find.text('Include a screenshot of the page'), findsOneWidget);
 
+    // Kinds are one tap each; a second tap removes one.
+    for (final label in ['Bug', 'Rendering issue', 'Feature request']) {
+      await tester.tap(find.text(label));
+      await tester.pump();
+    }
+    await tester.tap(find.text('Feature request'));
+    await tester.pump();
     await tester.enterText(
         find.widgetWithText(TextField, 'Subject'), 'Parsing issue');
     await tester.enterText(
@@ -472,6 +480,12 @@ void main() {
     expect(event['tags'], anyElement(equals(['subject', 'Parsing issue'])));
     expect(event['tags'],
         anyElement(equals(['r', 'https://example.org/other'])));
+    expect(
+        [
+          for (final t in event['tags'] as List)
+            if ((t as List).first == 't') t[1]
+        ],
+        ['feedback', 'bug', 'rendering-issue']);
     expect(event['content'], contains('https://blossom.example/abc123.jpg'));
     // Let the "Feedback posted" snackbar time out.
     await tester.pump(const Duration(seconds: 5));
@@ -548,6 +562,58 @@ void main() {
     expect(preview.data, isNot(contains('**')));
     expect(find.byType(MarkdownView), findsNothing,
         reason: 'the full text shows in the thread');
+  });
+
+  test('every feedback carries the feedback hashtag', () async {
+    await ProfileService.instance.createIdentity();
+    await service.post('Untagged.');
+    expect(relay.events.single['tags'], anyElement(equals(['t', 'feedback'])));
+    expect(FeedbackNote.fromEvent(relay.events.single).tags, ['feedback']);
+  });
+
+  testWidgets('the list filters by kind with the same pills', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    for (final (id, kinds) in [
+      ('b1', ['bug']),
+      ('b2', ['bug', 'rendering-issue']),
+      ('f1', ['feature-request']),
+      ('n1', <String>[]),
+    ]) {
+      relay.events.add({
+        'id': id,
+        'pubkey':
+            '2222222222222222222222222222222222222222222222222222222222222222',
+        'created_at': now - id.hashCode % 100,
+        'kind': 1,
+        'tags': [
+          ['p', FeedbackService.officialHex],
+          ['t', 'feedback'],
+          for (final k in kinds) ['t', k],
+        ],
+        'content': 'Note $id',
+      });
+    }
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
+    await settle(tester);
+    expect(find.byType(FilterPill), findsNWidgets(4));
+    expect(find.text('Bug 2'), findsOneWidget);
+    expect(find.text('Feature request 1'), findsOneWidget);
+    expect(find.text('Rendering issue 1'), findsOneWidget);
+    expect(find.textContaining('Note '), findsNWidgets(4));
+
+    await tester.tap(find.text('Bug 2'));
+    await tester.pump();
+    expect(find.text('Note b1'), findsOneWidget);
+    expect(find.text('Note b2'), findsOneWidget);
+    expect(find.text('Note f1'), findsNothing);
+    expect(find.text('Note n1'), findsNothing);
+    // Each note names its kinds.
+    expect(find.text('  ·  Rendering issue'), findsOneWidget);
+
+    await tester.tap(find.text('All'));
+    await tester.pump();
+    expect(find.textContaining('Note '), findsNWidgets(4));
   });
 
   test('list previews are plain text', () {
