@@ -90,3 +90,12 @@ assert.equal(registry.xavier, undefined, 'old name released on rename');
 assert.equal(pubkeyOf(registry.xdamman), 'a'.repeat(64));
 
 console.log('registry tests passed');
+
+// -- public blob addresses (reads without list()) ----------------------------
+{
+  const { publicUrl } = await import('../lib/profile_cache.js');
+  assert.equal(publicUrl('profiles/abc.json', 'vercel_blob_rw_QyXZmo5l4OfvbnZQ_secret'),
+    'https://qyxzmo5l4ofvbnzq.public.blob.vercel-storage.com/profiles/abc.json');
+  assert.equal(publicUrl('profiles/abc.json', undefined), null,
+    'no token: fall back to listing');
+}

@@ -74,7 +74,23 @@ async function migrateLegacy() {
   }
 }
 
-export async function loadRegistry() {
+// The registry as last read by this function instance: profile pages, feeds
+// and nostr.json read it on almost every request, and each read lists the
+// store, which counts against its monthly operations. Writers pass
+// { fresh: true }; this instance's own writes clear it.
+const MEMO_MS = 60 * 1000;
+let memo = null;
+
+export async function loadRegistry({ fresh = false } = {}) {
+  if (!fresh && memo && Date.now() - memo.at < MEMO_MS) {
+    return structuredClone(memo.registry);
+  }
+  const registry = await readRegistry();
+  memo = { at: Date.now(), registry: structuredClone(registry) };
+  return registry;
+}
+
+async function readRegistry() {
   let blobs = await listEntryBlobs();
   if (blobs.length === 0) {
     await migrateLegacy();
@@ -91,6 +107,7 @@ export async function loadRegistry() {
 
 /// Writes [name]'s entry as a new blob, then drops its older versions.
 export async function saveEntry(name, entry) {
+  memo = null;
   await put(`${PREFIX}${name}/${Date.now()}.json`, JSON.stringify(entry), {
     access: 'public',
     addRandomSuffix: false,
@@ -105,6 +122,7 @@ export async function saveEntry(name, entry) {
 
 /// Removes [name] entirely (all versions).
 export async function deleteEntry(name) {
+  memo = null;
   const own = (await listEntryBlobs())
       .filter((b) => b.pathname.startsWith(`${PREFIX}${name}/`));
   if (own.length) await del(own.map((b) => b.url));

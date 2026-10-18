@@ -46,7 +46,7 @@ export default async function handler(req, res) {
   const invalid = verifyAuthEvent(event, { name });
   if (invalid) return res.status(401).json({ error: invalid });
 
-  const registry = await loadRegistry();
+  const registry = await loadRegistry({ fresh: true });
   const before = new Set(Object.keys(registry));
   const { status, body } =
       applyRegistration(registry, { name, pubkey, senders });

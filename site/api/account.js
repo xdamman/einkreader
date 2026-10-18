@@ -38,7 +38,7 @@ export default async function handler(req, res) {
   const pubkey = authedPubkey(req);
   if (!pubkey) return res.status(401).json({ error: 'unauthorized' });
 
-  const registry = await loadRegistry();
+  const registry = await loadRegistry({ fresh: true });
   const own = entryForPubkey(registry, pubkey);
   if (own) await deleteEntry(own.name);
   let removed = 0;

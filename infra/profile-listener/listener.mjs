@@ -5,6 +5,7 @@
 // pages still refresh from the relays, just up to an hour late.
 //
 // Authors come from /.well-known/nostr.json (re-read every 10 minutes).
+// A list that drops more than half of them at once is ignored.
 // Node 22+ (built-in WebSocket); no dependencies, no secrets.
 const SITE = process.env.SITE ?? 'https://einkreader.app';
 const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
@@ -22,8 +23,17 @@ let flushTimer = null;
 async function loadAuthors() {
   try {
     const res = await fetch(`${SITE}/.well-known/nostr.json`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const names = (await res.json()).names ?? {};
     const next = [...new Set(Object.values(names))].sort();
+    // A list suddenly missing most authors is the site failing to read its
+    // registry (as when its Blob store was blocked), not people leaving:
+    // keep following everyone until it comes back.
+    const kept = next.filter((a) => authors.includes(a)).length;
+    if (authors.length > 1 && kept < authors.length / 2) {
+      log(`nostr.json lists only ${kept} of ${authors.length} authors: keeping them all`);
+      return;
+    }
     if (next.join() !== authors.join()) {
       authors = next;
       log(`following ${authors.length} authors`);

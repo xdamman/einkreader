@@ -32,14 +32,28 @@ export const tagFor = (name) => `profile-${name}`;
 
 const pathFor = (pubkey) => `profiles/${pubkey}.json`;
 
+/// Where the public blob at [path] is served: the store's address comes
+/// from its token (vercel_blob_rw_<storeId>_…), so a read needs no list(),
+/// which counts against the store's monthly operations.
+export function publicUrl(path, token = process.env.BLOB_READ_WRITE_TOKEN) {
+  const storeId = token?.split('_')[3];
+  return storeId
+    ? `https://${storeId.toLowerCase()}.public.blob.vercel-storage.com/${path}`
+    : null;
+}
+
 /// The cached { events, syncedAt } for [pubkey], or null.
 export async function readCache(pubkey) {
   try {
-    const { blobs } = await list({ prefix: pathFor(pubkey), limit: 1 });
-    const blob = blobs.find((b) => b.pathname === pathFor(pubkey));
-    if (!blob) return null;
-    const res = await fetch(`${blob.url}?v=${Date.parse(blob.uploadedAt) || 0}`,
-        { cache: 'no-store' });
+    let url = publicUrl(pathFor(pubkey));
+    if (!url) {
+      const { blobs } = await list({ prefix: pathFor(pubkey), limit: 1 });
+      url = blobs.find((b) => b.pathname === pathFor(pubkey))?.url;
+      if (!url) return null;
+    }
+    // A fresh query string: an overwritten blob is otherwise served stale
+    // for up to a minute.
+    const res = await fetch(`${url}?v=${Date.now()}`, { cache: 'no-store' });
     return res.ok ? await res.json() : null;
   } catch {
     return null;
