@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.6.25",
+    "date": "2026-10-18",
+    "title": "The article menu opens below the top bar",
+    "changes": [
+      "The article menu opens below the top bar, so its ⋮ button stays visible, and \"Reload & reprocess\" is now simply \"Reload\"."
+    ]
+  },
+  {
     "version": "0.6.24",
     "date": "2026-10-18",
     "title": "Article menu, feedback tags, and pages that keep headings with their text",
