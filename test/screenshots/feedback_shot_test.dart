@@ -96,7 +96,22 @@ void main() {
     relay.events.addAll([
       event(rootId, _marie, 26 * 3600, 1,
           'Could I rename a feed? Some default names are too long.', [
-        ['p', FeedbackService.officialHex]
+        ['p', FeedbackService.officialHex],
+        ['t', 'feedback'],
+        ['t', 'feature-request'],
+      ]),
+      event('c' * 64, _ana, 3 * 3600, 1,
+          'Tables from Substack posts show as raw text.', [
+        ['p', FeedbackService.officialHex],
+        ['t', 'feedback'],
+        ['t', 'bug'],
+        ['t', 'rendering-issue'],
+      ]),
+      event('d' * 64, _marie, 50 * 3600, 1,
+          'The app crashed when I opened an empty folder.', [
+        ['p', FeedbackService.officialHex],
+        ['t', 'feedback'],
+        ['t', 'bug'],
       ]),
       event('b' * 64, _agent, 5 * 3600, 1,
           'Proposal: rename any source from its ⋮ menu in Sources.', [
@@ -163,6 +178,36 @@ void main() {
     await settle(tester);
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/feedback_3_mention_sent.png'));
+  }, skip: !_enabled);
+
+  testWidgets('feedback kinds as filters', (tester) async {
+    phone(tester);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: _withEmoji(buildEinkTheme()),
+        home: FeedbackScreen(service: service)));
+    await settle(tester);
+    await tester.tap(find.text('Bug 2'));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_4_filters.png'));
+  }, skip: !_enabled);
+
+  testWidgets('tagging new feedback', (tester) async {
+    phone(tester);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: _withEmoji(buildEinkTheme()),
+        home: NewFeedbackScreen(
+            service: service, url: 'https://example.org/post')));
+    await settle(tester);
+    await tester.tap(find.text('Rendering issue'));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'Subject'),
+        'Embedded post shows as loose lines');
+    await tester.pumpAndSettle();
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_5_new_tagged.png'));
   }, skip: !_enabled);
 }
 

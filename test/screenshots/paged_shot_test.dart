@@ -103,6 +103,21 @@ void main() {
       await settle(tester);
     }
   }, skip: !_enabled);
+
+  testWidgets('article menu', (tester) async {
+    tester.view.physicalSize = const Size(750, 1000) * 2.0;
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildEinkTheme(),
+        home: ArticleScreen(articleId: id)));
+    await settle(tester);
+    await tester.tap(find.byTooltip('More'));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/article_menu.png'));
+  }, skip: !_enabled);
 }
 
 Future<void> _loadFonts() async {

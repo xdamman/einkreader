@@ -806,32 +806,48 @@ class _ArticleScreenState extends State<ArticleScreen> {
                 : '$_originLabel: ${article.displayTitle}',
             maxLines: 1, overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 16)),
+        // Everything in one menu: the title gets the width, and the
+        // text-size buttons stay put so they can be tapped repeatedly.
         actions: [
-          IconButton(
-            tooltip: 'Smaller text',
-            icon: const Icon(Icons.text_decrease),
-            onPressed: () => _setFontSize(_fontSize - 2),
-          ),
-          IconButton(
-            tooltip: 'Larger text',
-            icon: const Icon(Icons.text_increase),
-            onPressed: () => _setFontSize(_fontSize + 2),
-          ),
-          IconButton(
-            tooltip: 'Reload & reprocess',
+          PopupMenuButton<VoidCallback>(
+            tooltip: 'More',
             icon: _reprocessing
                 ? const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.refresh),
-            onPressed: _reprocessing ? null : _reprocess,
-          ),
-          IconButton(
-            tooltip: 'Share',
-            icon: const Icon(Icons.share_outlined),
-            onPressed: _showShareMenu,
+                : const Icon(Icons.more_vert),
+            onSelected: (action) => action(),
+            itemBuilder: (context) => [
+              _TextSizeMenuEntry(
+                onSmaller: () => _setFontSize(_fontSize - 2),
+                onLarger: () => _setFontSize(_fontSize + 2),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: _showShareMenu,
+                child: const ListTile(
+                  leading: Icon(Icons.share_outlined),
+                  title: Text('Share'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _reprocess,
+                enabled: !_reprocessing,
+                child: const ListTile(
+                  leading: Icon(Icons.refresh),
+                  title: Text('Reload & reprocess'),
+                ),
+              ),
+              PopupMenuItem(
+                value: () => _leaveFeedback(article),
+                child: const ListTile(
+                  leading: Icon(Icons.feedback_outlined),
+                  title: Text('Send feedback'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1125,4 +1141,46 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (!mounted) return;
     await openNewFeedback(context, url: article.url, screenshot: shot);
   }
+}
+
+/// "Text size  A−  A+" at the top of the article menu. Not a regular item:
+/// tapping a button resizes the text behind the menu and keeps it open,
+/// so the size can be stepped a few times in a row.
+class _TextSizeMenuEntry extends PopupMenuEntry<VoidCallback> {
+  final VoidCallback onSmaller;
+  final VoidCallback onLarger;
+
+  const _TextSizeMenuEntry({required this.onSmaller, required this.onLarger});
+
+  @override
+  double get height => kMinInteractiveDimension;
+
+  @override
+  bool represents(VoidCallback? value) => false;
+
+  @override
+  State<_TextSizeMenuEntry> createState() => _TextSizeMenuEntryState();
+}
+
+class _TextSizeMenuEntryState extends State<_TextSizeMenuEntry> {
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            const Expanded(
+                child: Text('Text size', style: TextStyle(fontSize: 16))),
+            IconButton(
+              tooltip: 'Smaller text',
+              icon: const Icon(Icons.text_decrease),
+              onPressed: widget.onSmaller,
+            ),
+            IconButton(
+              tooltip: 'Larger text',
+              icon: const Icon(Icons.text_increase),
+              onPressed: widget.onLarger,
+            ),
+          ],
+        ),
+      );
 }

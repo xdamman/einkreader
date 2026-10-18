@@ -16,6 +16,7 @@ import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/highlight_list.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:einkreader/services/reading_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -62,6 +63,37 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('the article menu holds text size, share, reprocess and '
+      'feedback; text size steps without closing it', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: ArticleScreen(articleId: articleId),
+    ));
+    await settle(tester);
+    final appBar = find.byType(AppBar);
+    expect(find.descendant(of: appBar, matching: find.byType(IconButton)),
+        findsOneWidget,
+        reason: 'only the menu (no back button on a first route)');
+
+    await tester.tap(find.byTooltip('More'));
+    await settle(tester);
+    for (final item in ['Text size', 'Share', 'Reload & reprocess',
+        'Send feedback']) {
+      expect(find.text(item), findsOneWidget);
+    }
+    final before = ReadingSettings.instance.prefs.value.fontSize;
+    await tester.tap(find.byTooltip('Larger text'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Larger text'));
+    await settle(tester);
+    expect(ReadingSettings.instance.prefs.value.fontSize, before + 4);
+    expect(find.text('Send feedback'), findsOneWidget,
+        reason: 'still open for another step');
+    await tester.tap(find.byTooltip('Smaller text'));
+    await settle(tester);
+    expect(ReadingSettings.instance.prefs.value.fontSize, before + 2);
+  });
+
   testWidgets('share menu lists browser + email options (no Twitter here)',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
@@ -70,7 +102,9 @@ void main() {
     ));
     await settle(tester);
 
-    await tester.tap(find.byTooltip('Share'));
+    await tester.tap(find.byTooltip('More'));
+    await settle(tester);
+    await tester.tap(find.text('Share'));
     await settle(tester);
 
     expect(find.text('Open in browser'), findsOneWidget);

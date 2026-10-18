@@ -39,6 +39,9 @@ class FeedbackNote {
   /// Attached images (NIP-92 imeta, or bare image links in the text).
   final List<String> images;
 
+  /// Hashtags (`t` tags), lowercase: "feedback", and a kind such as "bug".
+  final List<String> tags;
+
   FeedbackNote({
     required this.id,
     required this.pubkey,
@@ -48,6 +51,7 @@ class FeedbackNote {
     this.replyToId,
     this.subject,
     this.images = const [],
+    this.tags = const [],
     this.sending = false,
     Map<String, Set<String>>? reactions,
     Map<String, Map<String, DateTime>>? reactedAt,
@@ -161,10 +165,14 @@ class FeedbackNote {
     if (reply == null && positional.length > 1) reply = positional.last;
     String? subject;
     final images = <String>[];
+    final hashtags = <String>[];
     for (final tag in (event['tags'] as List? ?? const [])) {
       final t = (tag as List).map((e) => '$e').toList();
       if (t.length >= 2 && t[0] == 'subject' && t[1].trim().isNotEmpty) {
         subject = t[1].trim();
+      } else if (t.length >= 2 && t[0] == 't' && t[1].trim().isNotEmpty) {
+        final tag = t[1].trim().toLowerCase();
+        if (!hashtags.contains(tag)) hashtags.add(tag);
       } else if (t.isNotEmpty && t[0] == 'imeta') {
         for (final part in t.skip(1)) {
           if (part.startsWith('url ')) images.add(part.substring(4).trim());
@@ -181,12 +189,28 @@ class FeedbackNote {
       content: content,
       subject: subject,
       images: images,
+      tags: hashtags,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
           ((event['created_at'] as int?) ?? 0) * 1000),
       rootId: root,
       replyToId: reply ?? root,
     );
   }
+}
+
+/// The hashtag on every feedback note.
+const feedbackTag = 'feedback';
+
+/// What a feedback is about, picked when writing it and offered as a
+/// filter on the list. Stored as a hashtag (`t` tag).
+enum FeedbackKind {
+  bug('bug', 'Bug'),
+  feature('feature-request', 'Feature request'),
+  rendering('rendering-issue', 'Rendering issue');
+
+  final String tag;
+  final String label;
+  const FeedbackKind(this.tag, this.label);
 }
 
 /// A feedback being posted: the local [draft] to show right away, and
@@ -549,13 +573,16 @@ class FeedbackService {
   /// reached (the outbox retries it on the next sync). A screenshot whose
   /// upload fails is left out rather than holding the feedback back.
   Future<SentFeedback> submit(String body,
-      {String? subject, String? url, Uint8List? screenshot}) async {
+      {String? subject,
+      String? url,
+      Uint8List? screenshot,
+      Iterable<FeedbackKind> kinds = const []}) async {
     final local = FeedbackNote.fromEvent({
       'id': 'sending-${DateTime.now().microsecondsSinceEpoch}',
       'pubkey': await _profile.publicKeyHex,
       'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'content': _content(body, subject: subject, url: url),
-      'tags': _tags(subject: subject, url: url),
+      'tags': _tags(subject: subject, url: url, kinds: kinds),
     });
     final draft = FeedbackNote(
         id: local.id,
@@ -563,6 +590,7 @@ class FeedbackService {
         content: local.content,
         createdAt: local.createdAt,
         subject: local.subject,
+        tags: local.tags,
         sending: true);
 
     Future<({FeedbackNote note, bool queued})> send() async {
@@ -580,7 +608,11 @@ class FeedbackService {
           content:
               _content(body, subject: subject, url: url, imageUrl: imageUrl),
           tags: [
-            ..._tags(subject: subject, url: url, imageUrl: imageUrl),
+            ..._tags(
+                subject: subject,
+                url: url,
+                imageUrl: imageUrl,
+                kinds: kinds),
             ['client', 'einkreader'],
           ]);
       final note = FeedbackNote.fromEvent(event);
@@ -617,12 +649,19 @@ class FeedbackService {
     ].where((part) => part.isNotEmpty).join('\n\n');
   }
 
+  /// Every feedback note carries the "feedback" hashtag, plus its kinds.
   static List<List<String>> _tags(
-      {String? subject, String? url, String? imageUrl}) {
+      {String? subject,
+      String? url,
+      String? imageUrl,
+      Iterable<FeedbackKind> kinds = const []}) {
     final s = subject?.trim() ?? '';
     final link = url?.trim() ?? '';
     return [
       ['p', officialHex],
+      ['t', feedbackTag],
+      for (final kind in FeedbackKind.values)
+        if (kinds.contains(kind)) ['t', kind.tag],
       if (s.isNotEmpty) ['subject', s],
       if (link.isNotEmpty) ['r', link],
       if (imageUrl != null) ['imeta', 'url $imageUrl', 'm image/jpeg'],
