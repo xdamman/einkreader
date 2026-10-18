@@ -77,8 +77,7 @@ void main() {
 
     await tester.tap(find.byTooltip('More'));
     await settle(tester);
-    for (final item in ['Text size', 'Share', 'Reload & reprocess',
-        'Send feedback']) {
+    for (final item in ['Text size', 'Share', 'Reload', 'Send feedback']) {
       expect(find.text(item), findsOneWidget);
     }
     final before = ReadingSettings.instance.prefs.value.fontSize;

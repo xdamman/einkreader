@@ -812,6 +812,10 @@ class _ArticleScreenState extends State<ArticleScreen> {
         actions: [
           PopupMenuButton<VoidCallback>(
             tooltip: 'More',
+            // Opens below the bar, leaving the ⋮ button in sight.
+            position: PopupMenuPosition.under,
+            // The button is shorter than the bar: clear its bottom line.
+            offset: const Offset(0, 13),
             icon: _reprocessing
                 ? const SizedBox(
                     width: 20,
@@ -838,7 +842,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
                 enabled: !_reprocessing,
                 child: const ListTile(
                   leading: Icon(Icons.refresh),
-                  title: Text('Reload & reprocess'),
+                  title: Text('Reload'),
                 ),
               ),
               PopupMenuItem(
