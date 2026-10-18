@@ -249,8 +249,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
         (pos.viewportDimension, top + content.size.height, content.size.width);
     if (layout != _startsFor) {
       _startsFor = layout;
-      _starts = pageBreaks(collectLines(content, view, pos.pixels),
-          pos.viewportDimension, layout.$2);
+      final text = collectLines(content, view, pos.pixels);
+      _starts = pageBreaks(text.paragraphs, pos.viewportDimension, layout.$2,
+          headings: text.headings);
     }
     return _starts;
   }

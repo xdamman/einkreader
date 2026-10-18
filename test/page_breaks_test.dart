@@ -42,6 +42,31 @@ void main() {
     expect(starts, [0, 100, 200, 296]);
   });
 
+  test('a heading never ends a page: it moves over with its text', () {
+    // Text to 94, a heading at 100–110, its paragraph from 120. The page
+    // (0–150) could hold the heading and two lines, but the paragraph
+    // would split; it moves whole, and the heading goes with it.
+    final starts = pageBreaks(
+        [lines(0, 8), lines(100, 1), lines(120, 10)], 150, 238,
+        headings: {1});
+    expect(starts[1], 100);
+  });
+
+  test('a heading with room for only one line of its text moves over', () {
+    // Long paragraph to 154, heading 160–170, text from 180: a 200px page
+    // holds the heading and one line, so both go to the next page.
+    final starts = pageBreaks(
+        [lines(0, 13), lines(160, 1), lines(180, 20)], 200, 418,
+        headings: {1});
+    expect(starts[1], 160);
+  });
+
+  test("a paragraph's first line is never left alone at a page's end", () {
+    // 130px page: the second paragraph (from 120) would show one line.
+    final starts = pageBreaks([lines(0, 10), lines(120, 10)], 130, 238);
+    expect(starts[1], 120);
+  });
+
   test('a page that fits is one page', () {
     expect(pageBreaks([lines(0, 5)], 100, 58), [0]);
   });

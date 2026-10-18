@@ -228,7 +228,10 @@ void main() {
       final view = tester.renderObject<RenderBox>(find.byType(Scrollable));
       final column = tester.renderObject(find.byType(MarkdownView));
       // Lines relative to the screen's top; the cover hides what's below.
-      final lines = collectLines(column, view, 0).expand((p) => p).toList();
+      final lines = collectLines(column, view, 0)
+          .paragraphs
+          .expand((p) => p)
+          .toList();
       expect(lines, isNotEmpty);
       final cover = find.byType(Positioned);
       final bottom = cover.evaluate().isEmpty
