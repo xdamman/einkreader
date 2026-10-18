@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.6.23",
+    "date": "2026-10-18",
+    "title": "Pages that end on a whole line",
+    "changes": [
+      "Turning pages: each page ends after a whole line, never through one, and at the end of a paragraph when it can.",
+      "A feed served broken partway (as Daring Fireball's once was) keeps the posts before the break instead of failing the whole refresh.",
+      "Pages a site refuses to send to the app (bot checks, 403, 404) keep the feed's summary with a note to open them in the browser, instead of being retried on every refresh."
+    ]
+  },
+  {
     "version": "0.6.22",
     "date": "2026-10-17",
     "title": "Who reacted, @mentions, and the right link for linked posts",
