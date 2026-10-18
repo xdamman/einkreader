@@ -43,7 +43,14 @@ class ParsedFeed {
 /// Minimal, dependency-light RSS 2.0 / Atom parser.
 class FeedParser {
   static ParsedFeed parse(String xmlString) {
-    final doc = XmlDocument.parse(xmlString);
+    XmlDocument doc;
+    try {
+      doc = XmlDocument.parse(xmlString);
+    } on XmlException {
+      final salvaged = _salvage(xmlString);
+      if (salvaged == null) rethrow;
+      doc = salvaged;
+    }
     final root = doc.rootElement;
     if (root.name.local == 'feed') return _parseAtom(root);
     final channel = root.findElements('channel').firstOrNull ??
@@ -52,6 +59,27 @@ class FeedParser {
       throw const FormatException('Not a recognizable RSS or Atom feed');
     }
     return _parseRss(channel);
+  }
+
+  /// A feed cut short or broken partway (served while the blog rebuilds
+  /// it, as Daring Fireball's once was): keeps the entries before the
+  /// break rather than losing the whole refresh.
+  static XmlDocument? _salvage(String xml) {
+    for (final (close, tail) in [
+      ('</entry>', '</feed>'),
+      ('</item>', '</channel></rss>'),
+    ]) {
+      var end = xml.lastIndexOf(close);
+      while (end > 0) {
+        try {
+          return XmlDocument.parse(
+              '${xml.substring(0, end + close.length)}$tail');
+        } on XmlException {
+          end = xml.lastIndexOf(close, end - 1);
+        }
+      }
+    }
+    return null;
   }
 
   /// Reduces a description that may carry HTML to one plain-text line.

@@ -97,6 +97,17 @@ class SyncService {
     }
   }
 
+  /// A page the site won't serve to this app, however often we ask: a bot
+  /// challenge (AWS WAF answers 202 with an empty body and
+  /// x-amzn-waf-action), or a refusal (401, 403, 404, 410, 451).
+  static bool pageRefused(http.Response response) {
+    final status = response.statusCode;
+    if (const {401, 403, 404, 410, 451}.contains(status)) return true;
+    return status == 202 &&
+        (response.headers.containsKey('x-amzn-waf-action') ||
+            response.bodyBytes.isEmpty);
+  }
+
   final AppDatabase _db = AppDatabase.instance;
   final http.Client _http;
   final TwitterService twitter;
@@ -1021,6 +1032,23 @@ class SyncService {
           '${response.body.length} bytes',
         );
         lastKnownOffline = false;
+        if (!overwrite && pageRefused(response)) {
+          // Retrying on every refresh won't change the answer: keep the
+          // feed's summary and say why. The reader's reprocess button
+          // still tries again.
+          final why = 'The site refused to send this page to the app '
+              '(HTTP ${response.statusCode}). Open it in the browser to '
+              'read it.';
+          final summary = _plainSummary(article.summary);
+          await _db.updateArticleContent(
+              article.id!, summary == null ? why : '$summary\n\n*$why*',
+              fetched: true);
+          await AppLogService.instance.warn(
+            'Article #${article.id} refused by the site: '
+            'HTTP ${response.statusCode}, stored fallback summary',
+          );
+          return true;
+        }
         if (response.statusCode != 200) {
           throw Exception('HTTP ${response.statusCode}');
         }

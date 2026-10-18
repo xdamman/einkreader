@@ -622,6 +622,46 @@ void main() {
     expect(sync.sourceErrors, isEmpty);
   });
 
+  test('a page behind a bot wall keeps its summary and is not retried '
+      'on every refresh', () async {
+    useArchive(_no);
+    await db.insertSource(Source(
+      type: SourceType.rss,
+      title: 'News',
+      url: 'https://news.example.com/feed',
+      createdAt: DateTime(2026, 10, 1).millisecondsSinceEpoch,
+    ));
+    const feed = '''<?xml version="1.0"?>
+<rss version="2.0"><channel><title>News</title>
+<item><guid>1</guid><title>Walled</title>
+<link>https://walled.example.com/post</link>
+<description>What the post is about.</description></item>
+</channel></rss>''';
+    var pageRequests = 0;
+    final client = MockClient((request) async {
+      if (request.url.host == 'news.example.com') {
+        return http.Response(feed, 200,
+            headers: {'content-type': 'application/rss+xml; charset=utf-8'});
+      }
+      pageRequests++;
+      // AWS WAF's JavaScript challenge: 202, empty body.
+      return http.Response('', 202, headers: {'x-amzn-waf-action': 'challenge'});
+    });
+    final sync = SyncService.forTest(
+      http: client,
+      twitter: TwitterService(client: _no, accessToken: () async => 'tok'),
+    );
+
+    await sync.syncAll();
+    final article = (await db.getArticles()).single;
+    expect(article.fetched, 1);
+    expect(article.contentMarkdown, startsWith('What the post is about.'));
+    expect(article.contentMarkdown, contains('HTTP 202'));
+
+    await sync.syncAll();
+    expect(pageRequests, 1);
+  });
+
   test('a 402 credits-depleted response maps to a friendly message', () async {
     useArchive(_no);
     final source = await db.insertSource(Source(

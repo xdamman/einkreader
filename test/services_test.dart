@@ -88,6 +88,23 @@ void main() {
           ['https://daringfireball.net/linked/2026/10/16/x', null, null]);
     });
 
+    test('a feed broken partway keeps the entries before the break', () {
+      const head = '''<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Blog</title>
+  <entry><id>urn:1</id><title>One</title></entry>
+  <entry><id>urn:2</id><title>Two</title></entry>''';
+      // Cut mid-tag, as when the feed is served while being rewritten.
+      final cut = FeedParser.parse('$head\n  <entry><id>urn:3</id><ti');
+      expect(cut.items.map((i) => i.title), ['One', 'Two']);
+      // A broken entry in the middle drops it and what follows.
+      final broken = FeedParser.parse('$head\n  <entry><id>urn:3</id>'
+          '<title a=>Three</title></entry>\n  <entry><id>urn:4</id>'
+          '<title>Four</title></entry>\n</feed>');
+      expect(broken.items.map((i) => i.title), ['One', 'Two']);
+      expect(() => FeedParser.parse('<feed><title>x</ti'),
+          throwsA(isA<Exception>()));
+    });
+
   });
 
   group('NostrService', () {
