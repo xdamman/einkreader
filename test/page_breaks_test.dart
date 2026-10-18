@@ -1,0 +1,48 @@
+import 'package:einkreader/widgets/page_breaks.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// [count] lines of height 10 from [top], 2px apart.
+List<LineExtent> lines(double top, int count) =>
+    [for (var i = 0; i < count; i++) (top + i * 12, top + i * 12 + 10)];
+
+void main() {
+  test('a page ends at the end of a paragraph that fits whole', () {
+    // Paragraphs at 0–94 (8 lines) and 100–194: a 150px page would end
+    // mid second paragraph; it ends after the first instead.
+    final starts = pageBreaks([lines(0, 8), lines(100, 8)], 150, 194);
+    expect(starts, [0, 100]);
+  });
+
+  test('a long paragraph splits between lines, never through one', () {
+    final starts = pageBreaks([lines(0, 30)], 100, 358);
+    expect(starts.first, 0);
+    for (final start in starts.skip(1)) {
+      expect(start % 12, 0, reason: 'starts on a line: $start');
+    }
+    for (var i = 1; i < starts.length; i++) {
+      expect(starts[i] - starts[i - 1], lessThanOrEqualTo(100));
+      // Fills the page: at most one line's worth left blank.
+      expect(starts[i] - starts[i - 1], greaterThan(100 - 12));
+    }
+  });
+
+  test('a paragraph moves over only if the page stays two-thirds full', () {
+    // The second paragraph starts at 40: moving it whole would leave the
+    // page 60% empty, so it splits after its last whole line.
+    final starts = pageBreaks([lines(0, 3), lines(40, 20)], 100, 280);
+    expect(starts[1], 100);
+  });
+
+  test('an image taller than the page is cut; the text after it is not', () {
+    final starts = pageBreaks([
+      [(0, 250)],
+      lines(260, 5),
+    ], 100, 318);
+    // The image's tail shares page 3 with the first whole lines of text.
+    expect(starts, [0, 100, 200, 296]);
+  });
+
+  test('a page that fits is one page', () {
+    expect(pageBreaks([lines(0, 5)], 100, 58), [0]);
+  });
+}

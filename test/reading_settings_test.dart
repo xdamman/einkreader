@@ -10,6 +10,7 @@ import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/reading_settings.dart';
 import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/markdown_view.dart';
+import 'package:einkreader/widgets/page_breaks.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -22,6 +23,7 @@ void main() {
   final settings = ReadingSettings.instance;
   late int longId;
   late int shortId;
+  late int proseId;
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -37,7 +39,16 @@ void main() {
     final long = List.generate(
             60, (i) => 'Paragraph $i with enough words to take up a line.')
         .join('\n\n');
-    for (final (title, body) in [('Long', long), ('Short', 'One line.')]) {
+    final prose = List.generate(
+        30,
+        (i) => List.filled(3 + i % 7,
+                'Sentence $i runs long enough to wrap the column again.')
+            .join(' ')).join('\n\n');
+    for (final (title, body) in [
+      ('Long', long),
+      ('Short', 'One line.'),
+      ('Prose', prose),
+    ]) {
       await db.insertArticleIfNew(Article(
           sourceId: source.id!,
           guid: title,
@@ -50,6 +61,7 @@ void main() {
     final all = await db.getArticles();
     longId = all.firstWhere((a) => a.title == 'Long').id!;
     shortId = all.firstWhere((a) => a.title == 'Short').id!;
+    proseId = all.firstWhere((a) => a.title == 'Prose').id!;
   });
 
   setUp(() {
@@ -201,6 +213,38 @@ void main() {
         find.byKey(const Key('articleSwipe')), const Offset(0, -300), 1500);
     await settle(tester);
     expect(find.textContaining(RegExp(r'^Page 2 / ')), findsOneWidget);
+  });
+
+  testWidgets('paged: no page shows a cut line, top or bottom',
+      (tester) async {
+    await settings.update(const ReadingPrefs(paginated: true));
+    await openArticle(tester, proseId);
+    final bar = find.textContaining(RegExp(r'^Page \d+ / \d+$'));
+    final count = int.parse(RegExp(r'/ (\d+)')
+        .firstMatch(tester.widget<Text>(bar).data!)!
+        .group(1)!);
+    expect(count, greaterThan(2));
+    for (var page = 1; page <= count; page++) {
+      final view = tester.renderObject<RenderBox>(find.byType(Scrollable));
+      final column = tester.renderObject(find.byType(MarkdownView));
+      // Lines relative to the screen's top; the cover hides what's below.
+      final lines = collectLines(column, view, 0).expand((p) => p).toList();
+      expect(lines, isNotEmpty);
+      final cover = find.byType(Positioned);
+      final bottom = cover.evaluate().isEmpty
+          ? view.size.height
+          : tester.widget<Positioned>(cover).top!;
+      for (final (top, end) in lines) {
+        expect(top < -0.5 && end > 0.5, isFalse,
+            reason: 'page $page cuts a line at the top ($top–$end)');
+        expect(top < bottom - 0.5 && end > bottom + 0.5, isFalse,
+            reason: 'page $page cuts a line at the bottom ($top–$end)');
+      }
+      if (page < count) {
+        await tester.tap(find.byTooltip('Next page'));
+        await settle(tester);
+      }
+    }
   });
 
   testWidgets('paged: a short article has no page bar', (tester) async {
