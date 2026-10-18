@@ -151,8 +151,18 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Feedback'),
+        // No refresh button: the list fetches what's new on opening and
+        // every minute while open.
         actions: [
-          RefreshAction(loading: _loading, onPressed: _load),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TextButton.icon(
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('New feedback',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              onPressed: _newFeedback,
+            ),
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -169,14 +179,6 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                     'Public feedback about einkreader. Report a bug, '
                     'suggest an idea, or reply to others.',
                     style: TextStyle(fontSize: 15, height: 1.4),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('New feedback'),
-                    style: OutlinedButton.styleFrom(
-                        side: const BorderSide(width: 1.5)),
-                    onPressed: _newFeedback,
                   ),
                 ],
               ),
