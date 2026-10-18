@@ -15,6 +15,7 @@ import '../services/share_actions.dart';
 import '../services/reading_settings.dart';
 import '../services/sync_service.dart';
 import '../widgets/markdown_view.dart';
+import '../widgets/page_breaks.dart';
 import '../widgets/share_note_dialog.dart';
 import 'feedback_screen.dart';
 
@@ -173,7 +174,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
   void _prepareScroll(Article article) {
     if (!mounted || !_scroll.hasClients || _currentId != article.id) return;
     final maxExtent = _scroll.position.maxScrollExtent;
-    if (maxExtent <= 0) {
+    if (maxExtent <= 0 || (_reading.paginated && _pageCount() == 1)) {
       _updatePage();
       // Only FINAL content that fits on screen counts as read: a pending
       // saved link renders a short placeholder, and marking that read
@@ -213,47 +214,85 @@ class _ArticleScreenState extends State<ArticleScreen> {
 
   // ------------------------------------------------------------ pagination
   // With "Turn pages" on (Settings → Reading), the article doesn't scroll
-  // freely: it moves a screen at a time, keeping one line of the previous
-  // page at the top so no line is lost at the cut, and a bar at the bottom
-  // shows "Page 2 / 5" with arrows.
+  // freely: it moves a page at a time, and a bar at the bottom shows
+  // "Page 2 / 5" with arrows. Pages are cut from the laid-out text: each
+  // ends after its last whole line, preferably at the end of a paragraph
+  // (see pageBreaks), and what lies below that cut is covered until the
+  // next page.
 
   /// (current page, page count), both 1-based for display.
   final ValueNotifier<(int, int)> _page = ValueNotifier((1, 1));
 
-  /// How far one page turn moves: the screen height minus one line.
-  double get _pageStep {
-    final viewport = _scroll.position.viewportDimension;
-    final overlap = _fontSize * 1.55;
-    return viewport > overlap * 2 ? viewport - overlap : viewport;
+  /// Top of the cover hiding the next page's text, from the top of the
+  /// screen; null when nothing needs hiding.
+  final ValueNotifier<double?> _cover = ValueNotifier(null);
+
+  /// The article's column, measured to cut pages.
+  final GlobalKey _contentKey = GlobalKey();
+
+  List<double> _starts = const [0];
+  (double, double, double)? _startsFor;
+
+  /// Scroll offset where each page starts, recomputed when the layout
+  /// changes (images loading, text size, margins).
+  List<double> _pageStarts() {
+    if (!_scroll.hasClients) return const [0];
+    final pos = _scroll.position;
+    final content = _contentKey.currentContext?.findRenderObject();
+    final view = pos.context.notificationContext?.findRenderObject();
+    if (content is! RenderBox || view is! RenderBox || !content.hasSize) {
+      return const [0];
+    }
+    final top =
+        content.localToGlobal(Offset.zero, ancestor: view).dy + pos.pixels;
+    final layout =
+        (pos.viewportDimension, top + content.size.height, content.size.width);
+    if (layout != _startsFor) {
+      _startsFor = layout;
+      _starts = pageBreaks(collectLines(content, view, pos.pixels),
+          pos.viewportDimension, layout.$2);
+    }
+    return _starts;
   }
 
-  int _pageCount() {
-    if (!_scroll.hasClients) return 1;
-    final max = _scroll.position.maxScrollExtent;
-    if (max <= 0) return 1;
-    return 1 + (max / _pageStep - 0.01).ceil();
-  }
+  int _pageCount() => _pageStarts().length;
 
   /// 0-based page currently shown.
   int _currentPage() {
     if (!_scroll.hasClients) return 0;
-    final pos = _scroll.position;
-    if (pos.pixels >= pos.maxScrollExtent - 1) return _pageCount() - 1;
-    return (pos.pixels / _pageStep + 0.01).floor();
+    final starts = _pageStarts();
+    final pixels = _scroll.position.pixels;
+    var page = 0;
+    while (page + 1 < starts.length && starts[page + 1] <= pixels + 1) {
+      page++;
+    }
+    return page;
   }
 
   void _updatePage() {
     if (!_scroll.hasClients) return;
-    _page.value = (_currentPage() + 1, _pageCount());
+    final starts = _pageStarts();
+    final page = _currentPage();
+    _page.value = (page + 1, starts.length);
+    _cover.value = _reading.paginated && page + 1 < starts.length
+        ? starts[page + 1] - _scroll.position.pixels
+        : null;
   }
 
   void _goToPage(int page) {
     if (!_scroll.hasClients) return;
-    final count = _pageCount();
-    final p = page.clamp(0, count - 1);
+    final starts = _pageStarts();
+    final p = page.clamp(0, starts.length - 1);
     final max = _scroll.position.maxScrollExtent;
-    _scroll.jumpTo((p * _pageStep).clamp(0.0, max < 0 ? 0.0 : max));
+    _scroll.jumpTo(starts[p].clamp(0.0, max < 0 ? 0.0 : max));
     _updatePage();
+    // Paged, the last page may sit above the scroll end (blank space lets
+    // it start at its cut): reaching it is reaching the bottom.
+    final article = _article;
+    if (p == starts.length - 1 && starts.length > 1 && !_reachedBottom) {
+      _reachedBottom = true;
+      if (article != null && article.read == 0) _markRead();
+    }
   }
 
   /// Turns [delta] pages; false when already at that end.
@@ -290,6 +329,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     ReadingSettings.instance.prefs.removeListener(_onReadingPrefs);
     _scroll.dispose();
     _page.dispose();
+    _cover.dispose();
     _feedbackTap.dispose();
     super.dispose();
   }
@@ -860,7 +900,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
             // Side margins from Settings → Reading (automatic: a
             // comfortable column on tablets).
             final horizontal = _reading.marginFor(constraints.maxWidth);
-            return SingleChildScrollView(
+            return Stack(
+              children: [
+                SingleChildScrollView(
               // New identity per article so scroll resets to the top on swipe.
               key: ValueKey(_currentId),
               controller: _scroll,
@@ -868,8 +910,12 @@ class _ArticleScreenState extends State<ArticleScreen> {
               physics: _reading.paginated
                   ? const NeverScrollableScrollPhysics()
                   : const ClampingScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 48),
+              // Paged, a screen of blank space at the end lets the last
+              // page start at its cut like the others.
+              padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal,
+                  _reading.paginated ? constraints.maxHeight : 48),
               child: Column(
+                key: _contentKey,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
@@ -985,6 +1031,23 @@ class _ArticleScreenState extends State<ArticleScreen> {
                   ),
                 ],
               ),
+            ),
+                // Hides the lines of the next page below this page's cut.
+                ValueListenableBuilder<double?>(
+                  valueListenable: _cover,
+                  builder: (context, top, _) => top == null
+                      ? const SizedBox.shrink()
+                      : Positioned(
+                          top: top,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: ColoredBox(
+                              color: Theme.of(context)
+                                  .scaffoldBackgroundColor),
+                        ),
+                ),
+              ],
             );
           },
         ),
