@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.24",
+    "date": "2026-10-18",
+    "title": "Article menu, feedback tags, and pages that keep headings with their text",
+    "changes": [
+      "The article's buttons are now in one menu at the top right: text size (A− and A+ keep the menu open), Share, Reload & reprocess, and a new Send feedback.",
+      "When writing feedback, tag it as Bug, Feature request or Rendering issue in one tap. The feedback list offers the same tags as filters.",
+      "New feedback is now at the top right of the Feedback screen. The list fetches what's new by itself, so the refresh button is gone.",
+      "Turning pages: a heading is never left alone at the bottom of a page, and a paragraph never leaves just its first line behind.",
+      "Posts embedded in Substack articles show as a quote with a link to the post, instead of loose lines and a broken link."
+    ]
+  },
+  {
     "version": "0.6.23",
     "date": "2026-10-18",
     "title": "Pages that end on a whole line",
