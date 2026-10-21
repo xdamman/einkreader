@@ -71,7 +71,9 @@
     <div class="appnote" id="appNote">
       <strong>Want to post feedback, reply or react?</strong> Use the
       einkreader app: tap the feedback icon at the top right of the home
-      screen (or the Feedback link at the end of any article).
+      screen (or the Feedback link at the end of any article). On Nostr,
+      follow <a href="https://primal.net/search/%23einkreader" rel="noopener">#einkreader</a>
+      to see new feedback in your own app, and reply from there.
       <div class="actions">
         <a class="btn primary" href="https://play.google.com/store/apps/details?id=com.xlcollective.einkreader">Get the app</a>
         <button id="refreshBtn">Refresh</button>
@@ -82,7 +84,8 @@
 
     <footer>
       Feedback is published on the open Nostr network, addressed to
-      einkreader's official account. <a href="/changelog">Changelog</a> ·
+      einkreader's official account. <a href="https://njump.me/npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7" rel="me noopener">Follow einkreader on Nostr</a> ·
+      <a href="/changelog">Changelog</a> ·
       <a href="/contact">Contact</a> ·
       <a href="/privacy">Privacy</a>
     </footer>
@@ -91,7 +94,7 @@
 
   <script type="module">
     // Read-only: posting, replying and reacting happen in the app.
-    import { npubEncode, npubDecode } from '/js/nostr.js';
+    import { noteEncode, npubEncode, npubDecode } from '/js/nostr.js';
 
     const OFFICIAL = npubDecode('npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7');
     const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
@@ -440,7 +443,12 @@
         const note = document.createElement('p');
         note.className = 'status';
         note.style.marginTop = '16px';
-        note.textContent = 'To reply or react, open this feedback in the einkreader app.';
+        note.append('To reply or react, open this feedback in the einkreader app, or ');
+        const open = document.createElement('a');
+        open.href = `https://njump.me/${noteEncode(threadId)}`;
+        open.target = '_blank'; open.rel = 'noopener';
+        open.textContent = 'in any Nostr app ↗';
+        note.append(open, '.');
         view.append(note);
         return;
       }

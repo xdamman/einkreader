@@ -282,9 +282,14 @@ class NostrService {
   }
 
   /// Encodes a hex pubkey as npub1… (NIP-19).
-  static String npubEncode(String hexPubkey) => bech32Encode('npub', [
-        for (var i = 0; i < hexPubkey.length; i += 2)
-          int.parse(hexPubkey.substring(i, i + 2), radix: 16)
+  static String npubEncode(String hexPubkey) => _encodeHex('npub', hexPubkey);
+
+  /// Encodes a hex event id as note1… (NIP-19), the form Nostr apps open.
+  static String noteEncode(String hexId) => _encodeHex('note', hexId);
+
+  static String _encodeHex(String hrp, String hex) => bech32Encode(hrp, [
+        for (var i = 0; i < hex.length; i += 2)
+          int.parse(hex.substring(i, i + 2), radix: 16)
       ]);
 
   static NostrProfile _profileFromEvent(Map<String, dynamic> event) {

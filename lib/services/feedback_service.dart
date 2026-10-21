@@ -201,6 +201,10 @@ class FeedbackNote {
 /// The hashtag on every feedback note.
 const feedbackTag = 'feedback';
 
+/// Also on every feedback note: unlike #feedback, a hashtag only einkreader
+/// uses, so any Nostr app can follow the feedback by it.
+const appTag = 'einkreader';
+
 /// What a feedback is about, picked when writing it and offered as a
 /// filter on the list. Stored as a hashtag (`t` tag).
 enum FeedbackKind {
@@ -649,7 +653,8 @@ class FeedbackService {
     ].where((part) => part.isNotEmpty).join('\n\n');
   }
 
-  /// Every feedback note carries the "feedback" hashtag, plus its kinds.
+  /// Every feedback note carries the "feedback" and "einkreader" hashtags,
+  /// plus its kinds.
   static List<List<String>> _tags(
       {String? subject,
       String? url,
@@ -660,6 +665,7 @@ class FeedbackService {
     return [
       ['p', officialHex],
       ['t', feedbackTag],
+      ['t', appTag],
       for (final kind in FeedbackKind.values)
         if (kinds.contains(kind)) ['t', kind.tag],
       if (s.isNotEmpty) ['subject', s],

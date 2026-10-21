@@ -85,7 +85,7 @@ export function changelogHtml(entries) {
     <a href="/feedback">feedback</a>; follow along with the
     <a href="/changelog.xml">changelog feed</a>, in einkreader of course.</p>
 ${entries.map(entryHtml).join('\n')}
-    <footer><a href="/">Home</a> · <a href="/feedback">Feedback</a> · <a href="/contact">Contact</a> · <a href="/privacy">Privacy</a></footer>
+    <footer><a href="/">Home</a> · <a href="/feedback">Feedback</a> · <a href="https://njump.me/npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7" rel="me noopener">Follow einkreader on Nostr</a> · <a href="/contact">Contact</a> · <a href="/privacy">Privacy</a></footer>
   </div>
 </body>
 </html>
