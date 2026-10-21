@@ -33,6 +33,18 @@ class NostrProfileCache {
   static Iterable<NostrProfile> get all =>
       _profiles.values.map((p) => _named(p)!);
 
+  /// Every name a known person can be @mentioned by → their pubkey: the
+  /// name shown, and the one in their profile when the app renames them
+  /// (people still type the agent's old name). The app's own accounts are
+  /// in even before their profile loads.
+  static Map<String, String> get mentionNames => {
+        for (final p in _profiles.values)
+          if (p.name.trim().isNotEmpty) p.name.trim(): p.pubkey,
+        for (final p in all)
+          if (p.name.trim().isNotEmpty) p.name.trim(): p.pubkey,
+        for (final e in FeedbackService.knownNames.entries) e.value: e.key,
+      };
+
   /// The app's own accounts go by the name it gives them
   /// ([FeedbackService.knownNames]), whatever their profile says.
   static NostrProfile? _named(NostrProfile? profile) {

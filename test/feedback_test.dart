@@ -323,7 +323,6 @@ void main() {
         theme: buildEinkTheme(),
         home: FeedbackThreadScreen(root: note, service: service)));
     await settle(tester);
-    expect(find.byTooltip('Open in a Nostr app'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'Thanks @ad');
     await tester.pump();
@@ -350,6 +349,45 @@ void main() {
             of: find.text('@Ada'), matching: find.byType(GestureDetector)),
         findsWidgets,
         reason: 'the chip opens their profile');
+  });
+
+  testWidgets(
+      'a name typed out in full is a mention too, and Ctrl+Enter sends',
+      (tester) async {
+    const agent = FeedbackService.agentHex;
+    // The agent's profile still says its old name; the app calls it
+    // "einkReader agent". Either, typed out, mentions it.
+    NostrProfileCache.debugPut(const NostrProfile(
+        pubkey: agent, name: "Xavier's agent", about: ''));
+    await tester.runAsync(() => ProfileService.instance.createIdentity());
+    final note = (await tester.runAsync(() => service.post('Inbox tab')))!;
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(),
+        home: FeedbackThreadScreen(root: note, service: service)));
+    await settle(tester);
+
+    await tester.enterText(find.byType(TextField),
+        "@xavier’s agent can you share a screenshot? cc @einkReader agent");
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await settle(tester);
+
+    final sent = relay.events.last;
+    final npub = NostrService.npubEncode(agent);
+    expect(sent['content'],
+        'nostr:$npub can you share a screenshot? cc nostr:$npub');
+    expect(sent['tags'], anyElement(equals(['p', agent])));
+  });
+
+  test('typed names only mention whole names', () {
+    const ada =
+        '1111111111111111111111111111111111111111111111111111111111111111';
+    final npub = NostrService.npubEncode(ada);
+    expect(
+        FeedbackNote.encodeMentions('@Adam, @ada. mail@ada', const {},
+            known: {'Ada': ada}),
+        '@Adam, nostr:$npub. mail@ada');
   });
 
   test('subject, link and screenshot travel as tags and in the text',

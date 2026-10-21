@@ -105,19 +105,25 @@ class FeedbackNote {
         return '[@$name](${m.group(0)})';
       });
 
-  /// What the reader typed, with each "@Name" they picked from the
-  /// suggestions ([picked]: name → pubkey hex) turned into a NIP-27
-  /// mention.
-  static String encodeMentions(String typed, Map<String, String> picked) {
-    var text = typed;
+  /// What the reader typed, with each "@Name" turned into a NIP-27
+  /// mention: the names they picked from the suggestions ([picked]: name →
+  /// pubkey hex), and any other known name ([known]) typed out in full —
+  /// whatever its case or apostrophe, and only as a whole name.
+  static String encodeMentions(String typed, Map<String, String> picked,
+      {Map<String, String> known = const {}}) {
+    final names = {...known, ...picked};
     // Longest names first, so "@Ann Lee" isn't eaten by "@Ann".
-    final names = picked.keys.toList()
+    final ordered = names.keys.where((n) => n.trim().isNotEmpty).toList()
       ..sort((a, b) => b.length.compareTo(a.length));
-    for (final name in names) {
-      final token = '@$name';
-      if (!text.contains(token)) continue;
+    var text = typed;
+    for (final name in ordered) {
+      final pattern = RegExp(
+          r'(?<![\w.])@'
+          '${RegExp.escape(name.trim()).replaceAll(RegExp("['’]"), "['’]")}'
+          r"(?![\w'’])",
+          caseSensitive: false);
       text = text.replaceAll(
-          token, 'nostr:${NostrService.npubEncode(picked[name]!)}');
+          pattern, 'nostr:${NostrService.npubEncode(names[name]!)}');
     }
     return text;
   }

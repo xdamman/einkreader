@@ -311,7 +311,9 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
     final cursor = value.selection.baseOffset;
     String? query;
     if (cursor >= 0 && cursor <= value.text.length) {
-      final m = RegExp(r'(?:^|\s)@([^\s@]{0,30})$')
+      // Names have spaces ("@Ada Lovelace"): suggestions stay while some
+      // name still matches what follows the @.
+      final m = RegExp(r'(?:^|\s)@([^@\n]{0,30})$')
           .firstMatch(value.text.substring(0, cursor));
       query = m?.group(1);
     }
@@ -402,7 +404,9 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
   Future<void> _send() async {
     final typed = _controller.text.trim();
     if (typed.isEmpty) return;
-    final text = FeedbackNote.encodeMentions(typed, _picked);
+    // A name typed out in full counts too, picked from the list or not.
+    final text = FeedbackNote.encodeMentions(typed, _picked,
+        known: NostrProfileCache.mentionNames);
     setState(() => _sending = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -426,31 +430,12 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
     }
   }
 
-  /// Opens the thread in the reader's Nostr app (Primal, Amethyst…) to reply
-  /// or react there; without one, in the browser, which offers them all.
-  Future<void> _openInNostrApp() async {
-    final note = NostrService.noteEncode(widget.root.id);
-    try {
-      if (await launchUrl(Uri.parse('nostr:$note'),
-          mode: LaunchMode.externalApplication)) {
-        return;
-      }
-    } catch (_) {}
-    await launchUrl(Uri.parse('https://njump.me/$note'),
-        mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Feedback thread'),
         actions: [
-          IconButton(
-            tooltip: 'Open in a Nostr app',
-            icon: const Icon(Icons.open_in_new),
-            onPressed: _openInNostrApp,
-          ),
           RefreshAction(loading: _loading, onPressed: _load),
         ],
       ),
@@ -572,15 +557,20 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    minLines: 1,
-                    maxLines: 5,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      hintText: 'Write a reply… (@ to mention)',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                  child: _SendOnCtrlEnter(
+                    onSend: () {
+                      if (!_sending) _send();
+                    },
+                    child: TextField(
+                      controller: _controller,
+                      minLines: 1,
+                      maxLines: 5,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: const InputDecoration(
+                        hintText: 'Write a reply… (@ to mention)',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
                     ),
                   ),
                 ),
@@ -1038,6 +1028,27 @@ class _ImageStripState extends State<ImageStrip> {
   }
 }
 
+/// Ctrl+Enter (or ⌘+Enter) in [child]'s text field sends, as in most
+/// messaging apps; Enter alone still starts a new line.
+class _SendOnCtrlEnter extends StatelessWidget {
+  final VoidCallback onSend;
+  final Widget child;
+
+  const _SendOnCtrlEnter({required this.onSend, required this.child});
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.enter, control: true):
+              onSend,
+          const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
+              onSend,
+          const SingleActivator(LogicalKeyboardKey.enter, meta: true): onSend,
+        },
+        child: child,
+      );
+}
+
 class _ReactionChip extends StatelessWidget {
   final String emoji;
   final int count;
@@ -1395,15 +1406,20 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
                 labelText: 'Subject', border: OutlineInputBorder()),
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: _body,
-            minLines: 5,
-            maxLines: 12,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'What happened, or what would you like?',
-              alignLabelWithHint: true,
-              border: OutlineInputBorder(),
+          _SendOnCtrlEnter(
+            onSend: () {
+              if (!_posting) _post();
+            },
+            child: TextField(
+              controller: _body,
+              minLines: 5,
+              maxLines: 12,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'What happened, or what would you like?',
+                alignLabelWithHint: true,
+                border: OutlineInputBorder(),
+              ),
             ),
           ),
           const SizedBox(height: 14),
