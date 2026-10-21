@@ -511,11 +511,20 @@ def start(state, note):
     save_state(state)
 
 
+# The bot's names as people type them out: before 0.6.28 the app sent a
+# name typed without picking it from the suggestions as plain text.
+BOT_NAMES = ("einkreader agent", "xavier's agent", "einkreader")
+
+
 def mentions_bot(event):
-    """An explicit @mention (NIP-27 nostr:npub… in the text) of the bot.
-    Replies p-tag the people above them automatically, so a p tag alone
-    doesn't count."""
+    """An explicit @mention of the bot: NIP-27 (nostr:npub… in the text), or
+    its name typed out ("@einkReader agent"). Replies p-tag the people
+    above them automatically, so a p tag alone doesn't count."""
     content = event.get("content", "")
+    typed = content.lower().replace("\u2019", "'")
+    if any(re.search(rf"(?<![\w.])@{re.escape(name)}(?![\w']|\.\w)", typed)
+           for name in BOT_NAMES):
+        return True
     return any(f"nostr:{npub}" in content
                for npub in (OFFICIAL_NPUB, AGENT_NPUB)) or \
         "nostr:nprofile" in content and any(
