@@ -110,13 +110,13 @@ void main() {
     // Last: they mark articles as seen, which the shots above don't expect.
     testWidgets('mark seen source tablet', (tester) async {
       await _capture(tester, const HomeScreen(), 'mark_seen_1_source',
-          _tablet, setup: (t) => t.tap(find.text('Stratechery')));
+          _tablet, setup: (t) => t.tap(find.text('Hacker News: Best')));
     });
 
     testWidgets('marked seen tablet', (tester) async {
       await _capture(tester, const HomeScreen(), 'mark_seen_2_done', _tablet,
           setup: (t) async {
-        await t.tap(find.text('Stratechery'));
+        await t.tap(find.text('Hacker News: Best'));
         await t.pumpAndSettle();
         await t.tap(find.text('Mark all as seen'));
         await t.runAsync(

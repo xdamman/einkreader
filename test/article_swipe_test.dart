@@ -111,6 +111,35 @@ void main() {
     expect(find.text('FEED'), findsOneWidget);
   });
 
+  testWidgets('opening an article marks it seen, not read', (tester) async {
+    final db = AppDatabase.instance;
+    final long = (await tester.runAsync(() async {
+      final source = (await db.getSources()).first;
+      await db.insertArticleIfNew(Article(
+        sourceId: source.id!,
+        guid: 'guid-long',
+        title: 'Long article',
+        contentMarkdown: List.filled(200, 'A long paragraph.').join('\n\n'),
+        publishedAt: 50,
+        createdAt: 50,
+        fetched: 1,
+      ));
+      return (await db.getArticles()).firstWhere((a) => a.guid == 'guid-long');
+    }))!;
+    expect(long.seenAt, isNull);
+
+    // Too long to auto-read on open: stays unread, but is now seen.
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: ArticleScreen(articleId: long.id!),
+    ));
+    await settle(tester);
+
+    final opened = (await tester.runAsync(() => db.getArticle(long.id!)))!;
+    expect(opened.seenAt, isNotNull);
+    expect(opened.read, 0);
+  });
+
   testWidgets('two-finger double tap (e-ink refresh gesture) is not a swipe',
       (tester) async {
     await tester.pumpWidget(MaterialApp(

@@ -124,6 +124,8 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (article != null && _preparedId != article.id) {
       _preparedId = article.id;
       _reachedBottom = false;
+      // Opened is seen, finished or not (usually already seen in the feed).
+      if (article.seenAt == null) _db.markArticlesSeen([article.id!]);
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _prepareScroll(article));
       _downloadImages(article.id!);
