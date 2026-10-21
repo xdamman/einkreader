@@ -702,6 +702,26 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Marks [ids] as seen, with an Undo in case the tap was a slip.
+  Future<void> _markSeen(List<int> ids) async {
+    await _db.markArticlesSeen(ids);
+    await _load();
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(ids.length == 1
+          ? '1 article marked as seen'
+          : '${ids.length} articles marked as seen'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () async {
+          await _db.markArticlesSeen(ids, seen: false);
+          _load();
+        },
+      ),
+    ));
+  }
+
   /// Feed tab: a swipable filter strip above the article list — "All" first,
   /// then folders, then top-level sources, each group alphabetical. A stable
   /// order preserves the reader's spatial memory of where each chip lives.
@@ -714,7 +734,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final unread = <int, int>{};
     for (final article in _articles) {
       total[article.sourceId] = (total[article.sourceId] ?? 0) + 1;
-      if (article.read == 0) {
+      if (article.isNew) {
         unread[article.sourceId] = (unread[article.sourceId] ?? 0) + 1;
       }
     }
@@ -799,7 +819,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final counts =
             byAuthor[author] ?? (unread: 0, total: 0);
         byAuthor[author] = (
-          unread: counts.unread + (article.read == 0 ? 1 : 0),
+          unread: counts.unread + (article.isNew ? 1 : 0),
           total: counts.total + 1,
         );
       }
@@ -914,6 +934,15 @@ class _HomeScreenState extends State<HomeScreen> {
             onChanged: _load,
             showRequests: _feedAuthor == _requestsAuthor &&
                 SyncService.instance.emailRequests.isNotEmpty,
+          ),
+        // Catching up without pretending to have read: marks what this view
+        // shows (all, a folder, a source or an author) as seen, so the
+        // chips and bold titles only flag what arrives next.
+        if (articles.any((a) => a.isNew))
+          _MarkSeenBar(
+            count: articles.where((a) => a.isNew).length,
+            onPressed: () => _markSeen(
+                [for (final a in articles) if (a.isNew) a.id!]),
           ),
         if (currentReads.isNotEmpty)
           ResumeReadingSection(
@@ -1191,6 +1220,44 @@ class _SourceFilterBar extends StatelessWidget {
                 ),
             ]),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Slim row above the feed offering to mark its new articles as seen.
+/// Seen is not read: they lose their bold and their count on the chips, but
+/// stay out of the Read tab, which keeps listing only what was read.
+class _MarkSeenBar extends StatelessWidget {
+  final int count;
+  final VoidCallback onPressed;
+
+  const _MarkSeenBar({required this.count, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 2, 8, 2),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(width: 1)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              count == 1 ? '1 new article' : '$count new articles',
+              style: const TextStyle(fontSize: 14),
+            ),
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.done_all, size: 20),
+            label: const Text(
+              'Mark all as seen',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+            onPressed: onPressed,
+          ),
         ],
       ),
     );

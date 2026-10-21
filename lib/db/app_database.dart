@@ -87,7 +87,7 @@ class AppDatabase {
         debugDatabasePath ?? join(await getDatabasesPath(), 'einkreader.db');
     _db = await openDatabase(
       path,
-      version: 16,
+      version: 17,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -259,6 +259,10 @@ class AppDatabase {
       // to; filled in by the next sync of the feed.
       await _addColumnIfMissing(db, 'articles', 'page_url', 'TEXT');
     }
+    if (oldVersion < 17) {
+      // Seen in the feed ("Mark all as seen") without being read.
+      await _addColumnIfMissing(db, 'articles', 'seen_at', 'INTEGER');
+    }
   }
 
   static const _createNostrEventsSql = '''
@@ -359,6 +363,7 @@ class AppDatabase {
         via_article_id INTEGER,
         read_at INTEGER,
         page_url TEXT,
+        seen_at INTEGER,
         UNIQUE(source_id, guid)
       )
     ''');
@@ -649,7 +654,7 @@ class AppDatabase {
     'id', 'source_id', 'guid', 'title', 'author', 'url', 'url_key',
     'published_at', 'summary', 'fetched', 'read', 'read_later', 'favorite',
     'created_at', 'scroll_position', 'scrolled_at', 'via_article_id',
-    'read_at', 'page_url',
+    'read_at', 'page_url', 'seen_at',
   ];
 
   /// Articles newest first (by [listedAtSql]). [withContent] false leaves
@@ -781,10 +786,33 @@ class AppDatabase {
         'read_at': read ? DateTime.now().millisecondsSinceEpoch : null,
         'scroll_position': 0.0,
         'scrolled_at': null,
+        // Marked unread: new again, bold in the feed.
+        if (!read) 'seen_at': null,
       },
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  /// Marks the articles as seen (or not, to undo): they stop counting as
+  /// new in the feed but stay unread, so the Read tab only ever lists what
+  /// was actually read. Already-seen articles keep their first seen time.
+  Future<void> markArticlesSeen(List<int> ids, {bool seen = true}) async {
+    if (ids.isEmpty) return;
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // Chunked to stay under SQLite's bound-variable limit.
+    for (var i = 0; i < ids.length; i += 500) {
+      final chunk = ids.sublist(i, i + 500 > ids.length ? ids.length : i + 500);
+      final marks = List.filled(chunk.length, '?').join(',');
+      await db.rawUpdate(
+        seen
+            ? 'UPDATE articles SET seen_at = ? '
+                'WHERE seen_at IS NULL AND id IN ($marks)'
+            : 'UPDATE articles SET seen_at = NULL WHERE id IN ($marks)',
+        [if (seen) now, ...chunk],
+      );
+    }
   }
 
   /// Saves the reading position. A position > 0 puts an unread article in the

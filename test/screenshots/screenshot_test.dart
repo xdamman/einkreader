@@ -106,6 +106,24 @@ void main() {
       await _capture(tester, ArticleScreen(articleId: _featuredArticleId),
           'reader_phone', _phone);
     });
+
+    // Last: they mark articles as seen, which the shots above don't expect.
+    testWidgets('mark seen source tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'mark_seen_1_source',
+          _tablet, setup: (t) => t.tap(find.text('Stratechery')));
+    });
+
+    testWidgets('marked seen tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'mark_seen_2_done', _tablet,
+          setup: (t) async {
+        await t.tap(find.text('Stratechery'));
+        await t.pumpAndSettle();
+        await t.tap(find.text('Mark all as seen'));
+        await t.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 200)));
+        await t.pumpAndSettle();
+      });
+    });
   }, skip: _enabled ? false : 'Run with --dart-define=screenshots=true');
 }
 

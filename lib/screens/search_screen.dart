@@ -502,7 +502,7 @@ class _ArticleResult extends StatelessWidget {
         style: TextStyle(
           fontSize: 17,
           height: 1.3,
-          fontWeight: article.read == 0 ? FontWeight.w700 : FontWeight.w400,
+          fontWeight: article.isNew ? FontWeight.w700 : FontWeight.w400,
         ),
       ),
       subtitle: (meta.isEmpty && snippet == null)

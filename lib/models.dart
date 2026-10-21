@@ -167,6 +167,11 @@ class Article {
   /// read before this was recorded). The Read tab lists by it.
   final int? readAt;
 
+  /// When the reader marked the article as seen from the feed ("Mark all as
+  /// seen"): it no longer counts as new, but it isn't read either, so it
+  /// stays out of the Read tab. Null when never marked.
+  final int? seenAt;
+
   const Article({
     this.id,
     required this.sourceId,
@@ -187,7 +192,11 @@ class Article {
     this.scrolledAt,
     this.viaArticleId,
     this.readAt,
+    this.seenAt,
   });
+
+  /// Neither read nor seen: shown bold and counted on the feed chips.
+  bool get isNew => read == 0 && seenAt == null;
 
   Article copyWith({String? title, String? contentMarkdown, int? favorite}) =>
       Article(
@@ -210,6 +219,7 @@ class Article {
         scrolledAt: scrolledAt,
         viaArticleId: viaArticleId,
         readAt: readAt,
+        seenAt: seenAt,
       );
 
   /// Normalized form of [url] used to detect the same story arriving from
@@ -275,6 +285,7 @@ class Article {
         'scrolled_at': scrolledAt,
         'via_article_id': viaArticleId,
         'read_at': readAt,
+        'seen_at': seenAt,
       };
 
   /// Canonicalizes a URL for deduplication: lowercases the host, drops
@@ -329,6 +340,7 @@ class Article {
         scrolledAt: m['scrolled_at'] as int?,
         viaArticleId: m['via_article_id'] as int?,
         readAt: m['read_at'] as int?,
+        seenAt: m['seen_at'] as int?,
       );
 }
 
