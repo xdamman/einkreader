@@ -159,6 +159,8 @@ class _ArticleTile extends StatelessWidget {
           onPressed: () async {
             await AppDatabase.instance.setReadLater(article.id!, !saved);
             onChanged();
+            // Saved to read: its images download now, to read offline.
+            if (!saved) SyncService.instance.imagesForReading(article.id!);
           },
         );
       case FeedRowAction.unfavorite:

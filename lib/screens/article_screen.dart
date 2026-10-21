@@ -126,7 +126,16 @@ class _ArticleScreenState extends State<ArticleScreen> {
       _reachedBottom = false;
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _prepareScroll(article));
+      _downloadImages(article.id!);
     }
+  }
+
+  /// Images download when an article is opened, not at sync: shown from
+  /// the web meanwhile, from the device once stored.
+  Future<void> _downloadImages(int id) async {
+    SyncService.instance.openArticleId = id;
+    final changed = await SyncService.instance.imagesForReading(id);
+    if (changed && mounted && _currentId == id) _load();
   }
 
   /// Swipe left → next article in the feed (no-op past the end).
@@ -327,6 +336,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
   @override
   void dispose() {
     _saveProgress();
+    if (SyncService.instance.openArticleId == _currentId) {
+      SyncService.instance.openArticleId = null;
+    }
     ReadingSettings.instance.prefs.removeListener(_onReadingPrefs);
     _scroll.dispose();
     _page.dispose();

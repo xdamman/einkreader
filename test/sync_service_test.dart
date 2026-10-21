@@ -155,6 +155,9 @@ void main() {
     await sync.syncAll();
     final stored = (await db.getArticles()).single;
     expect(stored.contentMarkdown, contains('Caption v1'));
+    // Sync leaves images on the web; opening the post downloads them.
+    expect(stored.contentMarkdown, contains('](https://cdn/img.jpg)'));
+    expect(await sync.imagesForReading(stored.id!), isTrue);
     expect(_imageBytes(tempDir), utf8.encode('imgv1'));
 
     // The post is edited and its image replaced; reprocess must pick both up.

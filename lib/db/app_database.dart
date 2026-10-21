@@ -1037,6 +1037,39 @@ class AppDatabase {
     );
   }
 
+  /// Every article with images stored on the device, and whether it keeps
+  /// them: it's in To read or the Inbox (emails, saved links), read,
+  /// favorited, highlighted, or opened since [openedSince] (ms).
+  Future<List<({int id, String content, bool keep})>> articlesWithStoredImages(
+      {required int openedSince}) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT a.id, a.content_markdown,
+        (a.read = 1 OR a.read_later = 1 OR a.favorite = 1
+          OR COALESCE(a.scrolled_at, 0) > ?
+          OR s.type IN ('email', 'savedLinks')
+          OR EXISTS (SELECT 1 FROM highlights h WHERE h.article_id = a.id))
+          AS keep
+      FROM articles a LEFT JOIN sources s ON s.id = a.source_id
+      WHERE a.content_markdown LIKE '%eink-img://%'
+    ''', [openedSince]);
+    return [
+      for (final row in rows)
+        (
+          id: row['id'] as int,
+          content: row['content_markdown'] as String,
+          keep: (row['keep'] as int? ?? 0) == 1,
+        ),
+    ];
+  }
+
+  /// Replaces an article's text, leaving its download state alone.
+  Future<void> updateArticleMarkdown(int id, String markdown) async {
+    final db = await database;
+    await db.update('articles', {'content_markdown': markdown},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
   /// Rewrites stored `eink-img://YYYY/MM/…` image references to the current
   /// year-first layout (`eink-img://YYYY/…`) after an archive tidy moved the
   /// files. Returns how many articles changed.

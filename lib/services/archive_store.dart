@@ -23,8 +23,10 @@ import 'app_log.dart';
 /// base/highlights.md                    (all highlights, time-independent)
 /// ```
 ///
-/// In stored Markdown a downloaded image is referenced as `eink-img://relpath`
-/// (relative to the base dir); [localFile] resolves that back to a [File]. The
+/// In stored Markdown a downloaded image is referenced as
+/// `eink-img://relpath#<its web address>` (relative to the base dir);
+/// [localFile] resolves that back to a [File], and [unlocalize] gives the
+/// web address back when the file is removed to save space. The
 /// `.md` files written to disk instead use portable `images/name` references so
 /// a copied folder stays self-contained.
 class ArchiveStore {
@@ -152,7 +154,80 @@ class ArchiveStore {
   /// it is not a stored image or the base path is not known yet.
   static File? localFile(String url) {
     if (!url.startsWith(scheme) || _staticBase == null) return null;
-    return File(p.join(_staticBase!, url.substring(scheme.length)));
+    return File(p.join(_staticBase!, _relOf(url)));
+  }
+
+  /// The archive-relative path of an `eink-img://` reference.
+  static String _relOf(String ref) {
+    final rel = ref.substring(scheme.length);
+    final hash = rel.indexOf('#');
+    return hash < 0 ? rel : rel.substring(0, hash);
+  }
+
+  /// Where a stored image came from: references carry it after a `#`
+  /// (images stored before that don't, and can't be given back).
+  static String? remoteOf(String ref) {
+    if (!ref.startsWith(scheme)) return null;
+    final hash = ref.indexOf('#');
+    if (hash < 0) return null;
+    try {
+      return Uri.decodeComponent(ref.substring(hash + 1));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _ref(String rel, String url) =>
+      '$scheme$rel#${Uri.encodeComponent(url).replaceAll('(', '%28').replaceAll(')', '%29')}';
+
+  /// Whether [markdown] has images still on the web, not on the device.
+  static bool hasRemoteImages(String markdown) => _imageMarkdown
+      .allMatches(markdown)
+      .any((m) => (m.group(2) ?? '').startsWith('http'));
+
+  /// The archive-relative paths of the images [markdown] has on the device.
+  static Set<String> localImages(String markdown) => {
+        for (final m in _imageMarkdown.allMatches(markdown))
+          if ((m.group(2) ?? '').startsWith(scheme)) _relOf(m.group(2)!),
+      };
+
+  /// [markdown] with every stored image that knows its web address pointing
+  /// back there, so its file can go.
+  static String unlocalize(String markdown) =>
+      markdown.replaceAllMapped(_imageMarkdown, (m) {
+        final remote = remoteOf(m.group(2) ?? '');
+        if (remote == null) return m.group(0)!;
+        return '![${m.group(1) ?? ''}]($remote${m.group(3) ?? ''})';
+      });
+
+  /// Whether a stored image of [markdown] is gone from the device with no
+  /// web address to load it from (removed by an older cleanup): only
+  /// downloading the article again brings it back.
+  Future<bool> hasLostImages(String markdown) async {
+    final base = await _base();
+    for (final m in _imageMarkdown.allMatches(markdown)) {
+      final ref = m.group(2) ?? '';
+      if (!ref.startsWith(scheme) || remoteOf(ref) != null) continue;
+      if (!await File(p.join(base, _relOf(ref))).exists()) return true;
+    }
+    return false;
+  }
+
+  /// Deletes the stored images at [rels] (archive-relative paths). Returns
+  /// how many files and bytes it freed.
+  Future<({int files, int bytes})> deleteImages(Iterable<String> rels) async {
+    final base = await _base();
+    var files = 0, bytes = 0;
+    for (final rel in rels) {
+      final file = File(p.join(base, rel));
+      try {
+        final length = await file.length();
+        await file.delete();
+        files++;
+        bytes += length;
+      } catch (_) {}
+    }
+    return (files: files, bytes: bytes);
   }
 
   // -------------------------------------------------------------- path helpers
@@ -237,7 +312,7 @@ class ArchiveStore {
       // caller is reprocessing and wants a possibly-broken file replaced.
       if (!overwrite) {
         final cached = await _findCached(p.join(base, imagesRel), hash);
-        if (cached != null) return '$scheme$imagesRel/$cached';
+        if (cached != null) return _ref('$imagesRel/$cached', url);
       }
       final response = await _client
           .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
@@ -253,7 +328,7 @@ class ArchiveStore {
           resize ? await Isolate.run(() => _resize(bytes, maxDimension)) : bytes;
       final ext = resize ? 'jpg' : _extensionFor(response, url);
       final name = '$hash.$ext';
-      final ref = '$scheme$imagesRel/$name';
+      final ref = _ref('$imagesRel/$name', url);
       final file = File(p.join(base, imagesRel, name));
       await file.parent.create(recursive: true);
       await file.writeAsBytes(stored, flush: true);
@@ -390,14 +465,19 @@ class ArchiveStore {
       final url = m.group(2) ?? '';
       final title = m.group(3) ?? '';
       if (url.startsWith(scheme)) {
-        final rel = url.substring(scheme.length);
+        final rel = _relOf(url);
         final name = p.basename(rel);
-        if (copyInto != null) {
-          final src = File(p.join(base, rel));
-          if (await src.exists()) {
-            await copyInto.create(recursive: true);
-            await src.copy(p.join(copyInto.path, name));
-          }
+        final src = File(p.join(base, rel));
+        final remote = remoteOf(url);
+        if (remote != null && !await src.exists()) {
+          // Removed from the device: the .md points at the web instead.
+          out.write('![$alt]($remote$title)');
+          index = m.end;
+          continue;
+        }
+        if (copyInto != null && await src.exists()) {
+          await copyInto.create(recursive: true);
+          await src.copy(p.join(copyInto.path, name));
         }
         out.write('![$alt](images/$name$title)');
       } else {

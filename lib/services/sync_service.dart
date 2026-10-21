@@ -225,6 +225,11 @@ class SyncService {
       await _fetchPendingContent();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('last_sync', DateTime.now().millisecondsSinceEpoch);
+      try {
+        await releaseUnusedImages();
+      } catch (e) {
+        await AppLogService.instance.warn('Image cleanup failed: $e');
+      }
     } finally {
       _syncing = false;
       progress.add(const SyncProgress('', running: false));
@@ -448,6 +453,95 @@ class SyncService {
     }
   }
 
+  /// Whether [article] gets its images as soon as its text downloads: it's
+  /// in To read, or in the Inbox (emails and saved links).
+  static bool _keepsImages(Article article, Source? source) =>
+      article.readLater == 1 ||
+      source?.type == SourceType.email ||
+      source?.type == SourceType.savedLinks;
+
+  /// Downloads [articleId]'s images for reading: when it's opened, or saved
+  /// to read. An article whose images an older cleanup removed without
+  /// their web address is downloaded again whole. Returns true when its
+  /// text changed (the reader reloads it).
+  Future<bool> imagesForReading(int articleId) async {
+    final article = await _db.getArticle(articleId);
+    final content = article?.contentMarkdown;
+    if (article == null || content == null) return false;
+    try {
+      if (await _archive.hasLostImages(content)) {
+        await reprocessArticle(articleId);
+        return true;
+      }
+      if (!ArchiveStore.hasRemoteImages(content)) return false;
+      final source = await _db.getSource(article.sourceId);
+      final localized = await _archive.localizeMarkdown(
+        content,
+        relDir: source == null
+            ? ArchiveStore.sourceDir(ArchiveStore.articleDate(article), 'web')
+            : _relDir(source, article),
+        maxDimension: _maxImageDimension,
+      );
+      if (localized == content) return false;
+      await _db.updateArticleMarkdown(articleId, localized);
+      if (source != null) {
+        await _archive.writeArticle(
+            source: source, article: article, markdown: localized);
+      }
+      return true;
+    } catch (e) {
+      await AppLogService.instance
+          .warn('Could not download images for article #$articleId: $e');
+      return false;
+    }
+  }
+
+  /// The article open in the reader, whose images a cleanup leaves alone.
+  int? openArticleId;
+
+  static const _kImagesReleasedAt = 'images_released_at';
+
+  /// Once a day, deletes the images stored for articles that don't keep
+  /// them — not in To read or the Inbox, not read, favorited, highlighted
+  /// or opened in the last week — and points those articles back at the
+  /// images' web addresses. An image another article keeps stays.
+  Future<void> releaseUnusedImages({bool force = false}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final last = prefs.getInt(_kImagesReleasedAt) ?? 0;
+    if (!force && now - last < const Duration(days: 1).inMilliseconds) return;
+    await prefs.setInt(_kImagesReleasedAt, now);
+    final articles = await _db.articlesWithStoredImages(
+        openedSince: now - const Duration(days: 7).inMilliseconds);
+    final kept = <String>{};
+    final released = <String>{};
+    var changed = 0;
+    for (final a in articles) {
+      if (a.keep || a.id == openArticleId) {
+        kept.addAll(ArchiveStore.localImages(a.content));
+        continue;
+      }
+      released.addAll(ArchiveStore.localImages(a.content));
+      final content = ArchiveStore.unlocalize(a.content);
+      if (content == a.content) continue;
+      await _db.updateArticleMarkdown(a.id, content);
+      changed++;
+      final article = await _db.getArticle(a.id);
+      final source =
+          article == null ? null : await _db.getSource(article.sourceId);
+      if (article != null && source != null) {
+        await _archive.writeArticle(
+            source: source, article: article, markdown: content);
+      }
+    }
+    final freed = await _archive.deleteImages(released.difference(kept));
+    await AppLogService.instance.info(
+      'Removed ${freed.files} stored images '
+      '(${(freed.bytes / 1024 / 1024).toStringAsFixed(1)} MB) from '
+      '$changed articles not kept for reading',
+    );
+  }
+
   /// Relative archive folder for an article filed under its source + date.
   String _relDir(Source source, Article article) => ArchiveStore.sourceDir(
       ArchiveStore.articleDate(article), source.title);
@@ -586,13 +680,10 @@ class SyncService {
       String? markdown;
       if (hasFullContent) {
         final html = item.contentHtml!;
-        final converted = await Isolate.run(
+        // Images stay on the web until the article is opened or saved to
+        // read (see imagesForReading).
+        markdown = await Isolate.run(
             () => ArticleExtractor.convertHtmlToMarkdown(html));
-        markdown = await _archive.localizeMarkdown(
-          converted,
-          relDir: _relDirFor(source, published, now),
-          maxDimension: _maxImageDimension,
-        );
       }
       final article = Article(
         sourceId: source.id!,
@@ -679,15 +770,8 @@ class SyncService {
       final downloadsArticle = _sharesLink(tweet);
       final url = downloadsArticle ? tweet.articleUrl! : tweet.tweetUrl;
       final published = tweet.createdAt?.millisecondsSinceEpoch;
-      // Download any images embedded in the tweet/article so they read offline.
-      var content = downloadsArticle ? null : tweet.text;
-      if (content != null) {
-        content = await _archive.localizeMarkdown(
-          content,
-          relDir: _relDirFor(source, published, now),
-          maxDimension: _maxImageDimension,
-        );
-      }
+      // Its images download when it's opened or saved to read.
+      final content = downloadsArticle ? null : tweet.text;
       final article = Article(
         sourceId: source.id!,
         guid: tweet.id,
@@ -1072,13 +1156,17 @@ class SyncService {
         final relDir = source == null
             ? ArchiveStore.sourceDir(ArchiveStore.articleDate(article), 'web')
             : _relDir(source, article);
-        // Pull images onto the device so the article reads fully offline.
-        final localized = await _archive.localizeMarkdown(
-          markdown,
-          relDir: relDir,
-          maxDimension: _maxImageDimension,
-          overwrite: overwrite,
-        );
+        // Pull images onto the device so the article reads fully offline —
+        // only for one in To read or the Inbox, or being reloaded by the
+        // reader: the rest get theirs when opened (imagesForReading).
+        final localized = overwrite || _keepsImages(article, source)
+            ? await _archive.localizeMarkdown(
+                markdown,
+                relDir: relDir,
+                maxDimension: _maxImageDimension,
+                overwrite: overwrite,
+              )
+            : markdown;
         var content = localized;
         // Keep the original note/tweet above the extracted article, with
         // its own paragraph breaks (not collapsed into one wall of text).
