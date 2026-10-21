@@ -90,6 +90,68 @@ void main() {
     expect(find.text('2 new articles'), findsOneWidget);
   });
 
+  testWidgets('rows shown on screen are recorded as seen on leaving the app',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: const HomeScreen(key: ValueKey('auto-seen')),
+    ));
+    await settle(tester);
+    // Still bold during the visit: nothing changes under the reader's eyes.
+    expect(find.text('4 new articles'), findsOneWidget);
+    expect((await articles(tester)).every((a) => a.isNew), isTrue);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await settle(tester);
+    final all = await articles(tester);
+    expect(all.every((a) => a.seenAt != null && a.read == 0), isTrue);
+    // Back in the app: nothing is new any more.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await settle(tester);
+    expect(find.text('Mark all as seen'), findsNothing);
+    await tester.runAsync(
+        () => db.markArticlesSeen([for (final a in all) a.id!], seen: false));
+  });
+
+  testWidgets('read articles carry a check mark, seen ones do not',
+      (tester) async {
+    final all = await articles(tester);
+    final read = all.firstWhere((a) => a.title == 'Alpha story 0');
+    final seen = all.firstWhere((a) => a.title == 'Beta story 0');
+    await tester.runAsync(() async {
+      await db.markArticleRead(read.id!);
+      await db.markArticlesSeen([seen.id!]);
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: const HomeScreen(key: ValueKey('three-states')),
+    ));
+    await settle(tester);
+    expect(find.text('Read · Alpha', findRichText: true), findsNothing);
+    expect(find.textContaining('Read · Alpha'), findsOneWidget);
+    expect(find.textContaining('Read · Beta'), findsNothing);
+    FontWeight? weight(String title) =>
+        tester.widget<Text>(find.text(title)).style?.fontWeight;
+    expect(weight('Alpha story 0'), FontWeight.w400);
+    expect(weight('Beta story 0'), FontWeight.w400);
+    expect(weight('Beta story 1'), FontWeight.w700);
+    await tester.runAsync(() async {
+      await db.markArticleRead(read.id!, read: false);
+      await db.markArticlesSeen([seen.id!], seen: false);
+    });
+  });
+
+  test('reading records the seen time too, once', () async {
+    final a = (await db.getArticles()).first;
+    await db.markArticleRead(a.id!);
+    final first = (await db.getArticle(a.id!))!;
+    expect(first.seenAt, isNotNull);
+    expect(first.seenAt, first.readAt);
+    await db.markArticleRead(a.id!, read: false);
+  });
+
   test('marking unread makes a seen article new again', () async {
     final a = (await db.getArticles()).first;
     await db.markArticlesSeen([a.id!]);

@@ -48,7 +48,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with WidgetsBindingObserver {
   final _db = AppDatabase.instance;
   _HomeTab _tab = _HomeTab.feed;
 
@@ -95,6 +96,11 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Sources currently being synced, shown with a spinner in the feed strip.
   /// Several refresh concurrently, so this is a set rather than a single id.
   final Set<int> _syncingSourceIds = {};
+
+  /// New articles whose row came on screen in the feed during this visit.
+  /// They stay bold until the reader leaves the app, then are recorded as
+  /// seen: the next visit only flags what arrived since.
+  final Set<int> _shownIds = {};
   bool _developerMode = false;
   StreamSubscription<SyncProgress>? _progressSub;
   StreamSubscription<void>? _logSub;
@@ -103,6 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _progressSub = SyncService.instance.progress.stream.listen((p) {
       if (!mounted) return;
@@ -153,10 +160,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _progressSub?.cancel();
     _logSub?.cancel();
     _shareSub?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Leaving the app (or the screen going to sleep) ends the visit.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _recordShown();
+    }
+  }
+
+  /// Records the articles shown on screen this visit as seen.
+  Future<void> _recordShown() async {
+    if (_shownIds.isEmpty) return;
+    final ids = _shownIds.toList();
+    _shownIds.clear();
+    await _db.markArticlesSeen(ids);
+    await _load();
   }
 
   Future<void> _onSharedText(String text) async {
@@ -472,6 +498,8 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ArticleFeed(
                 articles: read,
                 dateOf: readTime,
+                // Everything here is read: no need to say so on each row.
+                showReadMark: false,
                 sourceTitles: _sourceTitles,
                 emptyMessage: _readFavoritesOnly
                     ? 'No favorites yet.\n\nUse the favorite button at '
@@ -962,6 +990,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 : 'No articles yet.\n\nPull to sync, or manage sources '
                     'in Settings.',
             onChanged: _load,
+            onShown: (article) => _shownIds.add(article.id!),
           ),
         ),
       ],

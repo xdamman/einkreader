@@ -124,6 +124,18 @@ void main() {
         await t.pumpAndSettle();
       });
     });
+
+    // Back on All: new (bold), seen (plain) and read (check mark) together.
+    testWidgets('three states tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'mark_seen_3_states',
+          _tablet, setup: (t) async {
+        await t.tap(find.text('All').first);
+        await t.pumpAndSettle();
+        ScaffoldMessenger.of(t.element(find.byType(HomeScreen)))
+            .hideCurrentSnackBar();
+        await t.pumpAndSettle();
+      });
+    });
   }, skip: _enabled ? false : 'Run with --dart-define=screenshots=true');
 }
 

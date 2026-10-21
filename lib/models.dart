@@ -167,9 +167,10 @@ class Article {
   /// read before this was recorded). The Read tab lists by it.
   final int? readAt;
 
-  /// When the reader marked the article as seen from the feed ("Mark all as
-  /// seen"): it no longer counts as new, but it isn't read either, so it
-  /// stays out of the Read tab. Null when never marked.
+  /// When the article was first seen: shown in the feed on screen (recorded
+  /// when the reader leaves the app), caught up with "Mark all as seen", or
+  /// read. A seen article no longer counts as new, but unless it's read it
+  /// stays out of the Read tab. Null while it's new.
   final int? seenAt;
 
   const Article({

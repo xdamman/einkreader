@@ -792,11 +792,20 @@ class AppDatabase {
       where: 'id = ?',
       whereArgs: [id],
     );
+    // Read implies seen: an article read straight from a link or a swipe
+    // gets its seen time too, the first time only.
+    if (read) {
+      await db.rawUpdate(
+          'UPDATE articles SET seen_at = read_at '
+          'WHERE id = ? AND seen_at IS NULL',
+          [id]);
+    }
   }
 
-  /// Marks the articles as seen (or not, to undo): they stop counting as
-  /// new in the feed but stay unread, so the Read tab only ever lists what
-  /// was actually read. Already-seen articles keep their first seen time.
+  /// Records when the articles were seen (or clears it, to undo): they
+  /// stop counting as new in the feed but stay unread, so the Read tab only
+  /// ever lists what was actually read. Already-seen articles keep their
+  /// first seen time.
   Future<void> markArticlesSeen(List<int> ids, {bool seen = true}) async {
     if (ids.isEmpty) return;
     final db = await database;

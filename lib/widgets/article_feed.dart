@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:intl/intl.dart';
 
 import '../db/app_database.dart';
@@ -31,6 +32,14 @@ class ArticleFeed extends StatelessWidget {
   /// [articles] must already be ordered by it.
   final int Function(Article article)? dateOf;
 
+  /// Called when a new article's row comes on screen, so the host can
+  /// record it as seen. Rows are then only built once they are actually on
+  /// screen, not ahead of the scroll.
+  final void Function(Article article)? onShown;
+
+  /// Whether read rows say so with a check mark (off where every row is).
+  final bool showReadMark;
+
   const ArticleFeed({
     super.key,
     required this.articles,
@@ -39,6 +48,8 @@ class ArticleFeed extends StatelessWidget {
     this.rowAction = FeedRowAction.readLater,
     required this.onChanged,
     this.dateOf,
+    this.onShown,
+    this.showReadMark = true,
   });
 
   @override
@@ -74,6 +85,8 @@ class ArticleFeed extends StatelessWidget {
     }
 
     return ListView.separated(
+      scrollCacheExtent:
+          onShown != null ? const ScrollCacheExtent.pixels(0) : null,
       itemCount: entries.length,
       separatorBuilder: (context, index) {
         final isLastOfDay =
@@ -85,11 +98,13 @@ class ArticleFeed extends StatelessWidget {
       itemBuilder: (context, index) {
         final entry = entries[index];
         if (entry is DateTime) return _DayHeader(day: entry);
+        if ((entry as Article).isNew) onShown?.call(entry);
         return _ArticleTile(
-          article: entry as Article,
+          article: entry,
           sourceTitle: sourceTitles[(entry).sourceId],
           articleIds: articleIds,
           rowAction: rowAction,
+          showReadMark: showReadMark,
           onChanged: onChanged,
         );
       },
@@ -138,6 +153,7 @@ class _ArticleTile extends StatelessWidget {
   /// Ordered ids of the feed this tile belongs to, for swipe navigation.
   final List<int> articleIds;
   final FeedRowAction rowAction;
+  final bool showReadMark;
   final VoidCallback onChanged;
 
   const _ArticleTile({
@@ -145,6 +161,7 @@ class _ArticleTile extends StatelessWidget {
     this.sourceTitle,
     required this.articleIds,
     required this.rowAction,
+    required this.showReadMark,
     required this.onChanged,
   });
 
@@ -197,6 +214,9 @@ class _ArticleTile extends StatelessWidget {
       if (_downloadStatus != null) _downloadStatus!,
     ].join(' · ');
 
+    // Three states: new is bold, seen is plain, read is plain with a
+    // check mark ahead of its meta line.
+    final read = showReadMark && article.read != 0;
     final tile = ListTile(
       contentPadding: const EdgeInsets.only(left: 16, right: 4, top: 6,
           bottom: 6),
@@ -210,11 +230,26 @@ class _ArticleTile extends StatelessWidget {
           fontWeight: article.isNew ? FontWeight.w700 : FontWeight.w400,
         ),
       ),
-      subtitle: meta.isEmpty
+      subtitle: meta.isEmpty && !read
           ? null
           : Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(meta, style: const TextStyle(fontSize: 13)),
+              child: Text.rich(
+                TextSpan(children: [
+                  if (read) ...[
+                    const WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Icon(Icons.check, size: 15),
+                    ),
+                    TextSpan(
+                      text: meta.isEmpty ? ' Read' : ' Read · ',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                  TextSpan(text: meta),
+                ]),
+                style: const TextStyle(fontSize: 13),
+              ),
             ),
       trailing: _actionButton(),
       onTap: () async {
