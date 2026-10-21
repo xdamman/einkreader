@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.6.27",
+    "date": "2026-10-21",
+    "title": "Mentions you can tap, and pictures in feedback",
+    "changes": [
+      "Replies from the agent that answers feedback now show as \"einkReader agent\".",
+      "@mentions in feedback show as outlined chips; tap one to open that person's profile.",
+      "Several pictures in a note sit side by side in a row you scroll sideways. In the viewer, swipe, tap the arrows or press the left/right arrow keys to go through them.",
+      "New feedback can include as many pictures as you like from your device.",
+      "A reply you haven't sent is kept for each thread and comes back when you return, even after closing the app."
+    ],
+    "feedback": [
+      {
+        "id": "48f7aba233c0410aa556b0f08a712c317b310fb0ecb16ed3dc48d227c7910765",
+        "title": "Improvements to feedback screen"
+      }
+    ]
+  },
+  {
     "version": "0.6.26",
     "date": "2026-10-21",
     "title": "Lighter storage, and feedback on any Nostr app",
