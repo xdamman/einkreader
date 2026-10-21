@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.6.26",
+    "date": "2026-10-21",
+    "title": "Lighter storage, and feedback on any Nostr app",
+    "changes": [
+      "Pictures download when you open an article or put it in To read (Inbox articles get theirs right away), instead of for every article at each refresh.",
+      "Once a day, pictures are removed from articles that aren't in To read or the Inbox, read, favorited or highlighted; opening one brings them back.",
+      "A feedback thread opens in your Nostr app (Primal, Amethyst…) from the new button at its top right, to reply or react there. New feedback carries #einkreader, so any Nostr app can follow it.",
+      "einkreader.app links to einkreader on Nostr in its footer, and each feedback thread on the site opens in any Nostr app."
+    ]
+  },
+  {
     "date": "2026-10-18",
     "title": "einkreader is on Google Play",
     "changes": [
