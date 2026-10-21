@@ -1,5 +1,6 @@
-// Feedback threads: who reacted (long press on a reaction) and @mentions
-// while replying. Run:
+// Feedback threads: who reacted (long press on a reaction), @mentions
+// while replying, mention chips, images side by side and the image viewer,
+// and images added to new feedback. Run:
 //
 //   flutter test test/screenshots/feedback_shot_test.dart \
 //     --update-goldens --dart-define=screenshots=true
@@ -16,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -166,14 +168,14 @@ void main() {
     phone(tester);
     await tester.pumpWidget(app());
     await settle(tester);
-    await tester.enterText(find.byType(TextField), 'Looks good, @xa');
+    await tester.enterText(find.byType(TextField), 'Looks good, @ei');
     await tester.pump();
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/feedback_2_mention_suggestions.png'));
-    await tester.tap(find.text("Xavier's agent").last);
+    await tester.tap(find.text('einkReader agent').last);
     await tester.pump();
     await tester.enterText(find.byType(TextField),
-        "Looks good, @Xavier's agent can it also reset to the feed's name?");
+        "Looks good, @einkReader agent can it also reset to the feed's name?");
     await tester.tap(find.byTooltip('Send'));
     await settle(tester);
     await expectLater(find.byType(MaterialApp),
@@ -193,6 +195,83 @@ void main() {
         matchesGoldenFile('goldens/feedback_4_filters.png'));
   }, skip: !_enabled);
 
+  testWidgets('mention chips and images side by side', (tester) async {
+    phone(tester);
+    final pages = [for (var i = 0; i < 3; i++) _fakePage(i)];
+    noteImageProvider = (url) => MemoryImage(pages[int.parse(
+        RegExp(r'(\d)\.png').firstMatch(url)!.group(1)!)]);
+    addTearDown(() => noteImageProvider = NetworkImage.new);
+    final ana = NostrService.npubEncode(_ana);
+    final rootId = 'e' * 64;
+    relay.events.addAll([
+      {
+        'id': rootId,
+        'pubkey': _marie,
+        'created_at': now - 4 * 3600,
+        'kind': 1,
+        'tags': [
+          ['p', FeedbackService.officialHex],
+          ['t', 'feedback'],
+          ['t', 'rendering-issue'],
+        ],
+        'content': 'Wide tables are cut off on the right, as nostr:$ana '
+            'noticed too. Three examples:\n\n'
+            'https://img.example/0.png\nhttps://img.example/1.png\n'
+            'https://img.example/2.png',
+      },
+      {
+        'id': 'f' * 64,
+        'pubkey': _agent,
+        'created_at': now - 3600,
+        'kind': 1,
+        'tags': [
+          ['e', rootId, '', 'root'],
+          ['p', _marie],
+        ],
+        'content': 'Thanks nostr:${NostrService.npubEncode(_marie)}! '
+            'Proposal: wide tables scroll sideways.',
+      },
+    ]);
+    final note = FeedbackNote.fromEvent(relay.events[relay.events.length - 2]);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: _withEmoji(buildEinkTheme()),
+        home: FeedbackThreadScreen(root: note, service: service)));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_6_chips_images.png'));
+
+    await tester.tap(find.byType(Image).at(1));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_7_image_viewer.png'));
+  }, skip: !_enabled);
+
+  testWidgets('images added to new feedback', (tester) async {
+    phone(tester);
+    NewFeedbackScreen.debugPickImages =
+        () async => [_fakePage(0), _fakePage(1)];
+    addTearDown(() => NewFeedbackScreen.debugPickImages = null);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: _withEmoji(buildEinkTheme()),
+        home: NewFeedbackScreen(service: service)));
+    await settle(tester);
+    await tester.tap(find.text('Bug'));
+    await tester.enterText(find.widgetWithText(TextField, 'Subject'),
+        'Wide tables are cut off');
+    await tester.enterText(
+        find.widgetWithText(
+            TextField, 'What happened, or what would you like?'),
+        'The last columns never show, even in landscape.');
+    await tester.tap(find.text('Add images'));
+    await settle(tester);
+    await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_8_new_with_images.png'));
+  }, skip: !_enabled);
+
   testWidgets('tagging new feedback', (tester) async {
     phone(tester);
     await tester.pumpWidget(MaterialApp(
@@ -209,6 +288,25 @@ void main() {
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/feedback_5_new_tagged.png'));
   }, skip: !_enabled);
+}
+
+/// A grey page with a title bar and lines of "text", numbered [i].
+Uint8List _fakePage(int i) {
+  final page = img.Image(width: 300, height: 400)
+    ..clear(img.ColorRgb8(255, 255, 255));
+  img.fillRect(page,
+      x1: 20, y1: 24, x2: 220, y2: 44, color: img.ColorRgb8(40, 40, 40));
+  for (var y = 70; y < 360; y += 22) {
+    img.fillRect(page,
+        x1: 20,
+        y1: y,
+        x2: 280 - (y * (i + 3)) % 90,
+        y2: y + 8,
+        color: img.ColorRgb8(150, 150, 150));
+  }
+  img.drawRect(page,
+      x1: 0, y1: 0, x2: 299, y2: 399, color: img.ColorRgb8(0, 0, 0));
+  return img.encodePng(page);
 }
 
 ThemeData _withEmoji(ThemeData theme) => theme.copyWith(

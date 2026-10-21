@@ -26,11 +26,25 @@ class NostrProfileCache {
   static final Set<String> _refreshed = {};
   static bool _storedLoaded = false;
 
-  static NostrProfile? get(String pubkey) => _profiles[pubkey];
+  static NostrProfile? get(String pubkey) => _named(_profiles[pubkey]);
 
   /// Every profile known so far (stored or fetched), for @mention
   /// suggestions.
-  static Iterable<NostrProfile> get all => _profiles.values;
+  static Iterable<NostrProfile> get all =>
+      _profiles.values.map((p) => _named(p)!);
+
+  /// The app's own accounts go by the name it gives them
+  /// ([FeedbackService.knownNames]), whatever their profile says.
+  static NostrProfile? _named(NostrProfile? profile) {
+    final name = FeedbackService.knownNames[profile?.pubkey];
+    if (profile == null || name == null) return profile;
+    return NostrProfile(
+        pubkey: profile.pubkey,
+        name: name,
+        about: profile.about,
+        picture: profile.picture,
+        nip05: profile.nip05);
+  }
 
   /// Makes [pubkeys]' profiles available: stored ones immediately, missing
   /// ones fetched (one query), and every one refreshed once per session.
@@ -108,7 +122,9 @@ class NostrProfileCache {
 /// Display name for a pubkey: its profile name, else "Anonymous" (never an
 /// npub — a key means nothing to a reader).
 String nostrDisplayName(String pubkey) {
-  final name = NostrProfileCache.get(pubkey)?.name ?? '';
+  final name = NostrProfileCache.get(pubkey)?.name ??
+      FeedbackService.knownNames[pubkey] ??
+      '';
   return name.isNotEmpty ? name : 'Anonymous';
 }
 

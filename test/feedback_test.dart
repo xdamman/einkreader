@@ -2,7 +2,6 @@
 // of replies (NIP-10), emoji reactions (NIP-25) with the reader's favorite
 // emojis first, and native profiles opened from any avatar or name.
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:einkreader/db/app_database.dart';
 import 'package:einkreader/screens/feedback_screen.dart';
@@ -14,6 +13,7 @@ import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:einkreader/widgets/markdown_view.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:einkreader/widgets/filter_pill.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
@@ -340,9 +340,16 @@ void main() {
     expect(sent['content'],
         'Thanks nostr:${NostrService.npubEncode(ada)} for this');
     expect(sent['tags'], anyElement(equals(['p', ada])));
-    expect(find.text('Thanks @Ada for this', findRichText: true),
+    expect(find.text('Thanks \uFFFC for this', findRichText: true),
         findsOneWidget,
+        reason: 'the mention sits in the text as a chip');
+    expect(find.text('@Ada'), findsOneWidget,
         reason: 'shown with the name, not the npub');
+    expect(
+        find.ancestor(
+            of: find.text('@Ada'), matching: find.byType(GestureDetector)),
+        findsWidgets,
+        reason: 'the chip opens their profile');
   });
 
   test('subject, link and screenshot travel as tags and in the text',
@@ -840,4 +847,181 @@ void main() {
       expect(find.text('2 new'), findsOneWidget);
     });
   });
+
+  test("the app's agent goes by einkReader agent, whatever its profile says",
+      () {
+    NostrProfileCache.debugPut(const NostrProfile(
+        pubkey: FeedbackService.agentHex, name: "Xavier's agent"));
+    expect(nostrDisplayName(FeedbackService.agentHex), 'einkReader agent');
+    expect(NostrProfileCache.all.map((p) => p.name), ['einkReader agent'],
+        reason: 'also in @mention suggestions');
+    NostrProfileCache.debugClear();
+    expect(nostrDisplayName(FeedbackService.agentHex), 'einkReader agent',
+        reason: 'even before its profile is fetched');
+  });
+
+  test('several images travel as one imeta tag each and in the text',
+      () async {
+    await ProfileService.instance.createIdentity();
+    final feedback = _CountingUploads(relay);
+    final posting = await feedback.submit('Two pictures',
+        images: [
+          Uint8List.fromList([1]),
+          Uint8List.fromList([2]),
+        ]);
+    final sent = await posting.sent;
+    expect(sent.note.images, [
+      'https://blossom.example/1.jpg',
+      'https://blossom.example/2.jpg',
+    ]);
+    final imeta = [
+      for (final t in relay.events.last['tags'] as List)
+        if ((t as List).first == 'imeta') t[1]
+    ];
+    expect(imeta,
+        ['url https://blossom.example/1.jpg', 'url https://blossom.example/2.jpg']);
+  });
+
+  testWidgets('the form adds several images from the device', (tester) async {
+    await tester.runAsync(() async {
+      await ProfileService.instance.createIdentity();
+    });
+    NewFeedbackScreen.debugPickImages = () async => [
+          Uint8List.fromList(img.encodePng(img.Image(width: 4, height: 4))),
+          Uint8List.fromList(img.encodePng(img.Image(width: 5, height: 5))),
+        ];
+    addTearDown(() => NewFeedbackScreen.debugPickImages = null);
+    final feedback = _CountingUploads(relay);
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: NewFeedbackScreen(service: feedback)));
+    await settle(tester);
+
+    await tester.tap(find.text('Add images'));
+    await settle(tester);
+    expect(find.byTooltip('Remove image'), findsNWidgets(2));
+    expect(find.text('Add more images'), findsOneWidget);
+    await tester.tap(find.byTooltip('Remove image').first);
+    await tester.pump();
+    expect(find.byTooltip('Remove image'), findsOneWidget);
+
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Subject'), 'With a picture');
+    await tester.tap(find.text('Post feedback'));
+    await settle(tester);
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 200)));
+    expect(feedback.uploads, 1);
+    expect(relay.events.last['content'],
+        contains('https://blossom.example/1.jpg'));
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('several images sit side by side; the viewer cycles through '
+      'them by button, swipe or arrow key', (tester) async {
+    await tester.runAsync(() => ProfileService.instance.createIdentity());
+    final note = (await tester.runAsync(() => service.post('Look',
+        imageUrl: 'https://img.example/a.png')))!;
+    final three = FeedbackNote.fromEvent({
+      'id': note.id,
+      'pubkey': note.pubkey,
+      'created_at': 0,
+      'content': 'Look https://img.example/a.png https://img.example/b.png '
+          'https://img.example/c.png',
+      'tags': const [],
+    });
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildEinkTheme(),
+      home: Scaffold(
+        body: FeedbackNoteTile(
+            note: three,
+            me: null,
+            canPost: false,
+            service: service,
+            large: true,
+            onReply: () {},
+            onChanged: () {}),
+      ),
+    ));
+    await tester.pump();
+    final strip = find.byType(ImageStrip);
+    expect(strip, findsOneWidget);
+    expect(
+        tester
+            .widget<ListView>(
+                find.descendant(of: strip, matching: find.byType(ListView)))
+            .scrollDirection,
+        Axis.horizontal);
+
+    await tester.tap(find.byType(Image).first);
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 3'), findsOneWidget);
+    await tester.tap(find.byTooltip('Next image'));
+    await tester.pumpAndSettle();
+    expect(find.text('2 / 3'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(find.text('3 / 3'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 3'), findsOneWidget, reason: 'wraps around');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(find.text('3 / 3'), findsOneWidget);
+    await tester.fling(find.byType(PageView), const Offset(-600, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 3'), findsNothing);
+    await tester.tap(find.byTooltip('Close image'));
+    await tester.pumpAndSettle();
+    expect(find.byType(PageView), findsNothing);
+  });
+
+  testWidgets('an unsent reply is kept per thread and comes back',
+      (tester) async {
+    await tester.runAsync(() => ProfileService.instance.createIdentity());
+    final note = (await tester.runAsync(() => service.post('Night mode')))!;
+    final other = (await tester.runAsync(() => service.post('Fonts')))!;
+    Future<void> open(FeedbackNote root) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(MaterialApp(
+          theme: buildEinkTheme(),
+          home: FeedbackThreadScreen(root: root, service: service)));
+      await settle(tester);
+    }
+
+    await open(note);
+    await tester.enterText(find.byType(TextField), 'Half-written thought');
+    await tester.pump();
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+
+    await open(other);
+    expect(find.text('Half-written thought'), findsNothing,
+        reason: 'each thread has its own draft');
+
+    await open(note);
+    expect(find.text('Half-written thought'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    await open(note);
+    expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text, '',
+        reason: 'sending clears the draft');
+  });
+}
+
+/// Counts uploads and gives each image its own URL.
+class _CountingUploads extends FeedbackService {
+  _CountingUploads(NostrService nostr) : super(nostr: nostr);
+  int uploads = 0;
+
+  @override
+  Future<String> uploadScreenshot(Uint8List bytes) async =>
+      'https://blossom.example/${++uploads}.jpg';
 }

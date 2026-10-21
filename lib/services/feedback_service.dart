@@ -248,6 +248,15 @@ class FeedbackService {
       'npub1dq33rr42kfeqss8kjpd0l4tn20ppq9fgu5j28c08vlsqjazr8t5qltl4h7';
   static final officialHex = NostrService.decodeNpub(officialNpub);
 
+  /// The agent that answers feedback (signs until the official key is
+  /// imported). Its Nostr profile still carries an old personal name, so
+  /// the app names it itself.
+  static const agentHex =
+      '735beae7899fa8c1ebe0e81087aeae773d37fba3f189f2c2e7808c7e1387b58f';
+
+  /// Names the app shows for its own accounts, whatever their profile says.
+  static const knownNames = {agentHex: 'einkReader agent'};
+
   final AppDatabase _db = AppDatabase.instance;
 
   /// Top-level feedback from the local cache only — instant, no network.
@@ -572,14 +581,16 @@ class FeedbackService {
 
   /// Posts new feedback without making the reader wait on the network:
   /// [SentFeedback.draft] is a local copy to show at once, and
-  /// [SentFeedback.sent] completes once the screenshot is uploaded and the
-  /// signed note is out, or queued in the outbox when no relay could be
-  /// reached (the outbox retries it on the next sync). A screenshot whose
-  /// upload fails is left out rather than holding the feedback back.
+  /// [SentFeedback.sent] completes once the screenshot and [images] are
+  /// uploaded and the signed note is out, or queued in the outbox when no
+  /// relay could be reached (the outbox retries it on the next sync). An
+  /// image whose upload fails is left out rather than holding the feedback
+  /// back.
   Future<SentFeedback> submit(String body,
       {String? subject,
       String? url,
       Uint8List? screenshot,
+      List<Uint8List> images = const [],
       Iterable<FeedbackKind> kinds = const []}) async {
     final local = FeedbackNote.fromEvent({
       'id': 'sending-${DateTime.now().microsecondsSinceEpoch}',
@@ -598,24 +609,24 @@ class FeedbackService {
         sending: true);
 
     Future<({FeedbackNote note, bool queued})> send() async {
-      String? imageUrl;
-      if (screenshot != null) {
+      final imageUrls = <String>[];
+      for (final bytes in [if (screenshot != null) screenshot, ...images]) {
         try {
-          imageUrl = await uploadScreenshot(screenshot);
+          imageUrls.add(await uploadScreenshot(bytes));
         } catch (e) {
           await AppLogService.instance
-              .warn('Feedback: screenshot upload failed, posting without: $e');
+              .warn('Feedback: image upload failed, posting without: $e');
         }
       }
       final event = await _profile.signEvent(
           kind: 1,
           content:
-              _content(body, subject: subject, url: url, imageUrl: imageUrl),
+              _content(body, subject: subject, url: url, imageUrls: imageUrls),
           tags: [
             ..._tags(
                 subject: subject,
                 url: url,
-                imageUrl: imageUrl,
+                imageUrls: imageUrls,
                 kinds: kinds),
             ['client', 'einkreader'],
           ]);
@@ -640,16 +651,16 @@ class FeedbackService {
   }
 
   /// The note's text: the subject first (NIP-14 tag, also the first line
-  /// so every client shows it), then the body, link and screenshot URL.
+  /// so every client shows it), then the body, link and image URLs.
   static String _content(String body,
-      {String? subject, String? url, String? imageUrl}) {
+      {String? subject, String? url, List<String> imageUrls = const []}) {
     final s = subject?.trim() ?? '';
     final link = url?.trim() ?? '';
     return [
       if (s.isNotEmpty) s,
       body.trim(),
       if (link.isNotEmpty) link,
-      if (imageUrl != null) imageUrl,
+      ...imageUrls,
     ].where((part) => part.isNotEmpty).join('\n\n');
   }
 
@@ -658,7 +669,7 @@ class FeedbackService {
   static List<List<String>> _tags(
       {String? subject,
       String? url,
-      String? imageUrl,
+      List<String> imageUrls = const [],
       Iterable<FeedbackKind> kinds = const []}) {
     final s = subject?.trim() ?? '';
     final link = url?.trim() ?? '';
@@ -670,7 +681,8 @@ class FeedbackService {
         if (kinds.contains(kind)) ['t', kind.tag],
       if (s.isNotEmpty) ['subject', s],
       if (link.isNotEmpty) ['r', link],
-      if (imageUrl != null) ['imeta', 'url $imageUrl', 'm image/jpeg'],
+      for (final imageUrl in imageUrls)
+        ['imeta', 'url $imageUrl', 'm image/jpeg'],
     ];
   }
 
@@ -681,8 +693,14 @@ class FeedbackService {
   Future<FeedbackNote> post(String body,
       {String? subject, String? url, String? imageUrl}) =>
       _publish(
-        content: _content(body, subject: subject, url: url, imageUrl: imageUrl),
-        tags: _tags(subject: subject, url: url, imageUrl: imageUrl),
+        content: _content(body,
+            subject: subject,
+            url: url,
+            imageUrls: [if (imageUrl != null) imageUrl]),
+        tags: _tags(
+            subject: subject,
+            url: url,
+            imageUrls: [if (imageUrl != null) imageUrl]),
       );
 
   /// Replies inside a thread (NIP-10 marked e-tags), notifying the author
@@ -734,6 +752,57 @@ class FeedbackService {
       throw Exception('No relay accepted the note');
     }
     return FeedbackNote.fromEvent(event);
+  }
+
+  // ------------------------------------------------------- reply drafts
+
+  static const _kReplyDrafts = 'feedback_reply_drafts';
+
+  /// The reply the reader was writing in a thread and didn't send: its
+  /// text and the @mentions picked in it (name → pubkey hex).
+  static Future<({String text, Map<String, String> picked})?> replyDraft(
+      String rootId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final draft = _replyDrafts(prefs)[rootId];
+    if (draft is! Map) return null;
+    final text = draft['text'];
+    if (text is! String || text.trim().isEmpty) return null;
+    final picked = draft['picked'];
+    return (
+      text: text,
+      picked: picked is Map
+          ? {for (final e in picked.entries) '${e.key}': '${e.value}'}
+          : <String, String>{},
+    );
+  }
+
+  /// Keeps (or, when [text] is blank, forgets) a thread's unsent reply.
+  static Future<void> saveReplyDraft(String rootId, String text,
+      {Map<String, String> picked = const {}}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final drafts = _replyDrafts(prefs);
+    if (text.trim().isEmpty) {
+      if (drafts.remove(rootId) == null) return;
+    } else {
+      drafts[rootId] = {
+        'text': text,
+        // Only the mentions still in the text matter.
+        'picked': {
+          for (final e in picked.entries)
+            if (text.contains('@${e.key}')) e.key: e.value
+        },
+      };
+    }
+    await prefs.setString(_kReplyDrafts, jsonEncode(drafts));
+  }
+
+  static Map<String, dynamic> _replyDrafts(SharedPreferences prefs) {
+    try {
+      final raw = prefs.getString(_kReplyDrafts);
+      return raw == null ? {} : jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return {};
+    }
   }
 
   // ------------------------------------------------------------- emojis

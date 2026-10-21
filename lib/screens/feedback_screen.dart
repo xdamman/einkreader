@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/errors.dart';
@@ -277,10 +278,35 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    _restoreDraft();
     _load();
   }
 
+  /// Brings back the reply left unsent in this thread (on going back, or
+  /// when the app was closed).
+  Future<void> _restoreDraft() async {
+    final draft = await FeedbackService.replyDraft(widget.root.id);
+    // Not over something typed meanwhile.
+    if (draft == null || !mounted || _controller.text.isNotEmpty) return;
+    _picked.addAll(draft.picked);
+    _controller.value = TextEditingValue(
+        text: draft.text,
+        selection: TextSelection.collapsed(offset: draft.text.length));
+  }
+
+  /// The text last kept as this thread's draft.
+  String _savedDraft = '';
+
+  /// Every change is kept at once: the app can be closed at any moment.
+  void _saveDraft() {
+    final text = _controller.text;
+    if (text == _savedDraft) return;
+    _savedDraft = text;
+    FeedbackService.saveReplyDraft(widget.root.id, text, picked: _picked);
+  }
+
   void _onTextChanged() {
+    _saveDraft();
     final value = _controller.value;
     final cursor = value.selection.baseOffset;
     String? query;
@@ -815,13 +841,17 @@ class FeedbackNoteTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 16, height: 1.4)),
                     if (note.images.isNotEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 4),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
                         child: Row(
                           children: [
-                            Icon(Icons.image_outlined, size: 16),
-                            SizedBox(width: 4),
-                            Text('Screenshot', style: TextStyle(fontSize: 13)),
+                            const Icon(Icons.image_outlined, size: 16),
+                            const SizedBox(width: 4),
+                            Text(
+                                note.images.length == 1
+                                    ? 'Screenshot'
+                                    : '${note.images.length} images',
+                                style: const TextStyle(fontSize: 13)),
                           ],
                         ),
                       ),
@@ -831,31 +861,28 @@ class FeedbackNoteTile extends StatelessWidget {
                             note.displayText, nostrDisplayName),
                         fontSize: large ? 18 : 16,
                         onLinkTap: (url, _, __) => _openLink(context, url)),
-                  if (!compact)
-                    for (final image in note.images)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 4),
-                        child: ConstrainedBox(
-                          constraints:
-                              BoxConstraints(maxHeight: large ? 480 : 240),
-                          child: Container(
-                            decoration:
-                                BoxDecoration(border: Border.all(width: 1)),
-                            child: GestureDetector(
-                              onTap: () => showImageViewer(
-                                  context, Image.network(image)),
-                              child: Image.network(image,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => Padding(
-                                        padding: const EdgeInsets.all(8),
-                                        child: Text('[screenshot: $image]',
-                                            style: const TextStyle(
-                                                fontSize: 13)),
-                                      )),
-                            ),
-                          ),
-                        ),
+                  if (!compact && note.images.length == 1)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 4),
+                      child: ConstrainedBox(
+                        constraints:
+                            BoxConstraints(maxHeight: large ? 480 : 240),
+                        child: _NoteImage(
+                            images: note.images, index: 0, fit: BoxFit.contain),
                       ),
+                    )
+                  else if (!compact && note.images.length > 1)
+                    // Side by side, scrolled sideways: a few pictures don't
+                    // push the replies screens away.
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 4),
+                      child: ImageStrip(
+                        height: large ? 260 : 180,
+                        count: note.images.length,
+                        itemBuilder: (i) =>
+                            _NoteImage(images: note.images, index: i),
+                      ),
+                    ),
                   if (note.sending)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 10),
@@ -914,6 +941,97 @@ class FeedbackNoteTile extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Where note images come from. Test seam: screenshot tests have no
+/// network.
+@visibleForTesting
+ImageProvider Function(String url) noteImageProvider = NetworkImage.new;
+
+/// One of a note's images, outlined; a tap opens them all in the viewer at
+/// this one.
+class _NoteImage extends StatelessWidget {
+  final List<String> images;
+  final int index;
+  final BoxFit fit;
+
+  const _NoteImage(
+      {required this.images, required this.index, this.fit = BoxFit.cover});
+
+  @override
+  Widget build(BuildContext context) {
+    final image = images[index];
+    return Container(
+      decoration: BoxDecoration(border: Border.all(width: 1)),
+      child: GestureDetector(
+        onTap: () => showImageGallery(context, [
+          for (final url in images)
+            Image(
+                image: noteImageProvider(url),
+                errorBuilder: (_, __, ___) => Text('[screenshot: $url]',
+                    style: const TextStyle(fontSize: 13))),
+        ], initial: index),
+        child: Image(
+            image: noteImageProvider(image),
+            fit: fit,
+            errorBuilder: (_, __, ___) => Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text('[screenshot: $image]',
+                      style: const TextStyle(fontSize: 13)),
+                )),
+      ),
+    );
+  }
+}
+
+/// Pictures in a row, scrolled sideways with a visible scrollbar (e-ink
+/// readers need to see there's more), each [height] tall and 3:4 wide.
+class ImageStrip extends StatefulWidget {
+  final double height;
+  final int count;
+  final Widget Function(int index) itemBuilder;
+
+  const ImageStrip(
+      {super.key,
+      required this.height,
+      required this.count,
+      required this.itemBuilder});
+
+  @override
+  State<ImageStrip> createState() => _ImageStripState();
+}
+
+class _ImageStripState extends State<ImageStrip> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: widget.height + 14,
+      child: Scrollbar(
+        controller: _scroll,
+        thumbVisibility: true,
+        child: ListView.separated(
+          controller: _scroll,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.only(bottom: 14),
+          itemCount: widget.count,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (_, i) => SizedBox(
+            width: widget.height * 0.75,
+            height: widget.height,
+            child: widget.itemBuilder(i),
+          ),
         ),
       ),
     );
@@ -1070,6 +1188,10 @@ class NewFeedbackScreen extends StatefulWidget {
   @visibleForTesting
   static Future<void> Function(BuildContext context)? debugSwitchProfile;
 
+  /// Test seam: stands in for the system file picker ("Add images").
+  @visibleForTesting
+  static Future<List<Uint8List>> Function()? debugPickImages;
+
   const NewFeedbackScreen(
       {super.key,
       required this.service,
@@ -1088,6 +1210,9 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
   /// Off by default: the page is captured just in case, and attached only
   /// when the reader asks (instantly — it's already there).
   bool _includeScreenshot = false;
+
+  /// Pictures the reader added from the device, in the order picked.
+  final List<Uint8List> _images = [];
 
   /// What it's about (bug, feature request, rendering issue), any number.
   final Set<FeedbackKind> _kinds = {};
@@ -1121,6 +1246,21 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
     if (mounted) _loadIdentity();
   }
 
+  Future<void> _addImages() async {
+    final picked = await (NewFeedbackScreen.debugPickImages ?? _pickImages)();
+    if (picked.isEmpty || !mounted) return;
+    setState(() => _images.addAll(picked));
+  }
+
+  static Future<List<Uint8List>> _pickImages() async {
+    final result = await FilePicker.platform.pickFiles(
+        type: FileType.image, allowMultiple: true, withData: true);
+    return [
+      for (final file in result?.files ?? const <PlatformFile>[])
+        if (file.bytes case final bytes?) bytes
+    ];
+  }
+
   Future<void> _post() async {
     if (_subject.text.trim().isEmpty && _body.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1139,6 +1279,7 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
           subject: _subject.text,
           url: _url.text,
           screenshot: _includeScreenshot ? widget.screenshot : null,
+          images: _images,
           kinds: _kinds);
       // Our own name and picture are already known: no relay round trip.
       final me = await widget.service.identity();
@@ -1317,6 +1458,52 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
                 ),
               ),
           ],
+          const SizedBox(height: 14),
+          if (_images.isNotEmpty) ...[
+            ImageStrip(
+              height: 140,
+              count: _images.length,
+              itemBuilder: (i) => Stack(
+                fit: StackFit.expand,
+                children: [
+                  GestureDetector(
+                    onTap: () => showImageGallery(
+                        context, [for (final b in _images) Image.memory(b)],
+                        initial: i),
+                    child: Container(
+                      decoration: BoxDecoration(border: Border.all(width: 1)),
+                      child: Image.memory(_images[i], fit: BoxFit.cover),
+                    ),
+                  ),
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: Container(
+                      decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(width: 1)),
+                      child: IconButton(
+                        tooltip: 'Remove image',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () => setState(() => _images.removeAt(i)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.photo_library_outlined),
+              label: Text(_images.isEmpty ? 'Add images' : 'Add more images'),
+              onPressed: _addImages,
+            ),
+          ),
           const SizedBox(height: 24),
           OutlinedButton(
             onPressed: _posting ? null : _post,
@@ -1372,7 +1559,14 @@ class RefreshAction extends StatelessWidget {
 
 /// Shows an image (a feedback screenshot) almost full screen, zoomable;
 /// tap anywhere or the close button to dismiss.
-Future<void> showImageViewer(BuildContext context, Image image) {
+Future<void> showImageViewer(BuildContext context, Image image) =>
+    showImageGallery(context, [image]);
+
+/// Shows [images] almost full screen, starting at [initial]: swipe, the
+/// arrow buttons or the keyboard's left/right arrows go to the previous or
+/// next one (wrapping around). Zoomable; tap or the close button dismisses.
+Future<void> showImageGallery(BuildContext context, List<Image> images,
+    {int initial = 0}) {
   return showDialog<void>(
     context: context,
     barrierColor: Colors.black87,
@@ -1380,26 +1574,139 @@ Future<void> showImageViewer(BuildContext context, Image image) {
       insetPadding: const EdgeInsets.all(12),
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-      child: Stack(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(dialogContext),
-            child: InteractiveViewer(
-              maxScale: 5,
-              child: Center(child: image),
-            ),
-          ),
-          Positioned(
-            top: 4,
-            right: 4,
-            child: IconButton(
-              tooltip: 'Close image',
-              icon: const Icon(Icons.close),
-              onPressed: () => Navigator.pop(dialogContext),
-            ),
-          ),
-        ],
-      ),
+      child: _ImageGallery(images: images, initial: initial),
     ),
   );
+}
+
+class _ImageGallery extends StatefulWidget {
+  final List<Image> images;
+  final int initial;
+
+  const _ImageGallery({required this.images, required this.initial});
+
+  @override
+  State<_ImageGallery> createState() => _ImageGalleryState();
+}
+
+class _ImageGalleryState extends State<_ImageGallery> {
+  late final _pages = PageController(initialPage: widget.initial);
+  late int _index = widget.initial;
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
+  /// One step left or right, wrapping around; no sliding animation (it
+  /// smears on e-ink).
+  void _go(int delta) {
+    final count = widget.images.length;
+    _pages.jumpToPage((_index + delta + count) % count);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final many = widget.images.length > 1;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _go(-1),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () => _go(1),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Stack(
+          children: [
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: PageView.builder(
+                controller: _pages,
+                itemCount: widget.images.length,
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (_, i) => InteractiveViewer(
+                  maxScale: 5,
+                  child: Center(child: widget.images[i]),
+                ),
+              ),
+            ),
+            if (many) ...[
+              Positioned(
+                left: 4,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _GalleryButton(
+                      tooltip: 'Previous image',
+                      icon: Icons.chevron_left,
+                      onPressed: () => _go(-1)),
+                ),
+              ),
+              Positioned(
+                right: 4,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _GalleryButton(
+                      tooltip: 'Next image',
+                      icon: Icons.chevron_right,
+                      onPressed: () => _go(1)),
+                ),
+              ),
+              Positioned(
+                bottom: 10,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                    color: Colors.white,
+                    child: Text('${_index + 1} / ${widget.images.length}',
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ),
+            ],
+            Positioned(
+              top: 4,
+              right: 4,
+              child: IconButton(
+                tooltip: 'Close image',
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A round, outlined arrow over the picture, readable on any image.
+class _GalleryButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  const _GalleryButton(
+      {required this.tooltip, required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(width: 1.5),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        icon: Icon(icon, size: 30),
+        onPressed: onPressed,
+      ),
+    );
+  }
 }

@@ -614,7 +614,32 @@ class _MarkdownViewState extends State<MarkdownView> {
         final url = (match.group(7) ?? match.group(11))!;
         final anchor = _unescape((match.group(6) ?? match.group(10))!);
         // Empty anchor text = an invisible in-page anchor: show nothing.
-        if (anchor.isNotEmpty) {
+        if (anchor.isNotEmpty &&
+            url.startsWith('nostr:') &&
+            widget.highlights.isEmpty) {
+          // A mentioned person (NIP-27): an outlined chip, tapped to open
+          // their profile. (Highlight painting only keeps text spans, so
+          // with highlights it stays a plain link.)
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: GestureDetector(
+              onTapUp: (details) =>
+                  widget.onLinkTap?.call(url, anchor, details.globalPosition),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                decoration: BoxDecoration(
+                  border: Border.all(width: 1.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(anchor,
+                    style: style.copyWith(
+                        fontSize: (style.fontSize ?? 16) * 0.92,
+                        fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ));
+        } else if (anchor.isNotEmpty) {
           final recognizer = TapGestureRecognizer()
             ..onTapUp = (details) {
               final onLinkTap = widget.onLinkTap;
