@@ -33,7 +33,7 @@ export function signEvent(template, secretHex) {
   return event;
 }
 
-// bech32 (NIP-19) for npub links and decoding the official npub.
+// bech32 (NIP-19) for npub and note links, and decoding the official npub.
 const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 
 function polymod(values) {
@@ -70,14 +70,19 @@ function convertBits(data, from, to, pad) {
   return out;
 }
 
-export function npubEncode(hex) {
+function bech32Encode(hrp, hex) {
   const data = convertBits(hexToBytes(hex), 8, 5, true);
-  const values = [...hrpExpand('npub'), ...data, 0, 0, 0, 0, 0, 0];
+  const values = [...hrpExpand(hrp), ...data, 0, 0, 0, 0, 0, 0];
   const mod = polymod(values) ^ 1;
   const checksum = [];
   for (let i = 0; i < 6; i++) checksum.push((mod >> (5 * (5 - i))) & 31);
-  return 'npub1' + [...data, ...checksum].map((d) => CHARSET[d]).join('');
+  return `${hrp}1` + [...data, ...checksum].map((d) => CHARSET[d]).join('');
 }
+
+export const npubEncode = (hex) => bech32Encode('npub', hex);
+
+/// A note's NIP-19 id (note1…), the form Nostr apps open.
+export const noteEncode = (hex) => bech32Encode('note', hex);
 
 export function npubDecode(npub) {
   const data = [...npub.slice(npub.lastIndexOf('1') + 1)]

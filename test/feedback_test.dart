@@ -323,6 +323,7 @@ void main() {
         theme: buildEinkTheme(),
         home: FeedbackThreadScreen(root: note, service: service)));
     await settle(tester);
+    expect(find.byTooltip('Open in a Nostr app'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'Thanks @ad');
     await tester.pump();
@@ -485,7 +486,7 @@ void main() {
           for (final t in event['tags'] as List)
             if ((t as List).first == 't') t[1]
         ],
-        ['feedback', 'bug', 'rendering-issue']);
+        ['feedback', 'einkreader', 'bug', 'rendering-issue']);
     expect(event['content'], contains('https://blossom.example/abc123.jpg'));
     // Let the "Feedback posted" snackbar time out.
     await tester.pump(const Duration(seconds: 5));
@@ -564,11 +565,21 @@ void main() {
         reason: 'the full text shows in the thread');
   });
 
-  test('every feedback carries the feedback hashtag', () async {
+  test('every feedback carries the feedback and einkreader hashtags',
+      () async {
     await ProfileService.instance.createIdentity();
     await service.post('Untagged.');
     expect(relay.events.single['tags'], anyElement(equals(['t', 'feedback'])));
-    expect(FeedbackNote.fromEvent(relay.events.single).tags, ['feedback']);
+    expect(FeedbackNote.fromEvent(relay.events.single).tags,
+        ['feedback', 'einkreader'],
+        reason: 'a hashtag any Nostr app can follow');
+  });
+
+  test('note ids encode as note1… for Nostr apps', () {
+    expect(
+        NostrService.noteEncode(
+            '096d8f7cc2edbd13ec2137bdf1182c59950f5a8fd8b86c470c0936526c80cd2e'),
+        'note1p9kc7lxzak738mppx77lzxpvtx2s7k50mzuxc3cvpym9ymyqe5hq78rkew');
   });
 
   testWidgets('the list filters by kind with the same pills', (tester) async {

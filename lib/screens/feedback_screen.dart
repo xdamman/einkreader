@@ -400,12 +400,33 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
     }
   }
 
+  /// Opens the thread in the reader's Nostr app (Primal, Amethyst…) to reply
+  /// or react there; without one, in the browser, which offers them all.
+  Future<void> _openInNostrApp() async {
+    final note = NostrService.noteEncode(widget.root.id);
+    try {
+      if (await launchUrl(Uri.parse('nostr:$note'),
+          mode: LaunchMode.externalApplication)) {
+        return;
+      }
+    } catch (_) {}
+    await launchUrl(Uri.parse('https://njump.me/$note'),
+        mode: LaunchMode.externalApplication);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Feedback thread'),
-        actions: [RefreshAction(loading: _loading, onPressed: _load)],
+        actions: [
+          IconButton(
+            tooltip: 'Open in a Nostr app',
+            icon: const Icon(Icons.open_in_new),
+            onPressed: _openInNostrApp,
+          ),
+          RefreshAction(loading: _loading, onPressed: _load),
+        ],
       ),
       body: Column(
         children: [
