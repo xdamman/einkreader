@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.28",
+    "date": "2026-10-22",
+    "title": "New, seen and read",
+    "changes": [
+      "An article counts as seen once it has been on screen in your feed, or once you open it. It stays bold until you next open the app, so nothing changes in front of you.",
+      "A \"Mark all as seen\" button at the top of the feed catches you up on everything, a folder, a source or a person, without calling those articles read. Undo is offered.",
+      "The feed tells three states apart: new is bold, seen is plain, read is plain with a ✓ Read mark. The Read tab still lists only what you actually read.",
+      "Marking an article unread makes it new again."
+    ],
+    "feedback": [
+      {
+        "id": "096d8f7cc2edbd13ec2137bdf1182c59950f5a8fd8b86c470c0936526c80cd2e",
+        "title": "Mark all as read"
+      }
+    ]
+  },
+  {
     "version": "0.6.27",
     "date": "2026-10-21",
     "title": "Mentions you can tap, and pictures in feedback",
