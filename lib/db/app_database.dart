@@ -685,6 +685,22 @@ class AppDatabase {
     return rows.map(Article.fromMap).toList();
   }
 
+  /// The newest unread articles of [sourceId] other than [exceptId], light
+  /// (no full text): "More from this feed" at the end of an article.
+  Future<List<Article>> getUnreadFromSource(int sourceId,
+      {required int exceptId, int limit = 5}) async {
+    final db = await database;
+    final rows = await db.query(
+      'articles',
+      columns: _listColumns,
+      where: 'source_id = ? AND id != ? AND read = 0',
+      whereArgs: [sourceId, exceptId],
+      orderBy: '$listedAtSql DESC',
+      limit: limit,
+    );
+    return rows.map(Article.fromMap).toList();
+  }
+
   Future<void> setReadLater(int id, bool readLater) async {
     final db = await database;
     await db.update(

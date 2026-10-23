@@ -156,7 +156,12 @@ void main() {
     // The AINOTE's screen-refresh gesture: two horizontally separated fingers
     // tapping twice in quick succession. The cross-finger up/down deltas used
     // to read as an instant horizontal fling.
-    final box = tester.getCenter(find.byKey(const Key('articleSwipe')));
+    // On the article's text, clear of the buttons below it.
+    final box = Offset(
+        tester.getCenter(find.byKey(const Key('articleSwipe'))).dx,
+        tester
+            .getCenter(find.textContaining('Body of A', findRichText: true))
+            .dy);
     for (var tap = 0; tap < 2; tap++) {
       final finger1 = await tester.startGesture(box + const Offset(-60, 0));
       final finger2 = await tester.startGesture(box + const Offset(60, 0));

@@ -60,6 +60,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
   /// The article's source, for the origin prefix in the top bar.
   Source? _source;
   List<Highlight> _highlights = [];
+
+  /// The feed's latest other unread articles, listed under the article.
+  List<Article> _moreFromFeed = [];
   String _selectedText = '';
 
   /// Text size, typeface, margins and paging (Settings → Reading).
@@ -112,12 +115,17 @@ class _ArticleScreenState extends State<ArticleScreen> {
         : await _db.getArticle(article!.viaArticleId!);
     final source =
         article == null ? null : await _db.getSource(article.sourceId);
+    final more = article == null
+        ? <Article>[]
+        : await _db.getUnreadFromSource(article.sourceId,
+            exceptId: article.id!);
     if (!mounted) return;
     setState(() {
       _article = article;
       _viaArticle = via;
       _source = source;
       _highlights = highlights;
+      _moreFromFeed = more;
     });
     // One-time per article (not on highlight/reprocess reloads, which also
     // land here): restore the saved position or auto-read a short article.
@@ -179,13 +187,34 @@ class _ArticleScreenState extends State<ArticleScreen> {
   /// Scrolls shorter than this (px) don't count as "started reading".
   static const double _minReadingOffset = 24;
 
+  /// The rule under the article's text: once on screen, the article is read
+  /// (what follows — buttons, more from the feed — needn't be scrolled to).
+  final GlobalKey _endOfTextKey = GlobalKey();
+
+  /// Scroll offset at which the end of the text is on screen: 0 when it
+  /// fits on open, the scroll end when it can't be measured.
+  double _readOffset() {
+    final pos = _scroll.position;
+    final end = _endOfTextKey.currentContext?.findRenderObject();
+    final view = pos.context.notificationContext?.findRenderObject();
+    if (end is! RenderBox || view is! RenderBox || !end.hasSize) {
+      return pos.maxScrollExtent;
+    }
+    final bottom = end
+            .localToGlobal(Offset(0, end.size.height), ancestor: view)
+            .dy +
+        pos.pixels;
+    return (bottom - pos.viewportDimension)
+        .clamp(0.0, pos.maxScrollExtent < 0 ? 0.0 : pos.maxScrollExtent);
+  }
+
   /// After the article's first layout: jump to the saved reading position, or
   /// mark an article that fits entirely on screen as read — its bottom is
   /// visible on open and no scrolling can ever happen.
   void _prepareScroll(Article article) {
     if (!mounted || !_scroll.hasClients || _currentId != article.id) return;
     final maxExtent = _scroll.position.maxScrollExtent;
-    if (maxExtent <= 0 || (_reading.paginated && _pageCount() == 1)) {
+    if (_readOffset() <= 0 || (_reading.paginated && _pageCount() == 1)) {
       _updatePage();
       // Only FINAL content that fits on screen counts as read: a pending
       // saved link renders a short placeholder, and marking that read
@@ -209,7 +238,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     if (article == null || metrics.axis != Axis.vertical) return;
     if (!_reachedBottom &&
         metrics.maxScrollExtent > 0 &&
-        metrics.pixels >= metrics.maxScrollExtent - 8) {
+        metrics.pixels >= _readOffset() - 8) {
       _reachedBottom = true;
       if (article.read == 0) _markRead();
       return;
@@ -299,9 +328,12 @@ class _ArticleScreenState extends State<ArticleScreen> {
     _scroll.jumpTo(starts[p].clamp(0.0, max < 0 ? 0.0 : max));
     _updatePage();
     // Paged, the last page may sit above the scroll end (blank space lets
-    // it start at its cut): reaching it is reaching the bottom.
+    // it start at its cut): reaching it, or the page where the text ends,
+    // is reaching the bottom.
     final article = _article;
-    if (p == starts.length - 1 && starts.length > 1 && !_reachedBottom) {
+    if (p > 0 &&
+        (p == starts.length - 1 || starts[p] >= _readOffset() - 8) &&
+        !_reachedBottom) {
       _reachedBottom = true;
       if (article != null && article.read == 0) _markRead();
     }
@@ -1003,9 +1035,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
                     onHighlightTap: _manageHighlight,
                     onLinkTap: _onLinkTap,
                   ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20),
-                    child: Divider(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Divider(key: _endOfTextKey),
                   ),
                   Center(
                     child: Wrap(
@@ -1038,8 +1070,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
                       ],
                     ),
                   ),
-                  // Feedback about the app, kept quiet: a line of text with
-                  // a link, prefilled with this article's link and a
+                  if (_moreFromFeed.isNotEmpty) _moreFromFeedList(),
+                  // Feedback about the app, kept quiet: a question, then a
+                  // link prefilled with this article's link and a
                   // screenshot of the page (e.g. "this page didn't parse").
                   Padding(
                     padding: const EdgeInsets.only(top: 28),
@@ -1048,7 +1081,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
                       // is exactly the size of the sentence around it.
                       child: Text.rich(
                         TextSpan(
-                          text: 'How was your reading experience? ',
+                          text: 'How was your reading experience?\n',
                           children: [
                             TextSpan(
                               text: 'Leave a feedback to improve einkreader',
@@ -1095,6 +1128,58 @@ class _ArticleScreenState extends State<ArticleScreen> {
       bottomNavigationBar: _reading.paginated ? _pageBar() : null,
       ),
     );
+  }
+
+  /// "More from …": the feed's latest unread articles after this one's
+  /// end, new ones bold as in the feed. Opening one stacks it on top, so
+  /// back returns here with the list updated.
+  Widget _moreFromFeedList() {
+    final title = _source?.title;
+    return Padding(
+      padding: const EdgeInsets.only(top: 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            title == null || title.trim().isEmpty
+                ? 'More from this feed'
+                : 'More from ${title.trim()}',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          for (final more in _moreFromFeed)
+            InkWell(
+              onTap: () => _openMore(more),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: const BoxDecoration(
+                    border: Border(bottom: BorderSide(width: 0.5))),
+                child: Text(
+                  more.displayTitle,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 17,
+                    height: 1.3,
+                    fontWeight:
+                        more.isNew ? FontWeight.w700 : FontWeight.w400,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openMore(Article more) async {
+    final ids = [for (final a in _moreFromFeed) a.id!];
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ArticleScreen(
+            articleId: more.id!,
+            articleIds: ids,
+            initialIndex: ids.indexOf(more.id!))));
+    if (mounted) _load();
   }
 
   /// "← Page 2 / 5 →": arrows only where there is somewhere to go. Hidden
