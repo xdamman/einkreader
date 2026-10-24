@@ -1,5 +1,5 @@
-// The end of an article, in each candidate layout: favorite and share, the
-// feed's latest unread articles with their dates, then the feedback link on
+// The end of an article: favorite and share, the next unread article of the
+// feed with its summary, the others with their dates, then the feedback link on
 // its own line. Run:
 //
 //   flutter test test/screenshots/more_from_feed_shot_test.dart \
@@ -87,37 +87,33 @@ void main() {
     ]);
   });
 
-  for (final layout in ArticleEndLayout.values) {
-    testWidgets('article end: ${layout.name}', (tester) async {
-      ArticleScreen.endLayout = layout;
-      addTearDown(() => ArticleScreen.endLayout = ArticleEndLayout.upNext);
-      tester.view.physicalSize = const Size(600, 800) * 2.0;
-      tester.view.devicePixelRatio = 2.0;
-      addTearDown(tester.view.reset);
-      Future<void> settle() async {
-        await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 200)));
-        await tester.pumpAndSettle();
-      }
+  testWidgets('article end', (tester) async {
+    tester.view.physicalSize = const Size(600, 800) * 2.0;
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+    Future<void> settle() async {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 200)));
+      await tester.pumpAndSettle();
+    }
 
-      await tester.pumpWidget(MaterialApp(
-          debugShowCheckedModeBanner: false,
-          theme: buildEinkTheme(),
-          home: ArticleScreen(articleId: id)));
-      await settle();
-      // The article's last lines at the top, what follows below them.
-      final lastLine = tester
-          .getTopLeft(find.textContaining('relationship with the user',
-              findRichText: true))
-          .dy;
-      await tester.drag(find.byType(SingleChildScrollView).first,
-          Offset(0, -(lastLine - 40)));
-      await settle();
-      await expectLater(find.byType(MaterialApp),
-          matchesGoldenFile('goldens/more_from_feed_${layout.name}.png'));
-      await tester.pump(const Duration(minutes: 2));
-    }, skip: !_enabled);
-  }
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildEinkTheme(),
+        home: ArticleScreen(articleId: id)));
+    await settle();
+    // The article's last lines at the top, what follows below them.
+    final lastLine = tester
+        .getTopLeft(find.textContaining('relationship with the user',
+            findRichText: true))
+        .dy;
+    await tester.drag(find.byType(SingleChildScrollView).first,
+        Offset(0, -(lastLine - 40)));
+    await settle();
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/more_from_feed.png'));
+    await tester.pump(const Duration(minutes: 2));
+  }, skip: !_enabled);
 }
 
 const _body = 'The internet made distribution free, and in doing so moved '

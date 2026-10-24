@@ -40,24 +40,8 @@ class ArticleScreen extends StatefulWidget {
   const ArticleScreen({super.key, required this.articleId,
       this.articleIds, this.initialIndex, this.focusHighlight});
 
-  /// How the end of an article is laid out: three candidates while the
-  /// design is being chosen (the two that lose go once one is picked).
-  static ArticleEndLayout endLayout = ArticleEndLayout.upNext;
-
   @override
   State<ArticleScreen> createState() => _ArticleScreenState();
-}
-
-/// The end of an article: actions, the feed's unread articles, feedback.
-enum ArticleEndLayout {
-  /// The next unread article as a card with its summary, then the others.
-  upNext,
-
-  /// A quiet line of actions, then a table of contents: date, title.
-  contents,
-
-  /// Two wide buttons, then the unread articles as cards, like in the feed.
-  cards,
 }
 
 class _ArticleScreenState extends State<ArticleScreen> {
@@ -1097,76 +1081,32 @@ class _ArticleScreenState extends State<ArticleScreen> {
     );
   }
 
-  /// Everything after the article's text, in the chosen [ArticleEndLayout]:
-  /// favorite and share, the feed's latest unread articles (new ones bold,
-  /// as in the feed, each with its date), then the feedback link.
+  /// Everything after the article's text: favorite and share, the next
+  /// unread article of the feed boxed with its summary, the other unread ones
+  /// (new ones bold, as in the feed, each with its date), then the feedback
+  /// link.
   List<Widget> _articleEnd(Article article) {
     final more = _moreFromFeed;
-    switch (ArticleScreen.endLayout) {
-      case ArticleEndLayout.upNext:
-        return [
-          _actionButtons(article),
-          if (more.isNotEmpty) ...[
-            const SizedBox(height: 32),
-            _upNextCard(more.first),
-            if (more.length > 1) ...[
-              const SizedBox(height: 24),
-              _sectionLabel('Also unread'),
-              for (final a in more.skip(1)) _dateRightRow(a),
-            ],
-            _seeAllLink(),
-          ],
-          _feedbackLine(article),
-        ];
-      case ArticleEndLayout.contents:
-        return [
-          _actionLinks(article),
-          if (more.isNotEmpty) ...[
-            const SizedBox(height: 36),
-            _contentsHeader(),
-            for (final a in more) _contentsRow(a),
-            _seeAllLink(),
-          ],
-          _feedbackLine(article),
-        ];
-      case ArticleEndLayout.cards:
-        return [
-          _actionButtons(article),
-          if (more.isNotEmpty) ...[
-            const SizedBox(height: 32),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Expanded(
-                  child: Text(_moreTitle,
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700)),
-                ),
-                if (_source != null)
-                  InkWell(
-                    onTap: _openFeed,
-                    child: Text('See all $_unreadInFeed ›',
-                        style: const TextStyle(
-                            fontSize: 16,
-                            decoration: TextDecoration.underline)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            for (final a in more) _moreCard(a),
-          ],
-          _feedbackLine(article),
-        ];
-    }
+    return [
+      _actionButtons(article),
+      if (more.isNotEmpty) ...[
+        const SizedBox(height: 32),
+        _upNextCard(more.first),
+        if (more.length > 1) ...[
+          const SizedBox(height: 24),
+          _sectionLabel('Also unread'),
+          for (final a in more.skip(1)) _dateRightRow(a),
+        ],
+        _seeAllLink(),
+      ],
+      _feedbackLine(article),
+    ];
   }
 
   String get _feedTitle {
     final title = _source?.title.trim() ?? '';
     return title.isEmpty ? 'this feed' : title;
   }
-
-  String get _moreTitle => 'More from $_feedTitle';
 
   /// "Oct 22" this year, "Oct 22, 2024" before.
   static String _shortDate(Article a) {
@@ -1217,36 +1157,6 @@ class _ArticleScreenState extends State<ArticleScreen> {
           Expanded(child: _shareButton()),
         ],
       );
-
-  /// Favorite and share as one quiet line of links.
-  Widget _actionLinks(Article article) {
-    Widget link(IconData icon, String label, VoidCallback onTap) => InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(icon, size: 20),
-              const SizedBox(width: 6),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 16, decoration: TextDecoration.underline)),
-            ]),
-          ),
-        );
-    return Center(
-      child: Wrap(
-        alignment: WrapAlignment.center,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 16,
-        children: [
-          link(article.favorite == 1 ? Icons.star : Icons.star_border,
-              article.favorite == 1 ? 'Favorited' : 'Add to favorites',
-              _toggleFavorite),
-          link(Icons.share_outlined, _shareLabel, _onShare),
-        ],
-      ),
-    );
-  }
 
   Widget _sectionLabel(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 4),
@@ -1340,96 +1250,6 @@ class _ArticleScreenState extends State<ArticleScreen> {
           ),
         ),
       );
-
-  /// "STRATECHERY ……… 12 unread" over a thick rule, like a newspaper index.
-  Widget _contentsHeader() => Container(
-        padding: const EdgeInsets.only(bottom: 6),
-        decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(width: 3))),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Expanded(
-              child: Text(_feedTitle.toUpperCase(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 16,
-                      letterSpacing: 1.5,
-                      fontWeight: FontWeight.w700)),
-            ),
-            Text('$_unreadInFeed unread',
-                style: const TextStyle(fontSize: 14)),
-          ],
-        ),
-      );
-
-  /// Date in a narrow column, then the title in the reading typeface.
-  Widget _contentsRow(Article a) => InkWell(
-        onTap: () => _openMore(a),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(width: 0.5))),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              SizedBox(
-                width: 72,
-                child: Text(_shortDate(a),
-                    style: const TextStyle(fontSize: 14)),
-              ),
-              Expanded(
-                child: Text(
-                  a.displayTitle,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: _titleStyle(a, _fontSize).copyWith(
-                    fontFamily: _reading.font.family,
-                    fontFamilyFallback: _reading.font.fallback,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-  /// A feed-like card: title, author and date, two lines of summary.
-  Widget _moreCard(Article a) {
-    final summary = a.summary?.trim() ?? '';
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: InkWell(
-        onTap: () => _openMore(a),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-          decoration: BoxDecoration(border: Border.all(width: 1)),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(a.displayTitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: _titleStyle(a, 17)),
-              const SizedBox(height: 4),
-              Text(_metaLine(a), style: const TextStyle(fontSize: 14)),
-              if (summary.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(summary,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 15, height: 1.35)),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   /// "See all 12 unread in Stratechery ›": the feed itself.
   Widget _seeAllLink() {

@@ -79,9 +79,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> open(WidgetTester tester, ArticleEndLayout layout) async {
-    ArticleScreen.endLayout = layout;
-    addTearDown(() => ArticleScreen.endLayout = ArticleEndLayout.upNext);
+  Future<void> open(WidgetTester tester) async {
     tester.view.physicalSize = const Size(600, 4000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -90,34 +88,41 @@ void main() {
     await settle(tester);
   }
 
-  for (final layout in ArticleEndLayout.values) {
-    testWidgets('${layout.name}: listed with dates; a tap opens one',
-        (tester) async {
-      await open(tester, layout);
-      for (var i = 3; i <= 7; i++) {
-        expect(find.text('story $i'), findsOneWidget);
-      }
-      expect(find.text('story 2'), findsNothing);
-      expect(find.text('already read'), findsNothing);
-      expect(find.text('elsewhere'), findsNothing);
-      // Every listed article shows its date.
-      expect(find.textContaining('Jan 1, 1970'), findsNWidgets(5));
-      // The feedback link sits on its own line, after the question.
-      expect(
-          find.textContaining('How was your reading experience?\n'
-              'Leave a feedback',
-              findRichText: true),
-          findsOneWidget);
+  testWidgets('up next, then the others, with dates; a tap opens one',
+      (tester) async {
+    await open(tester);
+    // The newest is up next; the others are also unread.
+    expect(find.text('UP NEXT IN BLOG'), findsOneWidget);
+    expect(find.text('ALSO UNREAD'), findsOneWidget);
+    for (var i = 3; i <= 7; i++) {
+      expect(find.text('story $i'), findsOneWidget);
+    }
+    expect(find.text('story 2'), findsNothing);
+    expect(find.text('already read'), findsNothing);
+    expect(find.text('elsewhere'), findsNothing);
+    // Every listed article shows its date.
+    expect(find.textContaining('Jan 1, 1970'), findsNWidgets(5));
+    // The feedback link sits on its own line, after the question.
+    expect(
+        find.textContaining('How was your reading experience?\n'
+            'Leave a feedback',
+            findRichText: true),
+        findsOneWidget);
 
-      await tester.tap(find.text('story 5'));
-      await settle(tester);
-      expect(find.text('Body of story 5'), findsOneWidget);
-    });
-  }
+    await tester.tap(find.text('story 5'));
+    await settle(tester);
+    expect(find.text('Body of story 5'), findsOneWidget);
+  });
+
+  testWidgets('"Read next" opens the newest unread', (tester) async {
+    await open(tester);
+    await tester.tap(find.text('Read next'));
+    await settle(tester);
+    expect(find.text('Body of story 7'), findsOneWidget);
+  });
 
   testWidgets('"See all" opens the feed when more are unread', (tester) async {
-    await open(tester, ArticleEndLayout.contents);
-    expect(find.text('7 unread'), findsOneWidget);
+    await open(tester);
     await tester.tap(find.text('See all 7 unread ›'));
     await settle(tester);
     expect(find.text('story 1'), findsOneWidget);
