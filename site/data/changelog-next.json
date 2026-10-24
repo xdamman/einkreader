@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.29",
+    "date": "2026-10-25",
+    "title": "Up next at the end of an article",
+    "changes": [
+      "At the end of an article, after the favorite and share buttons, the feed's next unread article waits in a box with its author, date and a short summary. Tap it, or \"Read next\", to open it.",
+      "Below it, the other unread articles from the same feed are listed with their dates; new ones are bold, like in the feed.",
+      "When a feed has more than 5 unread articles, a link opens the whole feed.",
+      "\"Leave a feedback\" now sits on its own line at the very end."
+    ],
+    "feedback": [
+      {
+        "id": "7641bb09e659b15dce7faff05ab2d89e5ff810ac3379a008f264506f8c5034fa",
+        "title": "More from this feed"
+      }
+    ]
+  },
+  {
     "version": "0.6.28",
     "date": "2026-10-22",
     "title": "New, seen and read",
