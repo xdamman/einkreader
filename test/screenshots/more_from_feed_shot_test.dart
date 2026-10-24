@@ -1,6 +1,6 @@
-// The end of an article: favorite and share, then "More from <feed>" with
-// the feed's latest unread articles, then the feedback link on its own
-// line. Run:
+// The end of an article, in each candidate layout: favorite and share, the
+// feed's latest unread articles with their dates, then the feedback link on
+// its own line. Run:
 //
 //   flutter test test/screenshots/more_from_feed_shot_test.dart \
 //     --update-goldens --dart-define=screenshots=true
@@ -46,28 +46,39 @@ void main() {
         title: 'Stratechery',
         url: 'https://stratechery.com/feed/',
         createdAt: 0));
-    Future<void> add(String title, int at, {bool read = false}) =>
+    Future<void> add(String title, int at,
+            {bool read = false, String? summary}) =>
         db.insertArticleIfNew(Article(
           sourceId: source.id!,
           guid: title,
           title: title,
           author: 'Ben Thompson',
           url: 'https://stratechery.com/${title.hashCode}',
+          summary: summary,
           contentMarkdown: _body,
           publishedAt: at,
           createdAt: at,
           fetched: 1,
           read: read ? 1 : 0,
         ));
-    await add('Aggregation Theory, Redux', now - 30 * hour);
-    await add('The Apple Vision Pro, One Year Later', now - 2 * hour);
-    await add('Netflix and the Ads Tier Inflection', now - 6 * hour);
+    await add('Aggregation Theory, Redux', now - 40 * hour);
+    await add('The Apple Vision Pro, One Year Later', now - 2 * hour,
+        summary: 'A year in, the Vision Pro is a remarkable device in '
+            'search of a reason to exist, and Apple seems to know it. What '
+            'comes next says a lot about how the company sees the future.');
+    await add('Netflix and the Ads Tier Inflection', now - 30 * hour,
+        summary: 'The ads tier was supposed to be a sideshow. Instead it '
+            'is now the engine of subscriber growth.');
     await add('AI and the Future of Distribution', now - 10 * hour,
         read: true);
-    await add('Microsoft, OpenAI and the Platform Shift', now - 20 * hour);
-    await add('The Super App Question, Revisited', now - 26 * hour);
-    await add('Intel at the Crossroads', now - 28 * hour);
-    await add('Why Spotify Bought Podcasts', now - 50 * hour);
+    await add('Microsoft, OpenAI and the Platform Shift', now - 50 * hour,
+        summary: 'Who owns the customer when the model is the product?');
+    await add('The Super App Question, Revisited', now - 75 * hour,
+        summary: 'Why the West never got its WeChat, and why that may '
+            'finally be changing.');
+    await add('Intel at the Crossroads', now - 100 * hour,
+        summary: 'Foundry or product company: Intel cannot be both.');
+    await add('Why Spotify Bought Podcasts', now - 150 * hour);
     final all = await db.getArticles();
     id = all.firstWhere((a) => a.title == 'Aggregation Theory, Redux').id!;
     // Seen in the feed but not read: listed, without the bold.
@@ -76,28 +87,37 @@ void main() {
     ]);
   });
 
-  testWidgets('article end', (tester) async {
-    tester.view.physicalSize = const Size(600, 800) * 2.0;
-    tester.view.devicePixelRatio = 2.0;
-    addTearDown(tester.view.reset);
-    Future<void> settle() async {
-      await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 200)));
-      await tester.pumpAndSettle();
-    }
+  for (final layout in ArticleEndLayout.values) {
+    testWidgets('article end: ${layout.name}', (tester) async {
+      ArticleScreen.endLayout = layout;
+      addTearDown(() => ArticleScreen.endLayout = ArticleEndLayout.upNext);
+      tester.view.physicalSize = const Size(600, 800) * 2.0;
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.reset);
+      Future<void> settle() async {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 200)));
+        await tester.pumpAndSettle();
+      }
 
-    await tester.pumpWidget(MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: buildEinkTheme(),
-        home: ArticleScreen(articleId: id)));
-    await settle();
-    await tester.drag(
-        find.byType(SingleChildScrollView).first, const Offset(0, -5000));
-    await settle();
-    await expectLater(find.byType(MaterialApp),
-        matchesGoldenFile('goldens/more_from_feed.png'));
-    await tester.pump(const Duration(minutes: 2));
-  }, skip: !_enabled);
+      await tester.pumpWidget(MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: buildEinkTheme(),
+          home: ArticleScreen(articleId: id)));
+      await settle();
+      // The article's last lines at the top, what follows below them.
+      final lastLine = tester
+          .getTopLeft(find.textContaining('relationship with the user',
+              findRichText: true))
+          .dy;
+      await tester.drag(find.byType(SingleChildScrollView).first,
+          Offset(0, -(lastLine - 40)));
+      await settle();
+      await expectLater(find.byType(MaterialApp),
+          matchesGoldenFile('goldens/more_from_feed_${layout.name}.png'));
+      await tester.pump(const Duration(minutes: 2));
+    }, skip: !_enabled);
+  }
 }
 
 const _body = 'The internet made distribution free, and in doing so moved '

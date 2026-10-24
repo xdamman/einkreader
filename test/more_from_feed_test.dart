@@ -56,6 +56,15 @@ void main() {
         (await db.getArticles()).firstWhere((a) => a.guid == 'open').id!;
   });
 
+  // Opening an article reads it: start every test with the stories unread.
+  setUp(() async {
+    for (final a in await db.getArticles()) {
+      if (a.guid.startsWith('story')) {
+        await db.markArticleRead(a.id!, read: false);
+      }
+    }
+  });
+
   test('newest five unread of the same feed, without the open one', () async {
     final more = await db.getUnreadFromSource(
         (await db.getArticle(openId))!.sourceId,
@@ -64,35 +73,53 @@ void main() {
         ['story 7', 'story 6', 'story 5', 'story 4', 'story 3']);
   });
 
-  testWidgets('listed under the article; a tap opens one', (tester) async {
+  Future<void> settle(WidgetTester tester) async {
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> open(WidgetTester tester, ArticleEndLayout layout) async {
+    ArticleScreen.endLayout = layout;
+    addTearDown(() => ArticleScreen.endLayout = ArticleEndLayout.upNext);
     tester.view.physicalSize = const Size(600, 4000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    Future<void> settle() async {
-      await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 100)));
-      await tester.pumpAndSettle();
-    }
-
     await tester.pumpWidget(MaterialApp(
         theme: buildEinkTheme(), home: ArticleScreen(articleId: openId)));
-    await settle();
-    expect(find.text('More from Blog'), findsOneWidget);
-    for (var i = 3; i <= 7; i++) {
-      expect(find.text('story $i'), findsOneWidget);
-    }
-    expect(find.text('story 2'), findsNothing);
-    expect(find.text('already read'), findsNothing);
-    expect(find.text('elsewhere'), findsNothing);
-    // The feedback link sits on its own line, after the question.
-    expect(
-        find.textContaining('How was your reading experience?\n'
-            'Leave a feedback',
-            findRichText: true),
-        findsOneWidget);
+    await settle(tester);
+  }
 
-    await tester.tap(find.text('story 5'));
-    await settle();
-    expect(find.text('Body of story 5'), findsOneWidget);
+  for (final layout in ArticleEndLayout.values) {
+    testWidgets('${layout.name}: listed with dates; a tap opens one',
+        (tester) async {
+      await open(tester, layout);
+      for (var i = 3; i <= 7; i++) {
+        expect(find.text('story $i'), findsOneWidget);
+      }
+      expect(find.text('story 2'), findsNothing);
+      expect(find.text('already read'), findsNothing);
+      expect(find.text('elsewhere'), findsNothing);
+      // Every listed article shows its date.
+      expect(find.textContaining('Jan 1, 1970'), findsNWidgets(5));
+      // The feedback link sits on its own line, after the question.
+      expect(
+          find.textContaining('How was your reading experience?\n'
+              'Leave a feedback',
+              findRichText: true),
+          findsOneWidget);
+
+      await tester.tap(find.text('story 5'));
+      await settle(tester);
+      expect(find.text('Body of story 5'), findsOneWidget);
+    });
+  }
+
+  testWidgets('"See all" opens the feed when more are unread', (tester) async {
+    await open(tester, ArticleEndLayout.contents);
+    expect(find.text('7 unread'), findsOneWidget);
+    await tester.tap(find.text('See all 7 unread ›'));
+    await settle(tester);
+    expect(find.text('story 1'), findsOneWidget);
   });
 }

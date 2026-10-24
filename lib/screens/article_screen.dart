@@ -17,6 +17,7 @@ import '../services/sync_service.dart';
 import '../widgets/markdown_view.dart';
 import '../widgets/page_breaks.dart';
 import '../widgets/share_note_dialog.dart';
+import 'article_list_screen.dart';
 import 'feedback_screen.dart';
 
 /// Reader screen. Select any text and choose "Highlight" from the selection
@@ -39,8 +40,24 @@ class ArticleScreen extends StatefulWidget {
   const ArticleScreen({super.key, required this.articleId,
       this.articleIds, this.initialIndex, this.focusHighlight});
 
+  /// How the end of an article is laid out: three candidates while the
+  /// design is being chosen (the two that lose go once one is picked).
+  static ArticleEndLayout endLayout = ArticleEndLayout.upNext;
+
   @override
   State<ArticleScreen> createState() => _ArticleScreenState();
+}
+
+/// The end of an article: actions, the feed's unread articles, feedback.
+enum ArticleEndLayout {
+  /// The next unread article as a card with its summary, then the others.
+  upNext,
+
+  /// A quiet line of actions, then a table of contents: date, title.
+  contents,
+
+  /// Two wide buttons, then the unread articles as cards, like in the feed.
+  cards,
 }
 
 class _ArticleScreenState extends State<ArticleScreen> {
@@ -63,6 +80,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
 
   /// The feed's latest other unread articles, listed under the article.
   List<Article> _moreFromFeed = [];
+
+  /// All of the feed's unread articles, this one excluded ("See all 12").
+  int _unreadInFeed = 0;
   String _selectedText = '';
 
   /// Text size, typeface, margins and paging (Settings → Reading).
@@ -119,6 +139,9 @@ class _ArticleScreenState extends State<ArticleScreen> {
         ? <Article>[]
         : await _db.getUnreadFromSource(article.sourceId,
             exceptId: article.id!);
+    final unread = more.isEmpty
+        ? 0
+        : (await _db.unreadCountsBySource())[article!.sourceId] ?? 0;
     if (!mounted) return;
     setState(() {
       _article = article;
@@ -126,6 +149,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
       _source = source;
       _highlights = highlights;
       _moreFromFeed = more;
+      _unreadInFeed = unread - (article?.read == 0 ? 1 : 0);
     });
     // One-time per article (not on highlight/reprocess reloads, which also
     // land here): restore the saved position or auto-read a short article.
@@ -1039,64 +1063,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 20),
                     child: Divider(key: _endOfTextKey),
                   ),
-                  Center(
-                    child: Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      alignment: WrapAlignment.center,
-                      children: [
-                        OutlinedButton.icon(
-                          icon: Icon(article.favorite == 1
-                              ? Icons.star
-                              : Icons.star_border),
-                          label: Text(article.favorite == 1
-                              ? 'Favorited'
-                              : 'Add to favorites'),
-                          onPressed: _toggleFavorite,
-                        ),
-                        // With highlights, one tap shares them all combined
-                        // (profile / Twitter / email); without, the regular
-                        // article share menu.
-                        OutlinedButton.icon(
-                          icon: const Icon(Icons.share_outlined),
-                          label: Text(_highlights.isEmpty
-                              ? 'Share'
-                              : 'Share your ${_highlights.length} '
-                                  'highlight${_highlights.length == 1 ? '' : 's'}'),
-                          onPressed: _highlights.isEmpty
-                              ? _showShareMenu
-                              : _shareAllHighlights,
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_moreFromFeed.isNotEmpty) _moreFromFeedList(),
-                  // Feedback about the app, kept quiet: a question, then a
-                  // link prefilled with this article's link and a
-                  // screenshot of the page (e.g. "this page didn't parse").
-                  Padding(
-                    padding: const EdgeInsets.only(top: 28),
-                    child: Center(
-                      // One text run (not an embedded widget) so the link
-                      // is exactly the size of the sentence around it.
-                      child: Text.rich(
-                        TextSpan(
-                          text: 'How was your reading experience?\n',
-                          children: [
-                            TextSpan(
-                              text: 'Leave a feedback to improve einkreader',
-                              style: const TextStyle(
-                                  decoration: TextDecoration.underline),
-                              recognizer: _feedbackTap
-                                ..onTap = () => _leaveFeedback(article),
-                            ),
-                          ],
-                        ),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 16, height: 1.4),
-                      ),
-                    ),
-                  ),
+                  ..._articleEnd(article),
                 ],
               ),
             ),
@@ -1130,47 +1097,393 @@ class _ArticleScreenState extends State<ArticleScreen> {
     );
   }
 
-  /// "More from …": the feed's latest unread articles after this one's
-  /// end, new ones bold as in the feed. Opening one stacks it on top, so
-  /// back returns here with the list updated.
-  Widget _moreFromFeedList() {
-    final title = _source?.title;
-    return Padding(
-      padding: const EdgeInsets.only(top: 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            title == null || title.trim().isEmpty
-                ? 'More from this feed'
-                : 'More from ${title.trim()}',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          for (final more in _moreFromFeed)
-            InkWell(
-              onTap: () => _openMore(more),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: const BoxDecoration(
-                    border: Border(bottom: BorderSide(width: 0.5))),
-                child: Text(
-                  more.displayTitle,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 17,
-                    height: 1.3,
-                    fontWeight:
-                        more.isNew ? FontWeight.w700 : FontWeight.w400,
-                  ),
+  /// Everything after the article's text, in the chosen [ArticleEndLayout]:
+  /// favorite and share, the feed's latest unread articles (new ones bold,
+  /// as in the feed, each with its date), then the feedback link.
+  List<Widget> _articleEnd(Article article) {
+    final more = _moreFromFeed;
+    switch (ArticleScreen.endLayout) {
+      case ArticleEndLayout.upNext:
+        return [
+          _actionButtons(article),
+          if (more.isNotEmpty) ...[
+            const SizedBox(height: 32),
+            _upNextCard(more.first),
+            if (more.length > 1) ...[
+              const SizedBox(height: 24),
+              _sectionLabel('Also unread'),
+              for (final a in more.skip(1)) _dateRightRow(a),
+            ],
+            _seeAllLink(),
+          ],
+          _feedbackLine(article),
+        ];
+      case ArticleEndLayout.contents:
+        return [
+          _actionLinks(article),
+          if (more.isNotEmpty) ...[
+            const SizedBox(height: 36),
+            _contentsHeader(),
+            for (final a in more) _contentsRow(a),
+            _seeAllLink(),
+          ],
+          _feedbackLine(article),
+        ];
+      case ArticleEndLayout.cards:
+        return [
+          _actionButtons(article),
+          if (more.isNotEmpty) ...[
+            const SizedBox(height: 32),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Expanded(
+                  child: Text(_moreTitle,
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700)),
                 ),
-              ),
+                if (_source != null)
+                  InkWell(
+                    onTap: _openFeed,
+                    child: Text('See all $_unreadInFeed ›',
+                        style: const TextStyle(
+                            fontSize: 16,
+                            decoration: TextDecoration.underline)),
+                  ),
+              ],
             ),
+            const SizedBox(height: 4),
+            for (final a in more) _moreCard(a),
+          ],
+          _feedbackLine(article),
+        ];
+    }
+  }
+
+  String get _feedTitle {
+    final title = _source?.title.trim() ?? '';
+    return title.isEmpty ? 'this feed' : title;
+  }
+
+  String get _moreTitle => 'More from $_feedTitle';
+
+  /// "Oct 22" this year, "Oct 22, 2024" before.
+  static String _shortDate(Article a) {
+    final date = DateTime.fromMillisecondsSinceEpoch(a.listedAt);
+    return date.year == DateTime.now().year
+        ? DateFormat('MMM d').format(date)
+        : DateFormat('MMM d, y').format(date);
+  }
+
+  static String _metaLine(Article a) => [
+        if (a.author != null && a.author!.trim().isNotEmpty) a.author!.trim(),
+        _shortDate(a),
+      ].join(' · ');
+
+  TextStyle _titleStyle(Article a, double size) => TextStyle(
+        fontSize: size,
+        height: 1.3,
+        fontWeight: a.isNew ? FontWeight.w700 : FontWeight.w400,
+      );
+
+  Widget _favoriteButton(Article article) => OutlinedButton.icon(
+        icon: Icon(article.favorite == 1 ? Icons.star : Icons.star_border),
+        label: Text(article.favorite == 1 ? 'Favorited' : 'Add to favorites'),
+        onPressed: _toggleFavorite,
+      );
+
+  // With highlights, one tap shares them all combined (profile / Twitter /
+  // email); without, the regular article share menu.
+  String get _shareLabel => _highlights.isEmpty
+      ? 'Share'
+      : 'Share your ${_highlights.length} '
+          'highlight${_highlights.length == 1 ? '' : 's'}';
+
+  VoidCallback get _onShare =>
+      _highlights.isEmpty ? _showShareMenu : _shareAllHighlights;
+
+  Widget _shareButton() => OutlinedButton.icon(
+        icon: const Icon(Icons.share_outlined),
+        label: Text(_shareLabel),
+        onPressed: _onShare,
+      );
+
+  /// Favorite and share as two buttons sharing the width equally.
+  Widget _actionButtons(Article article) => Row(
+        children: [
+          Expanded(child: _favoriteButton(article)),
+          const SizedBox(width: 12),
+          Expanded(child: _shareButton()),
+        ],
+      );
+
+  /// Favorite and share as one quiet line of links.
+  Widget _actionLinks(Article article) {
+    Widget link(IconData icon, String label, VoidCallback onTap) => InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 6),
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 16, decoration: TextDecoration.underline)),
+            ]),
+          ),
+        );
+    return Center(
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 16,
+        children: [
+          link(article.favorite == 1 ? Icons.star : Icons.star_border,
+              article.favorite == 1 ? 'Favorited' : 'Add to favorites',
+              _toggleFavorite),
+          link(Icons.share_outlined, _shareLabel, _onShare),
         ],
       ),
     );
   }
+
+  Widget _sectionLabel(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text(text.toUpperCase(),
+            style: const TextStyle(
+                fontSize: 13,
+                letterSpacing: 1.2,
+                fontWeight: FontWeight.w700)),
+      );
+
+  /// The next unread article, boxed: feed, title, author and date, summary.
+  Widget _upNextCard(Article a) {
+    final summary = a.summary?.trim() ?? '';
+    return InkWell(
+      onTap: () => _openMore(a),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(border: Border.all(width: 2)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionLabel('Up next in $_feedTitle'),
+            const SizedBox(height: 6),
+            Text(
+              a.displayTitle,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: _fontSize + 2,
+                height: 1.25,
+                fontWeight: FontWeight.w700,
+                fontFamily: _reading.font.family,
+                fontFamilyFallback: _reading.font.fallback,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(_metaLine(a),
+                style: const TextStyle(
+                    fontSize: 15, fontStyle: FontStyle.italic)),
+            if (summary.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                summary,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: _fontSize - 2,
+                  height: 1.4,
+                  fontFamily: _reading.font.family,
+                  fontFamilyFallback: _reading.font.fallback,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text('Read next',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w700)),
+                SizedBox(width: 6),
+                Icon(Icons.arrow_forward, size: 20),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Title on the left, date on the right.
+  Widget _dateRightRow(Article a) => InkWell(
+        onTap: () => _openMore(a),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(width: 0.5))),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Expanded(
+                child: Text(a.displayTitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: _titleStyle(a, 17)),
+              ),
+              const SizedBox(width: 12),
+              Text(_shortDate(a), style: const TextStyle(fontSize: 14)),
+            ],
+          ),
+        ),
+      );
+
+  /// "STRATECHERY ……… 12 unread" over a thick rule, like a newspaper index.
+  Widget _contentsHeader() => Container(
+        padding: const EdgeInsets.only(bottom: 6),
+        decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(width: 3))),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Expanded(
+              child: Text(_feedTitle.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700)),
+            ),
+            Text('$_unreadInFeed unread',
+                style: const TextStyle(fontSize: 14)),
+          ],
+        ),
+      );
+
+  /// Date in a narrow column, then the title in the reading typeface.
+  Widget _contentsRow(Article a) => InkWell(
+        onTap: () => _openMore(a),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(width: 0.5))),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              SizedBox(
+                width: 72,
+                child: Text(_shortDate(a),
+                    style: const TextStyle(fontSize: 14)),
+              ),
+              Expanded(
+                child: Text(
+                  a.displayTitle,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: _titleStyle(a, _fontSize).copyWith(
+                    fontFamily: _reading.font.family,
+                    fontFamilyFallback: _reading.font.fallback,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  /// A feed-like card: title, author and date, two lines of summary.
+  Widget _moreCard(Article a) {
+    final summary = a.summary?.trim() ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: InkWell(
+        onTap: () => _openMore(a),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          decoration: BoxDecoration(border: Border.all(width: 1)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(a.displayTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: _titleStyle(a, 17)),
+              const SizedBox(height: 4),
+              Text(_metaLine(a), style: const TextStyle(fontSize: 14)),
+              if (summary.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(summary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 15, height: 1.35)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// "See all 12 unread in Stratechery ›": the feed itself.
+  Widget _seeAllLink() {
+    if (_source == null || _unreadInFeed <= _moreFromFeed.length) {
+      return const SizedBox.shrink();
+    }
+    return Align(
+      alignment: Alignment.centerRight,
+      child: InkWell(
+        onTap: _openFeed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Text('See all $_unreadInFeed unread ›',
+              style: const TextStyle(
+                  fontSize: 16, decoration: TextDecoration.underline)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openFeed() async {
+    final source = _source;
+    if (source == null) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ArticleListScreen(source: source)));
+    if (mounted) _load();
+  }
+
+  /// Feedback about the app, kept quiet: a question, then a link prefilled
+  /// with this article's link and a screenshot of the page (e.g. "this
+  /// page didn't parse").
+  Widget _feedbackLine(Article article) => Padding(
+        padding: const EdgeInsets.only(top: 36),
+        child: Center(
+          // One text run (not an embedded widget) so the link is exactly
+          // the size of the sentence around it.
+          child: Text.rich(
+            TextSpan(
+              text: 'How was your reading experience?\n',
+              children: [
+                TextSpan(
+                  text: 'Leave a feedback to improve einkreader',
+                  style:
+                      const TextStyle(decoration: TextDecoration.underline),
+                  recognizer: _feedbackTap
+                    ..onTap = () => _leaveFeedback(article),
+                ),
+              ],
+            ),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, height: 1.4),
+          ),
+        ),
+      );
 
   Future<void> _openMore(Article more) async {
     final ids = [for (final a in _moreFromFeed) a.id!];
