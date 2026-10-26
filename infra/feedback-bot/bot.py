@@ -417,6 +417,9 @@ def prompt_for(job, root_id, thread):
         author=thread["author"], thread=thread_text(thread),
         max_shots=MAX_SHOTS, shots=SHOTS / root_id[:12] / str(thread["round"]),
         task=("implement the feedback" if first else
+              "implement Xavier's latest reply: what came before in the "
+              "thread has already shipped (it is in main), this is a new "
+              "change on top of it" if thread.get("followup") else
               "rework your previous proposal, already committed here, "
               "following Xavier's latest replies"))
     return (PROPOSE if job == "propose" else RELEASE).format(**fields)
@@ -447,7 +450,7 @@ def run_job(state, root_id):
     elif job == "propose" and reply.startswith("NO_RELEASE"):
         post(state, "reply", thread.get("reply_to") or root,
              reply.removeprefix("NO_RELEASE").strip())
-        thread["status"] = "done"
+        thread.update(status="done", closed_at=int(time.time()))
         state["handled"][root_id] = "done"
         drop_worktree(root_id)
     elif job == "propose":
@@ -459,7 +462,7 @@ def run_job(state, root_id):
                      f"{RELEASES}/v{version}")
         post(state, "reply", root, reply)
         log(f"released {root_id[:12]} as {version}")
-        thread["status"] = "released"
+        thread.update(status="released", closed_at=int(time.time()))
         state["handled"][root_id] = "done"
         drop_worktree(root_id)
     save_state(state)
@@ -613,23 +616,34 @@ def poll(state):
                 f"{note['pubkey'][:12]}")
 
     # Proposals: a 👍 releases, Xavier's replies ask for another round.
+    # A reply under a shipped (or answered) thread is a follow-up: another
+    # change, proposed the same way.
     for root_id, thread in state["threads"].items():
-        if thread["status"] not in ("proposed", "failed") or thread.get("job"):
+        if thread["status"] not in ("proposed", "failed", "released", "done") \
+                or thread.get("job"):
             continue  # a reply to a failed thread is a retry
         if thread["status"] == "proposed" and thread.get("proposal") in approved:
             log(f"proposal for {root_id[:12]} approved: releasing")
             if not DRY_RUN:
                 thread.update(job="release", status="working")
             continue
+        # After it closed: a second "ship it" sent while it was releasing
+        # isn't a follow-up.
+        since = thread.get("closed_at", 0) \
+            if thread["status"] in ("released", "done") else 0
         replies = sorted(
             (e for e in trusted_notes
-             if root_of(e) == root_id and e["id"] not in thread["seen"]),
+             if root_of(e) == root_id and e["id"] not in thread["seen"]
+             and e["created_at"] > since),
             key=lambda e: e["created_at"])
         if not replies:
             continue
-        log(f"Xavier replied on {root_id[:12]}: reworking the proposal")
+        followup = thread["status"] in ("released", "done")
+        log(f"Xavier replied on {root_id[:12]}: "
+            + ("a follow-up" if followup else "reworking the proposal"))
         if DRY_RUN:
             continue
+        thread["followup"] = followup
         for e in replies:
             thread["seen"].append(e["id"])
             thread["history"].append({"who": "xavier", "text": e["content"]})
