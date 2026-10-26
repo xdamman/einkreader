@@ -14,6 +14,7 @@ import '../services/nostr_service.dart';
 import '../services/profile_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/markdown_view.dart';
+import '../widgets/notice.dart';
 import 'feedback_screen.dart';
 import 'profile_screen.dart';
 
@@ -405,9 +406,10 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
       unawaited(SyncService.instance.syncSources(sources));
       if (!mounted) return;
       setState(() => _following = true);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Following $name — their notes and long reads '
-              'will appear in your feed')));
+      showNotice(
+          context,
+          'Following $name — their notes and long reads '
+          'will appear in your feed');
     } finally {
       if (mounted) setState(() => _followBusy = false);
     }
@@ -465,8 +467,7 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
           InkWell(
             onTap: () {
               Clipboard.setData(ClipboardData(text: _npub));
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('npub copied')));
+              showNotice(context, 'npub copied');
             },
             child: Row(
               children: [

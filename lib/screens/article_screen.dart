@@ -15,6 +15,7 @@ import '../services/share_actions.dart';
 import '../services/reading_settings.dart';
 import '../services/sync_service.dart';
 import '../widgets/markdown_view.dart';
+import '../widgets/notice.dart';
 import '../widgets/page_breaks.dart';
 import '../widgets/share_note_dialog.dart';
 import 'article_list_screen.dart';
@@ -561,10 +562,11 @@ class _ArticleScreenState extends State<ArticleScreen> {
       unawaited(SyncService.instance.downloadArticle(saved.id!));
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(online
+    showNotice(
+        context,
+        online
             ? 'Saved to To Read — downloading'
-            : 'Saved to To Read — will download when back online')));
+            : 'Saved to To Read — will download when back online');
   }
 
   // ------------------------------------------------------------------ share
@@ -637,8 +639,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
       case 'copy-url':
         await Clipboard.setData(ClipboardData(text: article.shareUrl!));
         if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Url copied')));
+        showNotice(context, 'Url copied');
       case 'email':
         await ShareActions.byEmail(
           context,
@@ -719,8 +720,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     await _archiveFavorite(article);
     await _rewriteHighlights();
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Highlighted')));
+    showNotice(context, 'Highlighted');
   }
 
   /// Re-downloads and re-processes the article, then re-renders it.
@@ -739,8 +739,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
     setState(() => _reprocessing = false);
     await _load();
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    showNotice(context, message);
   }
 
   /// Copies an article's markdown + images into YYYY/MM/favorites/ so it
@@ -811,8 +810,7 @@ class _ArticleScreenState extends State<ArticleScreen> {
       await _rewriteHighlights();
       if (!mounted) return;
       setState(() => _highlights = highlights);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Highlight removed')));
+      showNotice(context, 'Highlight removed');
     }
   }
 

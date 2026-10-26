@@ -16,6 +16,7 @@ import '../widgets/article_feed.dart';
 import '../widgets/clipboard_link_prompt.dart';
 import '../widgets/highlight_list.dart';
 import '../widgets/inbox_header.dart';
+import '../widgets/notice.dart';
 import '../widgets/resume_reading.dart';
 import '../widgets/profile_switcher.dart';
 import '../widgets/reconnect_twitter.dart';
@@ -191,8 +192,7 @@ class _HomeScreenState extends State<HomeScreen>
       // The share sheet lists us for any text; without a URL there is
       // nothing to queue — say so instead of silently dropping it.
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No link in the shared text — nothing to save')));
+      showNotice(context, 'No link in the shared text — nothing to save');
       return;
     }
     final saved = await _db.saveLinkForLater(url: link.url, title: link.title);
@@ -224,10 +224,11 @@ class _HomeScreenState extends State<HomeScreen>
     }
     await _load();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(online
+    showNotice(
+        context,
+        online
             ? 'Saved to To Read — downloading'
-            : 'Saved to To Read — will download when back online')));
+            : 'Saved to To Read — will download when back online');
   }
 
   bool _loading = false;
@@ -310,9 +311,7 @@ class _HomeScreenState extends State<HomeScreen>
     final summary = await SyncService.instance.syncAll();
     await _load();
     if (!silent && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(summary)));
+      showNotice(context, summary);
     }
   }
 
@@ -634,10 +633,11 @@ class _HomeScreenState extends State<HomeScreen>
     if (choice != 'retry') return;
     final (sent, remaining) = await OutboxService.instance.flush();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(remaining == 0
+    showNotice(
+        context,
+        remaining == 0
             ? 'Outbox sent ($sent item${sent == 1 ? '' : 's'})'
-            : 'Sent $sent — $remaining still waiting')));
+            : 'Sent $sent — $remaining still waiting');
   }
 
   /// Per-source breakdown chips for the Read and Highlights tabs (mirrors
@@ -735,11 +735,11 @@ class _HomeScreenState extends State<HomeScreen>
     await _db.markArticlesSeen(ids);
     await _load();
     if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(
-      content: Text(ids.length == 1
+    showNotice(
+      context,
+      ids.length == 1
           ? '1 article marked as seen'
-          : '${ids.length} articles marked as seen'),
+          : '${ids.length} articles marked as seen',
       action: SnackBarAction(
         label: 'Undo',
         onPressed: () async {
@@ -747,7 +747,7 @@ class _HomeScreenState extends State<HomeScreen>
           _load();
         },
       ),
-    ));
+    );
   }
 
   /// Feed tab: a swipable filter strip above the article list — "All" first,

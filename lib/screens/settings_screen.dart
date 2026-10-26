@@ -21,6 +21,7 @@ import '../services/update_service.dart';
 import '../services/errors.dart';
 import '../services/plugin_service.dart';
 import '../services/profile_service.dart';
+import '../widgets/notice.dart';
 import '../widgets/profile_switcher.dart';
 import '../widgets/reading_settings_panel.dart';
 import '../widgets/relay_settings.dart';
@@ -407,9 +408,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showNotice(context, message);
   }
 
   @override

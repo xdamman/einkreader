@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/profile_screen.dart';
 import '../services/profile_service.dart';
+import 'notice.dart';
 
 /// Anchored menu (long-press on the profile icon, or from Settings) to
 /// switch between profile slots or add one. The last used profile is
@@ -44,8 +45,7 @@ Future<void> showProfileSwitcherMenu(BuildContext context) async {
   } else {
     await ProfileService.instance.switchTo(choice);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Profile switched')));
+    showNotice(context, 'Profile switched');
   }
 }
 

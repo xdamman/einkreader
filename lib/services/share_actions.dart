@@ -3,6 +3,7 @@ import 'package:share_plus/share_plus.dart' as share_plus;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
+import '../widgets/notice.dart';
 import 'outbox_service.dart';
 import 'sync_service.dart';
 import 'tweet_card.dart';
@@ -268,8 +269,7 @@ class ShareActions {
     if (text == null || !context.mounted) return;
     if (text.isEmpty) {
       // Never drop silently — an empty post must say why nothing happened.
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Nothing posted — the tweet was empty')));
+      showNotice(context, 'Nothing posted — the tweet was empty');
       return;
     }
     String message = 'Posted to Twitter';
@@ -280,8 +280,7 @@ class ShareActions {
       if (e is TwitterPostRefused && e.permanent) {
         // Resending would be refused the same way: say why, queue nothing.
         if (context.mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(e.message)));
+          showNotice(context, e.message);
         }
         return;
       }
@@ -299,7 +298,6 @@ class ShareActions {
           : 'Couldn\'t post now — kept in the outbox for retry';
     }
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message), action: action));
+    showNotice(context, message, action: action);
   }
 }

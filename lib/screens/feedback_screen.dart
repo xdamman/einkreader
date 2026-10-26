@@ -10,6 +10,7 @@ import '../services/feedback_service.dart';
 import '../services/nostr_service.dart';
 import '../widgets/filter_pill.dart';
 import '../widgets/markdown_view.dart';
+import '../widgets/notice.dart';
 import '../widgets/profile_switcher.dart';
 import 'nostr_profile_screen.dart';
 import 'profile_screen.dart';
@@ -108,8 +109,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       final message = friendlyError(e, doing: 'loading feedback');
       if (_notes?.isNotEmpty ?? false) {
         // Keep showing what we have; just say the refresh failed.
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
+        showNotice(context, message);
       } else {
         setState(() => _error = message);
       }
@@ -394,8 +394,7 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'loading the thread'))));
+      showNotice(context, friendlyError(e, doing: 'loading the thread'));
     }
   }
 
@@ -419,8 +418,7 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
         _replyTo = widget.root;
       });
     } catch (e) {
-      messenger.showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'sending your reply'))));
+      messenger.showNotice(friendlyError(e, doing: 'sending your reply'));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -662,8 +660,7 @@ class FeedbackNoteTile extends StatelessWidget {
         note.removeReaction(emoji, myKey);
         onChanged();
       }
-      messenger.showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'sending your reaction'))));
+      messenger.showNotice(friendlyError(e, doing: 'sending your reaction'));
     }
   }
 
@@ -1263,8 +1260,7 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
 
   Future<void> _post() async {
     if (_subject.text.trim().isEmpty && _body.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Add a subject or a few words first')));
+      showNotice(context, 'Add a subject or a few words first');
       return;
     }
     // The profile may have been switched to an empty one meanwhile.
@@ -1285,18 +1281,15 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
       final me = await widget.service.identity();
       NostrProfileCache.put(NostrProfile(
           pubkey: posting.draft.pubkey, name: me.name, picture: me.picture));
-      messenger.showSnackBar(
-          const SnackBar(content: Text('Feedback posted — thank you!')));
+      messenger.showNotice('Feedback posted — thank you!');
       posting.sent.then((sent) {
         if (!sent.queued) return;
-        messenger.showSnackBar(const SnackBar(
-            content: Text('No connection — your feedback waits in the '
-                'outbox and goes out on the next sync')));
+        messenger.showNotice('No connection — your feedback waits in the '
+            'outbox and goes out on the next sync');
       });
       navigator.pop(posting);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'posting feedback'))));
+      messenger.showNotice(friendlyError(e, doing: 'posting feedback'));
       if (mounted) setState(() => _posting = false);
     }
   }

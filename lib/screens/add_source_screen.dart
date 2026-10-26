@@ -12,6 +12,7 @@ import '../services/feed_parser.dart';
 import '../services/nostr_service.dart';
 import '../services/build_config.dart';
 import '../services/sync_service.dart';
+import '../widgets/notice.dart';
 
 /// Adds a source, whichever kind: an RSS/Atom feed (a feed URL directly or a
 /// website/domain — the feed is discovered from the page's `<link>` tags), a
@@ -190,8 +191,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    showNotice(context, message);
   }
 
   Future<void> _connectTwitter() async {

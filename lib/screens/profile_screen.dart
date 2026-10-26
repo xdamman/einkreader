@@ -13,6 +13,7 @@ import '../models.dart';
 import '../services/errors.dart';
 import '../services/profile_service.dart';
 import '../theme.dart';
+import '../widgets/notice.dart';
 import '../widgets/share_note_dialog.dart';
 
 /// The profile, full screen (never a modal: one clean e-ink repaint, back =
@@ -242,9 +243,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final imported = await AppDatabase.instance.importProfileData(
           fromProfile: _importFrom!, onlySourceIds: _importSourceIds);
       if (mounted && imported > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Imported $imported feed'
-                '${imported == 1 ? '' : 's'} with their highlights')));
+        showNotice(
+            context,
+            'Imported $imported feed'
+            '${imported == 1 ? '' : 's'} with their highlights');
       }
     }
     if (!mounted) return;
@@ -404,10 +406,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _editing = false);
     await _load();
     if (accepted != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(accepted > 0
+      showNotice(
+          context,
+          accepted > 0
               ? 'Profile published'
-              : 'Profile saved — publishing when back online')));
+              : 'Profile saved — publishing when back online');
     }
   }
 
@@ -432,10 +435,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _persist();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(
-              content:
-                  Text(friendlyError(e, doing: 'uploading the avatar'))));
+      showNotice(context, friendlyError(e, doing: 'uploading the avatar'));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -861,12 +861,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await _profileService.deleteAccount();
-      messenger.showSnackBar(
-          const SnackBar(content: Text('Your profile was deleted')));
+      messenger.showNotice('Your profile was deleted');
       await _load();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'deleting your profile'))));
+      messenger.showNotice(friendlyError(e, doing: 'deleting your profile'));
     }
   }
 

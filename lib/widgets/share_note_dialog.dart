@@ -13,6 +13,7 @@ import '../services/profile_service.dart';
 import '../services/share_actions.dart';
 import '../services/sync_service.dart';
 import '../services/twitter_service.dart';
+import 'notice.dart';
 import 'reconnect_twitter.dart';
 
 /// Note-taking and sharing merged into one overlay: the quote, a roomy note
@@ -216,9 +217,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
       if (url == null) return;
       await Clipboard.setData(ClipboardData(text: url));
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Article link copied')));
+      showNotice(context, 'Article link copied');
       return;
     }
     final highlight = (await _withComment()).first;
@@ -228,9 +227,7 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     await _record('link', highlight, ref: eventId);
     await Clipboard.setData(ClipboardData(text: link));
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Link copied: $link')));
+    showNotice(context, 'Link copied: $link');
   }
 
   /// Opens the mail app pre-filled — an immediate hand-off, not a channel.
@@ -272,10 +269,10 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     final navigator = Navigator.of(context, rootNavigator: true);
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
     if (!toProfile && !toTwitter) {
-      messenger.showSnackBar(const SnackBar(content: Text('Note saved')));
+      messenger.showNotice('Note saved');
       return;
     }
-    messenger.showSnackBar(const SnackBar(content: Text('Sharing…')));
+    messenger.showNotice('Sharing…');
     unawaited(
       _shareInBackground(
         highlights: highlights,
@@ -382,18 +379,15 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
             : done.isEmpty
             ? failed.join('; ')
             : 'Shared: ${done.join(', ')} — failed: ${failed.join('; ')}';
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        action:
-            reconnect
-                ? reconnectTwitterAction(
-                  messenger: messenger,
-                  navigator: navigator,
-                )
-                : null,
-      ),
+    messenger.showNotice(
+      message,
+      action:
+          reconnect
+              ? reconnectTwitterAction(
+                messenger: messenger,
+                navigator: navigator,
+              )
+              : null,
     );
   }
 

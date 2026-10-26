@@ -136,6 +136,26 @@ void main() {
         await t.pumpAndSettle();
       });
     });
+
+    // The "marked as seen — Undo" notice: still up after 4 seconds, gone
+    // by itself after 5, like every notice.
+    testWidgets('notice goes away tablet', (tester) async {
+      await _capture(tester, const HomeScreen(), 'notice_2_after_5s', _tablet,
+          setup: (t) async {
+        await t.tap(find.text('All').first);
+        await t.pumpAndSettle();
+        await t.tap(find.text('Mark all as seen'));
+        await t.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 200)));
+        await t.pumpAndSettle();
+        await t.pump(const Duration(seconds: 4));
+        await t.pumpAndSettle();
+        await expectLater(find.byType(MaterialApp),
+            matchesGoldenFile('goldens/notice_1_after_4s.png'));
+        await t.pump(const Duration(seconds: 1));
+        await t.pumpAndSettle();
+      });
+    });
   }, skip: _enabled ? false : 'Run with --dart-define=screenshots=true');
 }
 

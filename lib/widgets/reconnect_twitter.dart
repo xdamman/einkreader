@@ -6,6 +6,7 @@ import '../services/build_config.dart';
 import '../services/errors.dart';
 import '../services/outbox_service.dart';
 import '../services/sync_service.dart';
+import 'notice.dart';
 
 /// Whether an error is one that reconnecting the Twitter account fixes (an
 /// expired session, a connection made before posting was allowed). Every
@@ -38,15 +39,11 @@ Future<bool> reconnectTwitter({
   try {
     final username = await SyncService.instance.twitter.connect(clientId);
     final (sent, _) = await OutboxService.instance.flush();
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(
-        content: Text('Reconnected as @$username'
-            '${sent > 0 ? ' — sent $sent waiting item${sent == 1 ? '' : 's'}' : ''}')));
+    messenger.showNotice('Reconnected as @$username'
+        '${sent > 0 ? ' — sent $sent waiting item${sent == 1 ? '' : 's'}' : ''}');
     return true;
   } catch (e) {
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(
-        content: Text(friendlyError(e, doing: 'reconnecting Twitter'))));
+    messenger.showNotice(friendlyError(e, doing: 'reconnecting Twitter'));
     return false;
   }
 }

@@ -5,6 +5,7 @@ import '../screens/profile_screen.dart';
 import '../services/errors.dart';
 import '../services/profile_service.dart';
 import '../services/sync_service.dart';
+import 'notice.dart';
 
 /// Shown above the Inbox's articles: how to fill it (your
 /// name@einkreader.app address, or a prompt to create a profile to get
@@ -62,13 +63,11 @@ class _InboxHeaderState extends State<InboxHeader> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await SyncService.instance.acceptEmailRequest(request);
-      messenger.showSnackBar(SnackBar(
-          content: Text('${request.from} can now send to your Inbox')));
+      messenger.showNotice('${request.from} can now send to your Inbox');
       widget.onChanged();
       await _load();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'accepting the sender'))));
+      messenger.showNotice(friendlyError(e, doing: 'accepting the sender'));
     } finally {
       if (mounted) setState(() => _busy.remove(request.id));
     }
@@ -81,8 +80,7 @@ class _InboxHeaderState extends State<InboxHeader> {
       await SyncService.instance.deleteEmailRequest(request);
       widget.onChanged();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(
-          content: Text(friendlyError(e, doing: 'deleting the email'))));
+      messenger.showNotice(friendlyError(e, doing: 'deleting the email'));
     } finally {
       if (mounted) setState(() => _busy.remove(request.id));
     }
@@ -164,9 +162,8 @@ class _InboxHeaderState extends State<InboxHeader> {
     final messenger = ScaffoldMessenger.of(context);
     final synced = await _profile.setAllowedSenders(saved);
     if (!synced) {
-      messenger.showSnackBar(const SnackBar(
-          content: Text('Saved — it will reach the server once you are '
-              'back online')));
+      messenger.showNotice('Saved — it will reach the server once you are '
+          'back online');
     }
     await _load();
   }
@@ -206,8 +203,7 @@ class _InboxHeaderState extends State<InboxHeader> {
                 InkWell(
                   onTap: () {
                     Clipboard.setData(ClipboardData(text: address));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('$address copied')));
+                    showNotice(context, '$address copied');
                   },
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
