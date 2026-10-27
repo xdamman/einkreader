@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.31",
+    "date": "2026-10-27",
+    "title": "A simple list at the end of an article",
+    "changes": [
+      "The Up next box is gone. At the end of an article, after the favorite and share buttons, \"More from\" and the feed's name now lists its 5 newest unread articles, with the date of each on the right.",
+      "New articles are bold, like in the feed, and one tap opens an article.",
+      "If the feed has more unread articles, a \"See all\" link opens the whole feed.",
+      "\"Leave a feedback\" stays on its own line at the very end."
+    ],
+    "feedback": [
+      {
+        "id": "7641bb09e659b15dce7faff05ab2d89e5ff810ac3379a008f264506f8c5034fa",
+        "title": "More from this feed"
+      }
+    ]
+  },
+  {
     "version": "0.6.30",
     "date": "2026-10-27",
     "title": "Notices that go away on their own",
