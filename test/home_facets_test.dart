@@ -58,6 +58,12 @@ void main() {
     pendingId = pending.id!;
     final b1 = await addArticle(beta, 'B1', read: 1);
     await addArticle(beta, 'B2', read: 1);
+    // Saved to read: one still unread, one since read.
+    final gamma = await addSource('Gamma');
+    final saved = await addArticle(gamma, 'Saved');
+    await db.setReadLater(saved.id!, true);
+    final savedRead = await addArticle(gamma, 'SavedRead', read: 1);
+    await db.setReadLater(savedRead.id!, true);
     await db.insertHighlightIfNew(Highlight(
         articleId: a1.id!, text: 'quote from alpha', createdAt: 100));
     await db.insertHighlightIfNew(Highlight(
@@ -105,6 +111,19 @@ void main() {
     await tester.tap(find.text('All').last);
     await settle(tester);
     expect(find.text('Story A1'), findsOneWidget);
+  });
+
+  testWidgets('To Read tab: read articles leave it for the Read tab',
+      (tester) async {
+    await pumpHome(tester, const ValueKey('to-read'));
+    await tester.tap(find.text('To Read'));
+    await settle(tester);
+    expect(find.text('Story Saved'), findsOneWidget);
+    expect(find.text('Story SavedRead'), findsNothing);
+
+    await tester.tap(find.text('Read'));
+    await settle(tester);
+    expect(find.text('Story SavedRead'), findsOneWidget);
   });
 
   testWidgets('Highlights tab: per-source chips filter the highlights',

@@ -436,8 +436,12 @@ class _HomeScreenState extends State<HomeScreen>
       case _HomeTab.feed:
         return _buildFeed();
       case _HomeTab.toRead:
+        // Once read, a saved article is done: it moves to the Read tab (and
+        // comes back here if marked unread).
         return ArticleFeed(
-          articles: _articles.where((a) => a.readLater == 1).toList(),
+          articles: _articles
+              .where((a) => a.readLater == 1 && a.read == 0)
+              .toList(),
           sourceTitles: _sourceTitles,
           emptyMessage:
               'Nothing saved to read later.\n\nTap the bookmark '

@@ -308,7 +308,9 @@ Future<void> _seed() async {
       'Ben Thompson',
       now - 2 * day - 3 * hour,
       '## A new gatekeeper\n\nDistribution used to be scarce.',
-      read: true);
+      // Saved, then read: listed under Read, no longer under To Read.
+      read: true,
+      readLater: true);
   await article(acx, 'links-june', 'Links For June', 'Scott Alexander',
       now - 2 * day - 6 * hour, '1. First link\n2. Second link',
       read: true);
