@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.6.32",
+    "date": "2026-10-27",
+    "title": "Feedback works offline",
+    "changes": [
+      "Replies and reactions in a feedback thread now work offline, like new feedback already did. They show up in the thread right away, wait in the outbox, and go out on the next sync.",
+      "Sending the exact same reply to the same message again within an hour no longer posts it twice: you see \"You already sent this reply\" instead.",
+      "\"Add images\" works again, and if picking an image fails it now tells you why."
+    ],
+    "feedback": [
+      {
+        "id": "3b0333c9277725dfdfe89cde54653c3216b5af708a012edb5d8198494acd9dc9",
+        "title": "Offline first"
+      }
+    ]
+  },
+  {
     "version": "0.6.31",
     "date": "2026-10-27",
     "title": "A simple list at the end of an article",
