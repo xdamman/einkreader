@@ -1079,22 +1079,17 @@ class _ArticleScreenState extends State<ArticleScreen> {
     );
   }
 
-  /// Everything after the article's text: favorite and share, the next
-  /// unread article of the feed boxed with its summary, the other unread ones
-  /// (new ones bold, as in the feed, each with its date), then the feedback
-  /// link.
+  /// Everything after the article's text: favorite and share, "More from"
+  /// the feed's latest unread articles (new ones bold, as in the feed, each
+  /// with its date), then the feedback link.
   List<Widget> _articleEnd(Article article) {
     final more = _moreFromFeed;
     return [
       _actionButtons(article),
       if (more.isNotEmpty) ...[
         const SizedBox(height: 32),
-        _upNextCard(more.first),
-        if (more.length > 1) ...[
-          const SizedBox(height: 24),
-          _sectionLabel('Also unread'),
-          for (final a in more.skip(1)) _dateRightRow(a),
-        ],
+        _sectionLabel('More from $_feedTitle'),
+        for (final a in more) _dateRightRow(a),
         _seeAllLink(),
       ],
       _feedbackLine(article),
@@ -1113,11 +1108,6 @@ class _ArticleScreenState extends State<ArticleScreen> {
         ? DateFormat('MMM d').format(date)
         : DateFormat('MMM d, y').format(date);
   }
-
-  static String _metaLine(Article a) => [
-        if (a.author != null && a.author!.trim().isNotEmpty) a.author!.trim(),
-        _shortDate(a),
-      ].join(' · ');
 
   TextStyle _titleStyle(Article a, double size) => TextStyle(
         fontSize: size,
@@ -1164,66 +1154,6 @@ class _ArticleScreenState extends State<ArticleScreen> {
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w700)),
       );
-
-  /// The next unread article, boxed: feed, title, author and date, summary.
-  Widget _upNextCard(Article a) {
-    final summary = a.summary?.trim() ?? '';
-    return InkWell(
-      onTap: () => _openMore(a),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(border: Border.all(width: 2)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionLabel('Up next in $_feedTitle'),
-            const SizedBox(height: 6),
-            Text(
-              a.displayTitle,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: _fontSize + 2,
-                height: 1.25,
-                fontWeight: FontWeight.w700,
-                fontFamily: _reading.font.family,
-                fontFamilyFallback: _reading.font.fallback,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(_metaLine(a),
-                style: const TextStyle(
-                    fontSize: 15, fontStyle: FontStyle.italic)),
-            if (summary.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                summary,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: _fontSize - 2,
-                  height: 1.4,
-                  fontFamily: _reading.font.family,
-                  fontFamilyFallback: _reading.font.fallback,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text('Read next',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w700)),
-                SizedBox(width: 6),
-                Icon(Icons.arrow_forward, size: 20),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   /// Title on the left, date on the right.
   Widget _dateRightRow(Article a) => InkWell(

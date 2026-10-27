@@ -1,6 +1,5 @@
-// The end of an article: favorite and share, the next unread article of the
-// feed with its summary, the others with their dates, then the feedback link on
-// its own line. Run:
+// The end of an article: favorite and share, "More from" the feed's latest
+// unread articles with their dates, then the feedback link on its own line. Run:
 //
 //   flutter test test/screenshots/more_from_feed_shot_test.dart \
 //     --update-goldens --dart-define=screenshots=true

@@ -88,12 +88,12 @@ void main() {
     await settle(tester);
   }
 
-  testWidgets('up next, then the others, with dates; a tap opens one',
-      (tester) async {
+  testWidgets('a simple list with dates; a tap opens one', (tester) async {
     await open(tester);
-    // The newest is up next; the others are also unread.
-    expect(find.text('UP NEXT IN BLOG'), findsOneWidget);
-    expect(find.text('ALSO UNREAD'), findsOneWidget);
+    expect(find.text('MORE FROM BLOG'), findsOneWidget);
+    // No boxed "Up next" any more.
+    expect(find.textContaining('UP NEXT'), findsNothing);
+    expect(find.text('Read next'), findsNothing);
     for (var i = 3; i <= 7; i++) {
       expect(find.text('story $i'), findsOneWidget);
     }
@@ -112,13 +112,6 @@ void main() {
     await tester.tap(find.text('story 5'));
     await settle(tester);
     expect(find.text('Body of story 5'), findsOneWidget);
-  });
-
-  testWidgets('"Read next" opens the newest unread', (tester) async {
-    await open(tester);
-    await tester.tap(find.text('Read next'));
-    await settle(tester);
-    expect(find.text('Body of story 7'), findsOneWidget);
   });
 
   testWidgets('"See all" opens the feed when more are unread', (tester) async {
