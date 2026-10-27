@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -405,16 +406,23 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
     setState(() => _sending = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final note = await _service.reply(_replyTo, text);
+      final sent = await _service.reply(_replyTo, text);
+      final note = sent.note;
       _picked.clear();
       // Fetched in the background: the reply shows at once.
       NostrProfileCache.load([note.pubkey], nostr: _service.nostr).then((_) {
         if (mounted) setState(() {});
       });
       _controller.clear();
+      if (sent.repeated) {
+        messenger.showNotice('You already sent this reply');
+      } else if (sent.queued) {
+        messenger.showNotice('No connection — your reply waits in the '
+            'outbox and goes out on the next sync');
+      }
       if (!mounted) return;
       setState(() {
-        _notes = [..._notes, note];
+        if (!_notes.any((n) => n.id == note.id)) _notes = [..._notes, note];
         _replyTo = widget.root;
       });
     } catch (e) {
@@ -648,13 +656,17 @@ class FeedbackNoteTile extends StatelessWidget {
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     final myKey = me ?? await service.myPubkey;
-    // Optimistic: the chip updates at once; undone if no relay accepts it.
+    // Optimistic: the chip updates at once. Offline, the reaction waits in
+    // the outbox; undone only if it couldn't even be signed.
     if (myKey != null) {
       note.addReaction(emoji, myKey, DateTime.now());
       onChanged();
     }
     try {
-      await service.react(note, emoji);
+      if (await service.react(note, emoji)) {
+        messenger.showNotice('No connection — your reaction waits in the '
+            'outbox and goes out on the next sync');
+      }
     } catch (e) {
       if (myKey != null) {
         note.removeReaction(emoji, myKey);
@@ -1244,17 +1256,47 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
   }
 
   Future<void> _addImages() async {
-    final picked = await (NewFeedbackScreen.debugPickImages ?? _pickImages)();
+    final List<Uint8List> picked;
+    try {
+      picked = await (NewFeedbackScreen.debugPickImages ?? _pickImages)();
+    } catch (e) {
+      if (mounted) {
+        showNotice(context, friendlyError(e, doing: 'adding images'));
+      }
+      return;
+    }
     if (picked.isEmpty || !mounted) return;
     setState(() => _images.addAll(picked));
   }
 
+  static const _imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+  /// No compression in the picker: on Android it writes a copy to the
+  /// public Pictures folder, which the app may not write to, and the pick
+  /// then silently fails; images are shrunk before upload anyway. Devices
+  /// without a gallery app (many e-ink tablets) get the file browser.
   static Future<List<Uint8List>> _pickImages() async {
-    final result = await FilePicker.platform.pickFiles(
-        type: FileType.image, allowMultiple: true, withData: true);
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          allowMultiple: true,
+          withData: true,
+          allowCompression: false);
+    } on PlatformException {
+      result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: _imageExtensions,
+          allowMultiple: true,
+          withData: true,
+          allowCompression: false);
+    }
     return [
       for (final file in result?.files ?? const <PlatformFile>[])
-        if (file.bytes case final bytes?) bytes
+        if (file.bytes case final bytes?)
+          bytes
+        else if (file.path case final path?)
+          await File(path).readAsBytes()
     ];
   }
 

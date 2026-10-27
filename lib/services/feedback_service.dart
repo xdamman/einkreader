@@ -691,8 +691,8 @@ class FeedbackService {
   /// it), link and screenshot (NIP-92 imeta, also its URL in the text) are
   /// optional.
   Future<FeedbackNote> post(String body,
-      {String? subject, String? url, String? imageUrl}) =>
-      _publish(
+          {String? subject, String? url, String? imageUrl}) async =>
+      (await _publish(
         content: _content(body,
             subject: subject,
             url: url,
@@ -701,42 +701,81 @@ class FeedbackService {
             subject: subject,
             url: url,
             imageUrls: [if (imageUrl != null) imageUrl]),
-      );
+      ))
+          .note;
 
   /// Replies inside a thread (NIP-10 marked e-tags), notifying the author
   /// of the note answered, the official account and anyone @mentioned
-  /// (NIP-27 `nostr:npub1…` in [text]).
-  Future<FeedbackNote> reply(FeedbackNote to, String text) {
+  /// (NIP-27 `nostr:npub1…` in [text]). Offline first: when no relay takes
+  /// it, the signed reply waits in the outbox (`queued`) and shows in the
+  /// thread meanwhile. The same reply to the same note within
+  /// [repeatWindow] isn't sent again (`repeated`): the earlier one is
+  /// returned instead.
+  Future<({FeedbackNote note, bool queued, bool repeated})> reply(
+      FeedbackNote to, String text) async {
     final root = to.rootId ?? to.id;
+    final earlier = await _recentReply(root, to.id, text.trim());
+    if (earlier != null) {
+      await AppLogService.instance
+          .info('Feedback: same reply already sent, not sending it again');
+      return (note: earlier, queued: false, repeated: true);
+    }
     final notified = {to.pubkey, officialHex};
-    return _publish(content: text, tags: [
-      ['e', root, '', 'root'],
-      if (to.id != root) ['e', to.id, '', 'reply'],
-      ['p', to.pubkey],
-      if (to.pubkey != officialHex) ['p', officialHex],
-      for (final pubkey in FeedbackNote.mentionedIn(text))
-        if (notified.add(pubkey)) ['p', pubkey],
-    ]);
+    final sent = await _publish(
+        content: text,
+        tags: [
+          ['e', root, '', 'root'],
+          if (to.id != root) ['e', to.id, '', 'reply'],
+          ['p', to.pubkey],
+          if (to.pubkey != officialHex) ['p', officialHex],
+          for (final pubkey in FeedbackNote.mentionedIn(text))
+            if (notified.add(pubkey)) ['p', pubkey],
+        ],
+        description: 'Reply: "${text.trim()}"');
+    return (note: sent.note, queued: sent.queued, repeated: false);
+  }
+
+  /// How long the same reply to the same note counts as a repeat (people
+  /// tapping send again when the network is slow).
+  static const repeatWindow = Duration(hours: 1);
+
+  /// The reader's own reply with exactly [content] to [replyToId] in
+  /// thread [root], sent within [repeatWindow], if any.
+  Future<FeedbackNote?> _recentReply(
+      String root, String replyToId, String content) async {
+    final me = await myPubkey;
+    if (me == null) return null;
+    final since = DateTime.now().subtract(repeatWindow);
+    for (final event in await _db.nostrEvents([1])) {
+      if (event['pubkey'] != me || event['content'] != content) continue;
+      final note = FeedbackNote.fromEvent(event);
+      if (note.rootId == root &&
+          note.replyToId == replyToId &&
+          note.createdAt.isAfter(since)) {
+        return note;
+      }
+    }
+    return null;
   }
 
   /// Reacts to a note with an emoji (NIP-25) and remembers the choice so
-  /// the reader's favorite emojis come first next time.
-  Future<void> react(FeedbackNote note, String emoji) async {
+  /// the reader's favorite emojis come first next time. Offline first:
+  /// returns true when no relay took it and it waits in the outbox.
+  Future<bool> react(FeedbackNote note, String emoji) async {
     final event = await _profile.signEvent(kind: 7, content: emoji, tags: [
       ['e', note.id],
       ['p', note.pubkey],
       ['k', '1'],
     ]);
     await _remember(event);
-    final accepted = await _nostr.publish(event);
-    if (accepted == 0) {
-      throw Exception('No relay accepted the reaction');
-    }
     await _rememberEmoji(emoji);
+    return _sendOrQueue(event, description: 'Reaction $emoji');
   }
 
-  Future<FeedbackNote> _publish(
-      {required String content, required List<List<String>> tags}) async {
+  Future<({FeedbackNote note, bool queued})> _publish(
+      {required String content,
+      required List<List<String>> tags,
+      String? description}) async {
     final event = await _profile.signEvent(
         kind: 1,
         content: content.trim(),
@@ -745,13 +784,28 @@ class FeedbackService {
           ['client', 'einkreader'],
         ]);
     await _remember(event);
-    final accepted = await _nostr.publish(event);
-    await AppLogService.instance
-        .info('Feedback: note ${event['id']} accepted by $accepted relay(s)');
-    if (accepted == 0) {
-      throw Exception('No relay accepted the note');
+    final queued = await _sendOrQueue(event,
+        description: description ?? 'Feedback: "${content.trim()}"');
+    return (note: FeedbackNote.fromEvent(event), queued: queued);
+  }
+
+  /// Publishes a signed event; when no relay takes it (offline, relays
+  /// down), queues it in the outbox, which re-sends it on the next sync.
+  /// Returns whether it was queued.
+  Future<bool> _sendOrQueue(Map<String, dynamic> event,
+      {required String description}) async {
+    try {
+      final accepted = await _nostr.publish(event);
+      await AppLogService.instance.info(
+          'Feedback: event ${event['id']} accepted by $accepted relay(s)');
+      if (accepted > 0) return false;
+      await OutboxService.instance.enqueueNostrEvent(event,
+          description: description, error: 'No relay accepted the event');
+    } catch (e) {
+      await OutboxService.instance
+          .enqueueNostrEvent(event, description: description, error: '$e');
     }
-    return FeedbackNote.fromEvent(event);
+    return true;
   }
 
   // ------------------------------------------------------- reply drafts

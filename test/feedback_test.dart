@@ -147,8 +147,8 @@ void main() {
     expect(event['tags'], anyElement(equals(['p', FeedbackService.officialHex])));
     expect(event['tags'], anyElement(equals(['client', 'einkreader'])));
 
-    final reply = await service.reply(note, 'Yes please!');
-    final nested = await service.reply(reply, 'Agreed with you');
+    final reply = (await service.reply(note, 'Yes please!')).note;
+    final nested = (await service.reply(reply, 'Agreed with you')).note;
     expect(relay.events.last['tags'],
         anyElement(equals(['e', note.id, '', 'root'])));
     expect(relay.events.last['tags'],
@@ -549,6 +549,45 @@ void main() {
     await OutboxService.instance.delete(queued.single.id!);
   });
 
+  test('offline, replies and reactions wait in the outbox', () async {
+    await ProfileService.instance.createIdentity();
+    final note = await service.post('Night mode');
+    final offline = FeedbackService(nostr: _OfflineRelay());
+
+    final sent = await offline.reply(note, 'Me too');
+    expect(sent.queued, isTrue);
+    expect(sent.repeated, isFalse);
+    expect(await offline.react(note, '🎉'), isTrue);
+
+    // Both show in the thread right away.
+    final thread = await offline.cachedThread(note.id);
+    expect(thread.map((n) => n.content), contains('Me too'));
+    expect(thread.first.reactions['🎉'], contains(await offline.myPubkey));
+
+    final queued = await OutboxService.instance.items();
+    expect(queued.map((i) => i.text), ['Reply: "Me too"', 'Reaction 🎉']);
+    expect(queued.first.payload, contains(sent.note.id));
+    for (final item in queued) {
+      await OutboxService.instance.delete(item.id!);
+    }
+  });
+
+  test('the same reply within an hour is sent only once', () async {
+    await ProfileService.instance.createIdentity();
+    final note = await service.post('Night mode');
+    final first = await service.reply(note, 'Yes please!');
+    final again = await service.reply(note, '  Yes please!  ');
+    expect(again.repeated, isTrue);
+    expect(again.note.id, first.note.id);
+    expect(relay.events.where((e) => e['content'] == 'Yes please!'),
+        hasLength(1));
+
+    // A different reply, or the same words to another note, still go out.
+    expect((await service.reply(note, 'Yes, please')).repeated, isFalse);
+    expect((await service.reply(first.note, 'Yes please!')).repeated,
+        isFalse);
+  });
+
   testWidgets('the list keeps each feedback to a few lines', (tester) async {
     relay.events.add({
       'id': 'long',
@@ -916,6 +955,28 @@ void main() {
     expect(feedback.uploads, 1);
     expect(relay.events.last['content'],
         contains('https://blossom.example/1.jpg'));
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a picker that fails says so instead of doing nothing',
+      (tester) async {
+    await tester.runAsync(() async {
+      await ProfileService.instance.createIdentity();
+    });
+    NewFeedbackScreen.debugPickImages =
+        () async => throw PlatformException(code: 'invalid_format_type');
+    addTearDown(() => NewFeedbackScreen.debugPickImages = null);
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: NewFeedbackScreen(service: service)));
+    await settle(tester);
+
+    await tester.tap(find.text('Add images'));
+    await tester.pump();
+    expect(find.textContaining('adding images'), findsOneWidget);
+    expect(find.text('Add images'), findsOneWidget);
     await tester.pump(const Duration(seconds: 5));
   });
 

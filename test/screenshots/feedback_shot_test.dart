@@ -1,6 +1,6 @@
 // Feedback threads: who reacted (long press on a reaction), @mentions
 // while replying, mention chips, images side by side and the image viewer,
-// and images added to new feedback. Run:
+// images added to new feedback, and replying offline. Run:
 //
 //   flutter test test/screenshots/feedback_shot_test.dart \
 //     --update-goldens --dart-define=screenshots=true
@@ -11,6 +11,7 @@ import 'package:einkreader/screens/feedback_screen.dart';
 import 'package:einkreader/screens/nostr_profile_screen.dart';
 import 'package:einkreader/services/feedback_service.dart';
 import 'package:einkreader/services/nostr_service.dart';
+import 'package:einkreader/services/outbox_service.dart';
 import 'package:einkreader/services/profile_service.dart';
 import 'package:einkreader/theme.dart';
 import 'package:flutter/material.dart';
@@ -30,13 +31,15 @@ const _agent =
     '735beae7899fa8c1ebe0e81087aeae773d37fba3f189f2c2e7808c7e1387b58f';
 const _ana = '3333333333333333333333333333333333333333333333333333333333333333';
 
-/// Answers from what it was given; publishing always succeeds.
+/// Answers from what it was given; publishing succeeds unless [offline].
 class _Relay extends NostrService {
   final events = <Map<String, dynamic>>[];
+  bool offline = false;
 
   @override
   Future<int> publish(Map<String, dynamic> event,
       {Duration timeout = const Duration(seconds: 8)}) async {
+    if (offline) return 0;
     events.add(event);
     return 1;
   }
@@ -270,6 +273,35 @@ void main() {
     await settle(tester);
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/feedback_8_new_with_images.png'));
+  }, skip: !_enabled);
+
+  testWidgets('replying offline, then sending the same reply again',
+      (tester) async {
+    phone(tester);
+    relay.offline = true;
+    addTearDown(() => relay.offline = false);
+    await tester.pumpWidget(app());
+    await settle(tester);
+    await tester.enterText(
+        find.byType(TextField), 'Yes please, my feeds have long names too');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_9_reply_offline.png'));
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byType(TextField), 'Yes please, my feeds have long names too');
+    await tester.tap(find.byTooltip('Send'));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_10_reply_repeated.png'));
+    await tester.pump(const Duration(seconds: 6));
+    await tester.runAsync(() async {
+      for (final item in await OutboxService.instance.items()) {
+        await OutboxService.instance.delete(item.id!);
+      }
+    });
   }, skip: !_enabled);
 
   testWidgets('tagging new feedback', (tester) async {
