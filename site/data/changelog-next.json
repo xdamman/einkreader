@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.6.33",
+    "date": "2026-10-28",
+    "title": "Read articles leave To Read",
+    "changes": [
+      "Once you've read an article you saved, it leaves the To Read tab, so the list only holds what's still waiting for you.",
+      "You'll find it in the Read tab, still bookmarked.",
+      "If you mark it unread, it goes back to To Read."
+    ],
+    "feedback": [
+      {
+        "id": "d5921c9d5b9f1e668c829e9458639368028af70a0cfdee589abea9108183c8af",
+        "title": "Read articles shouldn't show up in the \"To read\" screen"
+      }
+    ]
+  },
+  {
     "version": "0.6.32",
     "date": "2026-10-27",
     "title": "Feedback works offline",
