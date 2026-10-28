@@ -673,6 +673,50 @@ void main() {
     expect(find.textContaining('Note '), findsNWidgets(4));
   });
 
+  testWidgets('release notes count only from the maintainers',
+      (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    for (final (id, pubkey) in [
+      ('r1', FeedbackService.officialHex),
+      ('r2', FeedbackService.agentHex),
+      ('r3', '2' * 64),
+    ]) {
+      relay.events.add({
+        'id': id,
+        'pubkey': pubkey,
+        'created_at': now - 60,
+        'kind': 1,
+        'tags': [
+          ['p', FeedbackService.officialHex],
+          ['t', 'feedback'],
+          ['t', 'release-notes'],
+        ],
+        'content': 'Note $id',
+      });
+    }
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
+    await settle(tester);
+    expect(find.text('Release notes 2'), findsOneWidget);
+    // Someone else's note is still feedback, just not release notes.
+    expect(find.text('  ·  Release notes'), findsNWidgets(2));
+
+    await tester.tap(find.text('Release notes 2'));
+    await tester.pump();
+    expect(find.text('Note r1'), findsOneWidget);
+    expect(find.text('Note r2'), findsOneWidget);
+    expect(find.text('Note r3'), findsNothing);
+  });
+
+  test('only the maintainers can tag release notes', () {
+    expect(FeedbackKind.availableTo('2' * 64),
+        isNot(contains(FeedbackKind.releaseNotes)));
+    expect(FeedbackKind.availableTo(null),
+        isNot(contains(FeedbackKind.releaseNotes)));
+    expect(FeedbackKind.availableTo(FeedbackService.officialHex),
+        contains(FeedbackKind.releaseNotes));
+  });
+
   test('list previews are plain text', () {
     expect(plainPreview('# Title\n\nSee [this](https://x.org) **now**'),
         'Title See this now');

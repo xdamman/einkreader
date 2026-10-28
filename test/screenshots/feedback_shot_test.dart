@@ -304,6 +304,64 @@ void main() {
     });
   }, skip: !_enabled);
 
+  testWidgets('release notes', (tester) async {
+    phone(tester);
+    final pages = [for (var i = 0; i < 3; i++) _fakePage(i)];
+    noteImageProvider = (url) => MemoryImage(pages[int.parse(
+        RegExp(r'(\d)\.png').firstMatch(url)!.group(1)!)]);
+    addTearDown(() => noteImageProvider = NetworkImage.new);
+    Map<String, dynamic> note(String id, String pubkey, int ago,
+            String content) =>
+        {
+          'id': id,
+          'pubkey': pubkey,
+          'created_at': now - ago,
+          'kind': 1,
+          'tags': [
+            ['p', FeedbackService.officialHex],
+            ['t', 'feedback'],
+            ['t', 'einkreader'],
+            ['t', 'release-notes'],
+          ],
+          'content': content,
+        };
+    NostrProfileCache.debugPut(NostrProfile(
+        pubkey: FeedbackService.officialHex, name: 'einkReader', about: ''));
+    relay.events.addAll([
+      note('1' * 63 + '0', FeedbackService.officialHex, 2 * 3600,
+          "What's new: read articles leave To Read\n\n"
+          'Articles you finish now move from To Read to Read, and come '
+          'back if you mark them unread.\n\n'
+          'https://img.example/0.png\nhttps://img.example/1.png'),
+      note('2' * 63 + '0', FeedbackService.officialHex, 6 * 86400,
+          "What's new: feedback works offline\n\n"
+          'Replies and reactions wait in the outbox until you are back '
+          'online.\n\nhttps://img.example/2.png'),
+      // Anyone can add the hashtag: not counted as release notes.
+      note('3' * 63 + '0', _ana, 3600, 'My own release notes!'),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: _withEmoji(buildEinkTheme()),
+        home: FeedbackScreen(service: service)));
+    await settle(tester);
+    await tester.tap(find.text('Release notes 2'));
+    await settle(tester);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_11_release_notes.png'));
+
+    await tester.tap(find.textContaining('read articles leave To Read'));
+    await settle(tester);
+    // Let the pictures decode.
+    for (var i = 0; i < 5; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+    }
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_12_release_note.png'));
+  }, skip: !_enabled);
+
   testWidgets('tagging new feedback', (tester) async {
     phone(tester);
     await tester.pumpWidget(MaterialApp(

@@ -210,11 +210,30 @@ const appTag = 'einkreader';
 enum FeedbackKind {
   bug('bug', 'Bug'),
   feature('feature-request', 'Feature request'),
-  rendering('rendering-issue', 'Rendering issue');
+  rendering('rendering-issue', 'Rendering issue'),
+
+  /// What's new in a release. Anyone can put the hashtag on a note, so
+  /// the app counts it only from the maintainers' accounts.
+  releaseNotes('release-notes', 'Release notes', maintainersOnly: true);
 
   final String tag;
   final String label;
-  const FeedbackKind(this.tag, this.label);
+  final bool maintainersOnly;
+  const FeedbackKind(this.tag, this.label, {this.maintainersOnly = false});
+
+  /// Whether [note] is of this kind: tagged with it, and for
+  /// [maintainersOnly] kinds, written by a maintainer.
+  bool matches(FeedbackNote note) =>
+      note.tags.contains(tag) &&
+      (!maintainersOnly || FeedbackService.maintainers.contains(note.pubkey));
+
+  /// The kinds [pubkey] may tag a new feedback with.
+  static List<FeedbackKind> availableTo(String? pubkey) => [
+        for (final kind in values)
+          if (!kind.maintainersOnly ||
+              FeedbackService.maintainers.contains(pubkey))
+            kind,
+      ];
 }
 
 /// A feedback being posted: the local [draft] to show right away, and
@@ -253,6 +272,15 @@ class FeedbackService {
   /// the app names it itself.
   static const agentHex =
       '735beae7899fa8c1ebe0e81087aeae773d37fba3f189f2c2e7808c7e1387b58f';
+
+  /// Who may publish release notes: the official account, its agent, and
+  /// Xavier's own accounts (the einkreader profile and his personal one).
+  static final maintainers = {
+    officialHex,
+    agentHex,
+    '8256dcc06b7399551b35752afd9dc774eab545d01886065023d7f178cd293fe2',
+    '340254e011abda2e82585cbfee4f91b3f07549a6c468fe009bf3ec7665a2e31b',
+  };
 
   /// Names the app shows for its own accounts, whatever their profile says.
   static const knownNames = {agentHex: 'einkReader agent'};

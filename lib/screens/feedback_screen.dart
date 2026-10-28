@@ -145,11 +145,11 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     final all = _notes;
     final counts = {
       for (final kind in FeedbackKind.values)
-        kind: all?.where((n) => n.tags.contains(kind.tag)).length ?? 0,
+        kind: all?.where(kind.matches).length ?? 0,
     };
     final notes = _kind == null
         ? all
-        : all?.where((n) => n.tags.contains(_kind!.tag)).toList();
+        : all?.where(_kind!.matches).toList();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Feedback'),
@@ -817,7 +817,7 @@ class FeedbackNoteTile extends StatelessWidget {
                           style: const TextStyle(fontSize: 13)),
                       // Its kinds, as tagged when written.
                       for (final kind in FeedbackKind.values)
-                        if (note.tags.contains(kind.tag))
+                        if (kind.matches(note))
                           Text('  ·  ${kind.label}',
                               style: const TextStyle(
                                   fontSize: 13, fontWeight: FontWeight.w600)),
@@ -1318,7 +1318,9 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
           url: _url.text,
           screenshot: _includeScreenshot ? widget.screenshot : null,
           images: _images,
-          kinds: _kinds);
+          // A switch of profile may have taken release notes away.
+          kinds: _kinds.where(FeedbackKind.availableTo(
+              await widget.service.myPubkey).contains));
       // Our own name and picture are already known: no relay round trip.
       final me = await widget.service.identity();
       NostrProfileCache.put(NostrProfile(
@@ -1345,6 +1347,9 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
             ? identity.name
             : 'your einkreader profile';
     final screenshot = widget.screenshot;
+    // Release notes only for the maintainers' profiles.
+    final kinds = FeedbackKind.availableTo(
+        identity == null ? null : NostrService.decodeNpub(identity.npub));
     return Scaffold(
       appBar: AppBar(title: const Text('New feedback')),
       body: ListView(
@@ -1412,7 +1417,7 @@ class _NewFeedbackScreenState extends State<NewFeedbackScreen> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final kind in FeedbackKind.values)
+              for (final kind in kinds)
                 FilterPill(
                   label: kind.label,
                   selected: _kinds.contains(kind),
