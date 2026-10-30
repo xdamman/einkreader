@@ -322,21 +322,32 @@ void main() {
             ['t', 'feedback'],
             ['t', 'einkreader'],
             ['t', 'release-notes'],
+            ['subject', content.split('\n').first],
           ],
           'content': content,
         };
+    const play = 'Update from Google Play: '
+        'https://play.google.com/store/apps/details?id=com.xlcollective.einkreader\n\n'
+        'All versions: https://einkreader.app/changelog';
     NostrProfileCache.debugPut(NostrProfile(
         pubkey: FeedbackService.officialHex, name: 'einkReader', about: ''));
     relay.events.addAll([
+      // As tool/nostr_release_note.py writes them.
       note('1' * 63 + '0', FeedbackService.officialHex, 2 * 3600,
-          "What's new: read articles leave To Read\n\n"
-          'Articles you finish now move from To Read to Read, and come '
-          'back if you mark them unread.\n\n'
+          "einkReader 0.6.33 on Google Play: what's new\n\n"
+          'Read articles leave To Read (0.6.33)\n'
+          "- Once you've read an article you saved, it leaves the To Read "
+          "tab, so the list only holds what's still waiting for you.\n"
+          "- You'll find it in the Read tab, still bookmarked.\n"
+          '- If you mark it unread, it goes back to To Read.\n\n'
+          '$play\n\n'
           'https://img.example/0.png\nhttps://img.example/1.png'),
       note('2' * 63 + '0', FeedbackService.officialHex, 6 * 86400,
-          "What's new: feedback works offline\n\n"
-          'Replies and reactions wait in the outbox until you are back '
-          'online.\n\nhttps://img.example/2.png'),
+          "einkReader 0.6.32 on Google Play: what's new\n\n"
+          'Feedback works offline (0.6.32)\n'
+          '- Replies and reactions in a feedback thread now work offline. '
+          'They wait in the outbox and go out on the next sync.\n\n'
+          '$play\n\nhttps://img.example/2.png'),
       // Anyone can add the hashtag: not counted as release notes.
       note('3' * 63 + '0', _ana, 3600, 'My own release notes!'),
     ]);
@@ -350,7 +361,7 @@ void main() {
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/feedback_11_release_notes.png'));
 
-    await tester.tap(find.textContaining('read articles leave To Read'));
+    await tester.tap(find.textContaining('0.6.33 on Google Play').first);
     await settle(tester);
     // Let the pictures decode.
     for (var i = 0; i < 5; i++) {

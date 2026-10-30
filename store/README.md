@@ -51,6 +51,17 @@ installed side by side (each with its own library).
    `einkreader-vX.Y.Z-play.aab` from it.
 3. Play Console → the track → Create release → upload the `.aab` → paste
    release notes (template in `listing.md`) → review → roll out.
+4. Once it reaches Production, post a release note on Nostr from the
+   official account: everything since the last version that got one, with
+   screenshots of what changed (their URLs at the end of the text). The
+   app lists it under Feedback → Release notes, which counts only the
+   maintainers' accounts.
+
+   ```sh
+   python3 tool/nostr_release_note.py X.Y.Z --since <last noted> > note.txt
+   # add the screenshot URLs at the end of note.txt, then
+   nostr post --tags "$(python3 tool/nostr_release_note.py X.Y.Z --tags)" < note.txt
+   ```
 
 versionCode comes from `pubspec.yaml` (`+N`), so every tag gets a new,
 higher code automatically.
