@@ -740,7 +740,7 @@ def main():
             run_job(state, root_id)
         flush_pending(state)
         return
-    threading.Thread(target=work, args=(state,), daemon=True).start()
+    worker = None
     while True:
         try:
             with LOCK:
@@ -748,6 +748,10 @@ def main():
                 poll(state)
         except Exception as e:  # never let one bad event kill the service
             log(f"poll failed: {e!r}")
+        if worker is None:  # after a first poll, so it sees what's new
+            worker = threading.Thread(target=work, args=(state,),
+                                      daemon=True)
+            worker.start()
         time.sleep(POLL_SECONDS)
 
 
