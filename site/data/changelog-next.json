@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.36",
+    "date": "2026-10-31",
+    "title": "Sharing an X post with a note links to it",
+    "changes": [
+      "Sharing an X post with a note still tries a real quote first.",
+      "When X refuses the quote, your note is posted with a link to the original post, like any other article, and X shows its usual preview.",
+      "A screenshot of the post is used only if the link doesn't fit in the character limit or X refuses that post too.",
+      "If X says you already posted the same thing, nothing more is sent, so you never get a duplicate."
+    ],
+    "feedback": [
+      {
+        "id": "587ea826120974fab9e40d4d2ce0814e0ea100d89bfaacdc671f8c9b719adb39",
+        "title": "Share a tweet with a note on Twitter should quote it"
+      }
+    ]
+  },
+  {
     "version": "0.6.35",
     "date": "2026-10-31",
     "title": "Notes keep a draft",
