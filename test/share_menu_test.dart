@@ -499,8 +499,9 @@ void main() {
       // Quote first; no lookup needed: the stored post is drawn.
       expect(calls,
           ['POST /2/tweets', 'POST /2/media/upload', 'POST /2/tweets']);
+      // The screenshot comes with a link to the original post.
       expect(tweet, {
-        'text': 'So true',
+        'text': 'So true\n\nhttps://x.com/patrickc/status/42',
         'media': {
           'media_ids': ['777']
         },
@@ -544,6 +545,7 @@ void main() {
           expect(body['media'], {
             'media_ids': ['9']
           });
+          expect(body['text'], 'Look\n\nhttps://x.com/someone/status/42');
           return http.Response('{"data": {"id": "1"}}', 201);
         }),
       );
@@ -554,6 +556,23 @@ void main() {
         'POST /2/media/upload',
         'POST /2/tweets',
       ]);
+    });
+
+    test('the link to the original post only goes in when it fits', () {
+      const url = 'https://x.com/a/status/1';
+      expect(TwitterService.withLinkTo('Hi', url), 'Hi\n\n$url');
+      expect(TwitterService.withLinkTo('', url), url);
+      // Already there: not twice.
+      expect(TwitterService.withLinkTo('See $url', url), 'See $url');
+      // 255 + 2 + 23 = 280 fits; one more character doesn't.
+      expect(TwitterService.withLinkTo('a' * 255, url), endsWith(url));
+      expect(TwitterService.withLinkTo('a' * 256, url), 'a' * 256);
+      // Other links count 23, as X counts them.
+      final withLink = 'https://example.com/${'p' * 100} ${'a' * 231}';
+      expect(TwitterService.withLinkTo(withLink, url), endsWith(url));
+      // Long-post accounts have room.
+      expect(TwitterService.withLinkTo('a' * 500, url, maxLength: 25000),
+          endsWith(url));
     });
 
     test('a duplicate is refused for good', () async {

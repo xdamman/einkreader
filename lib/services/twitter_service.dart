@@ -535,7 +535,9 @@ class TwitterService {
   /// The quote is always tried first. When X refuses it (the author limits
   /// who may quote, or the API's own limits apply), the post goes out again
   /// with a screenshot of the quoted post attached instead, drawn from
-  /// [quoted] or, without it, from the post looked up by id.
+  /// [quoted] or, without it, from the post looked up by id, and a link to
+  /// the original post after the text (when it fits the character budget),
+  /// so readers can still open it.
   Future<void> postTweet(String text,
       {String? quoteTweetId, QuotedTweet? quoted}) async {
     quoteTweetId ??= quoted?.id;
@@ -561,8 +563,27 @@ class TwitterService {
           'Twitter: X refused to quote $quoteTweetId; attaching a '
           'screenshot of it instead');
       final card = quoted ?? await _quotedFromApi(quoteTweetId!);
-      await _postWithScreenshot(token, text, card);
+      await _postWithScreenshot(
+          token,
+          withLinkTo(text, card.url,
+              maxLength: _cachedTweetMaxLength ?? 280),
+          card);
     }
+  }
+
+  /// X counts every link as this many characters (t.co shortening).
+  static const linkWeight = 23;
+
+  /// [text] followed by a link to [url] on its own paragraph, unless the
+  /// link is already in it or would push it past [maxLength] (each link
+  /// counting [linkWeight], as X counts them).
+  static String withLinkTo(String text, String url, {int maxLength = 280}) {
+    if (text.contains(url)) return text;
+    final weighted = text.replaceAll(
+        RegExp(r'https?://\S+'), 'x' * linkWeight).length;
+    final separator = text.isEmpty ? '' : '\n\n';
+    if (weighted + separator.length + linkWeight > maxLength) return text;
+    return '$text$separator$url';
   }
 
   Future<QuotedTweet> _quotedFromApi(String id) async {
