@@ -86,6 +86,10 @@ POLL_SECONDS = 60
 LOOKBACK = "3d"
 # Xavier's own notes: long enough for a reply to a thread answered days ago.
 TRUSTED_LOOKBACK = "14d"
+# Every SWEEP_SECONDS a poll looks back SWEEP_LOOKBACK instead, for anything
+# a relay was slow to deliver or a gap in the rules let through.
+SWEEP_SECONDS = 60 * 60
+SWEEP_LOOKBACK = "30d"
 JOB_TIMEOUT = 3 * 60 * 60  # a release (build + CI) fits comfortably
 MAX_SHOTS = 4
 
@@ -612,16 +616,18 @@ def join(state, root_id, mention, notes):
 DRY_RUN = "--dry-run" in sys.argv
 
 
-def poll(state):
+def poll(state, sweep=False):
+    lookback = SWEEP_LOOKBACK if sweep else LOOKBACK
+    trusted_lookback = SWEEP_LOOKBACK if sweep else TRUSTED_LOOKBACK
     notes = {e["id"]: e for e in nostr_events(
         "--kinds", "1", "--filter", f"p={OFFICIAL_HEX}",
-        "--since", LOOKBACK, "--limit", "200")}
+        "--since", lookback, "--limit", "500" if sweep else "200")}
     approved = set(state["approved"])
     trusted_notes = []
     for pubkey in TRUSTED:
         for event in nostr_events("--kinds", "1,7", "--author", pubkey,
-                                  "--since", TRUSTED_LOOKBACK,
-                                  "--limit", "300"):
+                                  "--since", trusted_lookback,
+                                  "--limit", "1000" if sweep else "300"):
             if event.get("kind") == 1:
                 trusted_notes.append(event)
                 continue
@@ -732,7 +738,7 @@ def main():
     save_state(state)
     log(f"feedback bot started (repo {REPO}, account: {bot_account()})")
     if DRY_RUN:
-        poll(load_state())  # state is left untouched below
+        poll(load_state(), sweep="--sweep" in sys.argv)  # state untouched
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--once":
         poll(state)
@@ -741,11 +747,15 @@ def main():
         flush_pending(state)
         return
     worker = None
+    swept = 0
     while True:
         try:
+            sweep = time.time() - swept >= SWEEP_SECONDS
             with LOCK:
                 flush_pending(state)
-                poll(state)
+                poll(state, sweep=sweep)
+            if sweep:
+                swept = time.time()
         except Exception as e:  # never let one bad event kill the service
             log(f"poll failed: {e!r}")
         if worker is None:  # after a first poll, so it sees what's new
