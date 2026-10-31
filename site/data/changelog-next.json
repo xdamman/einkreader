@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.6.34",
+    "date": "2026-10-31",
+    "title": "Release notes in Feedback",
+    "changes": [
+      "Feedback has a new \"Release notes\" filter, next to Bug, Feature request and Rendering issue. Tap it to see what's new in each version, newest first, with screenshots.",
+      "Only notes posted by einkReader's own accounts show up there, so the list stays a reliable record of what changed.",
+      "Each note sums up everything since the previous one and links to Google Play and the full changelog."
+    ],
+    "feedback": [
+      {
+        "id": "444a4874bb0a2f7a2996dda5ccb65d91f6666f24e0acc94d6a806939626f217a",
+        "title": "Add a new tag for feedback for \"release notes\""
+      }
+    ]
+  },
+  {
     "version": "0.6.33",
     "date": "2026-10-28",
     "title": "Read articles leave To Read",
