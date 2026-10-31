@@ -389,6 +389,68 @@ void main() {
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/feedback_5_new_tagged.png'));
   }, skip: !_enabled);
+
+  testWidgets('"new" counts replies only, and clears on opening', (tester) async {
+    phone(tester);
+    final me = (await service.myPubkey)!;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('feedback_seen_baseline', now - 3600);
+    await prefs.remove('feedback_thread_seen');
+    final mineId = '9' * 64;
+    Map<String, dynamic> event(String id, String pubkey, int ago, int kind,
+            String content, List<List<String>> tags) =>
+        {
+          'id': id,
+          'pubkey': pubkey,
+          'created_at': now - ago,
+          'kind': kind,
+          'tags': tags,
+          'content': content,
+        };
+    relay.events.addAll([
+      event(mineId, me, 40 * 60, 1, 'Could the list show unread counts?', [
+        ['p', FeedbackService.officialHex],
+        ['t', 'feedback'],
+        ['t', 'feature-request'],
+      ]),
+      // One new reply…
+      event('8' * 64, _marie, 20 * 60, 1, 'Yes, I would like that too.', [
+        ['e', mineId, '', 'root'],
+        ['p', me],
+      ]),
+      // …and three new reactions, which don't count as "new".
+      for (final (who, ago, emoji) in [
+        (_marie, 25 * 60, '👍'),
+        (_ana, 15 * 60, '👍'),
+        (_ana, 14 * 60, '❤️'),
+      ])
+        event('$who${ago}r', who, ago, 7, emoji, [
+          ['e', mineId],
+          ['p', me],
+        ]),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: _withEmoji(buildEinkTheme()),
+        home: FeedbackScreen(service: service)));
+    // The list shows no spinner while it loads: wait for the notes.
+    for (var i = 0; i < 50 && find.text('1 new').evaluate().isEmpty; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('1 new'), findsOneWidget);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_13_new_replies.png'));
+    await tester.tap(find.text('Could the list show unread counts?'));
+    await settle(tester);
+    Navigator.of(tester.element(find.byType(FeedbackThreadScreen))).pop();
+    await settle(tester);
+    expect(find.text('1 new'), findsNothing);
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_14_new_cleared.png'));
+  }, skip: !_enabled);
 }
 
 /// A grey page with a title bar and lines of "text", numbered [i].

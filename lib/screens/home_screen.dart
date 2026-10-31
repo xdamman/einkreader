@@ -369,7 +369,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
           ),
           // Public feedback on Nostr: read, post, reply, react. The badge
-          // counts new replies and reactions to the reader's own feedback.
+          // counts new replies to the reader's own feedback.
           ValueListenableBuilder<int>(
             valueListenable: FeedbackService.unseenCount,
             builder:

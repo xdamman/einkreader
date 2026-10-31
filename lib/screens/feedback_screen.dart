@@ -34,7 +34,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   List<FeedbackNote>? _notes;
   Map<String, int> _replyCounts = {};
 
-  /// Thread root id → replies and reactions to the reader's notes they
+  /// Thread root id → replies to the reader's notes they
   /// haven't seen (opening the thread clears it).
   Map<String, int> _unseen = {};
   String? _me;
@@ -134,9 +134,18 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   }
 
   Future<void> _openThread(FeedbackNote note) async {
+    // Opening the thread is seeing its replies: the "new" chip goes now,
+    // not only once the thread has loaded from the relays.
+    setState(() => _unseen = {..._unseen}..remove(note.id));
+    final marked = _service.markThreadSeen(note.id);
     await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => FeedbackThreadScreen(
             root: note, service: _service)));
+    await marked;
+    // Recount from the cache even if a reload is already running (it would
+    // skip this one and could put back the counts from before).
+    final unseen = await _service.unseenByThread();
+    if (mounted) setState(() => _unseen = unseen);
     _load();
   }
 
@@ -618,7 +627,7 @@ class FeedbackNoteTile extends StatelessWidget {
   final FeedbackService service;
   final int? replyCount;
 
-  /// New replies and reactions to the reader's notes in this thread.
+  /// New replies to the reader's notes in this thread.
   final int newCount;
   final bool large;
 

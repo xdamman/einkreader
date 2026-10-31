@@ -472,18 +472,18 @@ class FeedbackService {
     _addressed.addAll(_idsAddressedToUs([event]));
   }
 
-  /// How many replies and reactions to the reader's own feedback they
-  /// haven't seen yet, for the badge on the feedback icon. Updated by
-  /// [unseenByThread].
+  /// How many replies to the reader's own feedback they haven't seen yet,
+  /// for the badge on the feedback icon. Reactions don't count: they show
+  /// on the note itself. Updated by [unseenByThread].
   static final ValueNotifier<int> unseenCount = ValueNotifier(0);
 
   static const _kSeenBaseline = 'feedback_seen_baseline';
   static const _kThreadSeen = 'feedback_thread_seen';
 
-  /// Replies and reactions from others to the reader's notes, newer than
-  /// when they last opened that thread: thread root id → count. Only
-  /// counts activity after the first time this ran, so installing or
-  /// updating doesn't light up old history. Cache only, no network.
+  /// Replies from others to the reader's notes, newer than when they last
+  /// opened that thread: thread root id → count. Only counts replies after
+  /// the first time this ran, so installing or updating doesn't light up
+  /// old history. Cache only, no network.
   Future<Map<String, int>> unseenByThread() async {
     final me = await myPubkey;
     if (me == null) {
@@ -498,38 +498,26 @@ class FeedbackService {
     }
     final seen = _threadSeen(prefs);
 
+    final events = await _db.nostrEvents([1]);
     final notes = {
-      for (final e in await _db.nostrEvents([1]))
-        e['id'] as String: FeedbackNote.fromEvent(e)
+      for (final e in events) e['id'] as String: FeedbackNote.fromEvent(e)
     };
     final mine = {
       for (final n in notes.values)
         if (n.pubkey == me) n.id
     };
     final out = <String, int>{};
-    void count(String thread, int createdAt) {
-      if (createdAt <= (seen[thread] ?? baseline!)) return;
-      out[thread] = (out[thread] ?? 0) + 1;
-    }
-
-    for (final e in await _db.nostrEvents([1, 7])) {
+    for (final e in events) {
       if (e['pubkey'] == me) continue;
-      final createdAt = (e['created_at'] as int?) ?? 0;
       final ids = [
         for (final tag in (e['tags'] as List? ?? const []))
           if ((tag as List).length >= 2 && tag[0] == 'e') '${tag[1]}'
       ];
-      if (ids.isEmpty) continue;
-      if (e['kind'] == 1) {
-        if (!ids.any(mine.contains)) continue;
-        final note = notes[e['id']];
-        count(note?.rootId ?? ids.first, createdAt);
-      } else {
-        // NIP-25: the last e-tag is the reacted-to note.
-        final target = ids.last;
-        if (!mine.contains(target)) continue;
-        count(notes[target]?.rootId ?? target, createdAt);
-      }
+      if (!ids.any(mine.contains)) continue;
+      final thread = notes[e['id']]?.rootId ?? ids.first;
+      final createdAt = (e['created_at'] as int?) ?? 0;
+      if (createdAt <= (seen[thread] ?? baseline)) continue;
+      out[thread] = (out[thread] ?? 0) + 1;
     }
     unseenCount.value = out.values.fold(0, (a, b) => a + b);
     return out;
@@ -546,7 +534,7 @@ class FeedbackService {
     }
   }
 
-  /// The reader opened this thread: its replies and reactions are seen.
+  /// The reader opened this thread: its replies are seen.
   Future<void> markThreadSeen(String rootId) async {
     final prefs = await SharedPreferences.getInstance();
     final seen = _threadSeen(prefs)

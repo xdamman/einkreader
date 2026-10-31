@@ -856,7 +856,7 @@ void main() {
     expect(find.text('No feedback yet — be the first.'), findsNothing);
   });
 
-  group('notifications for replies and reactions to my feedback', () {
+  group('notifications for replies to my feedback', () {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     const other = 'bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11bb11';
     var n = 0;
@@ -882,11 +882,16 @@ void main() {
       ]);
       relay.events.addAll([
         someoneElses,
-        // Counted: a reply and a reaction to my note.
+        // Counted: replies to my note.
         from(other, 1, 'Good idea', [
           ['e', mine.id, '', 'root'],
           ['p', FeedbackService.officialHex],
         ]),
+        from(other, 1, 'Yes please', [
+          ['e', mine.id, '', 'root'],
+          ['p', FeedbackService.officialHex],
+        ]),
+        // Not counted: a reaction to my note (it shows on the note).
         from(other, 7, '👍', [
           ['e', mine.id],
           ['p', (await service.myPubkey)!],
@@ -915,8 +920,8 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       await ProfileService.instance.createIdentity();
       final mine = await service.post('Old feedback');
-      relay.events.add(from(other, 7, '👍', [
-        ['e', mine.id]
+      relay.events.add(from(other, 1, 'An old reply', [
+        ['e', mine.id, '', 'root']
       ]));
       await service.feedback();
       expect(await service.unseenByThread(), isEmpty);
@@ -928,6 +933,24 @@ void main() {
           theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
       await settle(tester);
       expect(find.text('2 new'), findsOneWidget);
+    });
+
+    testWidgets('opening the thread clears its chip', (tester) async {
+      await tester.runAsync(setup);
+      await tester.pumpWidget(MaterialApp(
+          theme: buildEinkTheme(), home: FeedbackScreen(service: service)));
+      await settle(tester);
+      expect(find.text('2 new'), findsOneWidget);
+      await tester.tap(find.text('Night mode?'));
+      await tester.pump();
+      // Gone at once, not only once the thread has loaded.
+      expect(find.text('2 new', skipOffstage: false), findsNothing);
+      await settle(tester);
+      expect(find.byType(FeedbackThreadScreen), findsOneWidget);
+      Navigator.of(tester.element(find.byType(FeedbackThreadScreen))).pop();
+      await settle(tester);
+      expect(find.text('2 new'), findsNothing);
+      expect(FeedbackService.unseenCount.value, 0);
     });
   });
 
