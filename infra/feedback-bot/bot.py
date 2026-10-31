@@ -25,7 +25,9 @@ and release.
 
 Polls every POLL_SECONDS with a lookback window instead of `--watch`, which
 does not replay history: anything posted while the machine was off is still
-picked up. Jobs run one at a time. State (threads, posts waiting for a key)
+picked up. Jobs run one at a time in a worker thread while polling goes
+on: Xavier's replies get a 👀 at once and their jobs (and releases) run
+before new feedback. State (threads, posts waiting for a key)
 lives in STATE_FILE, so restarts never redo work; a job cut short by a
 restart runs again.
 
@@ -41,6 +43,7 @@ import shutil
 import urllib.request
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -81,8 +84,14 @@ APPROVE_EMOJIS = ("👍", "+")
 MODEL = os.environ.get("FEEDBACK_BOT_MODEL", "claude-opus-5-5")
 POLL_SECONDS = 60
 LOOKBACK = "3d"
+# Xavier's own notes: long enough for a reply to a thread answered days ago.
+TRUSTED_LOOKBACK = "14d"
 JOB_TIMEOUT = 3 * 60 * 60  # a release (build + CI) fits comfortably
 MAX_SHOTS = 4
+
+
+# Held by the poll loop and, between its long steps, by the job worker.
+LOCK = threading.RLock()
 
 
 def log(msg):
@@ -425,24 +434,49 @@ def prompt_for(job, root_id, thread):
     return (PROPOSE if job == "propose" else RELEASE).format(**fields)
 
 
+def next_job(state):
+    """The thread whose job runs next: releases and answers to Xavier
+    (threads he replied in or mentioned the bot in) before new feedback,
+    oldest first."""
+    queued = [(root_id, t) for root_id, t in state["threads"].items()
+              if t.get("job")]
+    if not queued:
+        return None
+    return min(queued, key=lambda item: (
+        item[1]["job"] == "propose" and not item[1].get("reply_to"),
+        item[1].get("queued_at", 0)))[0]
+
+
+def queue(thread, job):
+    thread.update(job=job, status="working", queued_at=int(time.time()))
+
+
 def run_job(state, root_id):
-    """Runs the thread's pending job (propose or release) to its end."""
-    thread = state["threads"][root_id]
-    job = thread["job"]
-    root = {"id": root_id, "pubkey": thread["author"]}
-    try:
-        cwd = worktree(root_id)
-    except subprocess.CalledProcessError as e:
-        log(f"no worktree for {root_id[:12]}: {e.stderr.strip()[:200]}")
-        thread.update(job=None, status="failed")
-        save_state(state)
-        return
-    shots = SHOTS / root_id[:12] / str(thread["round"])
-    if job == "propose":
-        shutil.rmtree(shots, ignore_errors=True)
-        shots.mkdir(parents=True, exist_ok=True)
-    reply = run_claude(prompt_for(job, root_id, thread), cwd,
-                       f"{job}-{root_id[:12]}-{thread['round']}")
+    """Runs the thread's pending job (propose or release) to its end. Takes
+    LOCK except while Claude works, so polling goes on meanwhile."""
+    with LOCK:
+        thread = state["threads"][root_id]
+        job = thread["job"]
+        root = {"id": root_id, "pubkey": thread["author"]}
+        try:
+            cwd = worktree(root_id)
+        except subprocess.CalledProcessError as e:
+            log(f"no worktree for {root_id[:12]}: {e.stderr.strip()[:200]}")
+            thread.update(job=None, status="failed")
+            save_state(state)
+            return
+        shots = SHOTS / root_id[:12] / str(thread["round"])
+        if job == "propose":
+            shutil.rmtree(shots, ignore_errors=True)
+            shots.mkdir(parents=True, exist_ok=True)
+        prompt = prompt_for(job, root_id, thread)
+        name = f"{job}-{root_id[:12]}-{thread['round']}"
+    reply = run_claude(prompt, cwd, name)
+    with LOCK:
+        _finish(state, root_id, thread, job, root, cwd, shots, reply)
+
+
+def _finish(state, root_id, thread, job, root, cwd, shots, reply):
     thread["job"] = None
     if not reply:
         thread["status"] = "failed"
@@ -507,7 +541,7 @@ def start(state, note):
     state["handled"][root_id] = "working"
     state["threads"][root_id] = {
         "author": note["pubkey"], "status": "working", "job": "propose",
-        "round": 1, "seen": [root_id],
+        "round": 1, "seen": [root_id], "queued_at": int(time.time()),
         "history": [{"who": "feedback", "text": note["content"]}]}
     save_state(state)
     post(state, "reaction", note, "👀")
@@ -566,7 +600,7 @@ def join(state, root_id, mention, notes):
         history.append({"who": "xavier", "text": mention["content"]})
     state["threads"][root_id] = {
         "author": root["pubkey"], "status": "working", "job": "propose",
-        "round": old.get("round", 0) + 1,
+        "round": old.get("round", 0) + 1, "queued_at": int(time.time()),
         "seen": old.get("seen", []) + [mention["id"]],
         "history": history,
         "reply_to": {"id": mention["id"], "pubkey": mention["pubkey"]}}
@@ -586,7 +620,8 @@ def poll(state):
     trusted_notes = []
     for pubkey in TRUSTED:
         for event in nostr_events("--kinds", "1,7", "--author", pubkey,
-                                  "--since", LOOKBACK, "--limit", "300"):
+                                  "--since", TRUSTED_LOOKBACK,
+                                  "--limit", "300"):
             if event.get("kind") == 1:
                 trusted_notes.append(event)
                 continue
@@ -625,7 +660,7 @@ def poll(state):
         if thread["status"] == "proposed" and thread.get("proposal") in approved:
             log(f"proposal for {root_id[:12]} approved: releasing")
             if not DRY_RUN:
-                thread.update(job="release", status="working")
+                queue(thread, "release")
             continue
         # After it closed: a second "ship it" sent while it was releasing
         # isn't a follow-up.
@@ -649,9 +684,10 @@ def poll(state):
             thread["history"].append({"who": "xavier", "text": e["content"]})
         thread["reply_to"] = {"id": replies[-1]["id"],
                               "pubkey": replies[-1]["pubkey"]}
-        thread.update(job="propose", status="working",
-                      round=thread["round"] + 1)
+        queue(thread, "propose")
+        thread["round"] += 1
         state["handled"][root_id] = "working"
+        post(state, "reaction", replies[-1], "👀")
     # Xavier @mentioning the bot anywhere else: it joins that thread.
     for e in sorted(trusted_notes, key=lambda e: e["created_at"]):
         if e["id"] in state.setdefault("mentions_seen", []) or \
@@ -671,9 +707,23 @@ def poll(state):
         join(state, root_id, e, notes)
     if not DRY_RUN:
         save_state(state)
-        for root_id, thread in list(state["threads"].items()):
-            if thread.get("job"):
-                run_job(state, root_id)
+
+
+def work(state):
+    """The job worker: runs queued jobs one at a time, forever."""
+    while True:
+        with LOCK:
+            root_id = next_job(state)
+        if not root_id:
+            time.sleep(5)
+            continue
+        try:
+            run_job(state, root_id)
+        except Exception as e:  # a failed thread waits for Xavier's retry
+            log(f"job on {root_id[:12]} failed: {e!r}")
+            with LOCK:
+                state["threads"][root_id].update(job=None, status="failed")
+                save_state(state)
 
 
 def main():
@@ -686,12 +736,16 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--once":
         poll(state)
+        while (root_id := next_job(state)):
+            run_job(state, root_id)
         flush_pending(state)
         return
+    threading.Thread(target=work, args=(state,), daemon=True).start()
     while True:
         try:
-            flush_pending(state)
-            poll(state)
+            with LOCK:
+                flush_pending(state)
+                poll(state)
         except Exception as e:  # never let one bad event kill the service
             log(f"poll failed: {e!r}")
         time.sleep(POLL_SECONDS)
