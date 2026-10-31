@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.6.38",
+    "date": "2026-10-31",
+    "title": "\"New\" in Feedback means new replies",
+    "changes": [
+      "The \"new\" chip on a feedback note now counts only new replies. Reactions still show as emoji counts on the note, but they no longer add to \"new\" or to the badge on the Feedback icon.",
+      "Opening a thread clears its \"new\" chip right away, and it stays gone when you come back to the list."
+    ],
+    "feedback": [
+      {
+        "id": "2d63a18a3968c1132b82c98a23974a0a90623aa991089cb2a95b919c707434b7",
+        "title": "\"New\" should count only replies, and clear when the thread opens"
+      }
+    ]
+  },
+  {
     "version": "0.6.37",
     "date": "2026-10-31",
     "title": "Drag a source onto a folder",
