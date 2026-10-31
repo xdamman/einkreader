@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 
 import '../db/app_database.dart';
@@ -692,6 +693,80 @@ class _HomeScreenState extends State<HomeScreen>
     ];
   }
 
+  /// Long-press on a source chip: an options menu anchored under the chip
+  /// (Rename, then every folder it can move to), so filing or renaming a
+  /// source doesn't need a trip to Settings.
+  Future<void> _showSourceChipMenu(int sourceId, Rect chip) async {
+    final source = _sources.where((s) => s.id == sourceId).firstOrNull;
+    if (source == null) return;
+    final folders = [..._folders]..sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final choice = await showMenu<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(chip.left, chip.bottom, chip.width, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        const PopupMenuItem(value: 'rename', child: Text('Rename')),
+        // Plain text items: fixed-width Rows overflow while the menu's
+        // open/close animation is mid-width.
+        for (final folder in folders)
+          if (folder.id != source.folderId)
+            PopupMenuItem(
+              value: '${folder.id}',
+              child: Text('Move to "${folder.title}"',
+                  overflow: TextOverflow.ellipsis),
+            ),
+        if (source.folderId != null)
+          const PopupMenuItem(value: 'top', child: Text('Move to top level')),
+      ],
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'rename') return _renameSource(sourceId);
+    final folderId = choice == 'top' ? null : int.parse(choice);
+    await _db.setSourceFolder(sourceId, folderId);
+    await _load();
+  }
+
+  /// Double-tap on a source chip (or Rename in its menu): edit its name in
+  /// place. Feeds keep a custom name: refreshing only fills a missing title.
+  Future<void> _renameSource(int sourceId) async {
+    final source = _sources.where((s) => s.id == sourceId).firstOrNull;
+    if (source == null) return;
+    final controller = TextEditingController(text: source.title);
+    final title = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+        title: const Text('Rename source'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Source name'),
+          onSubmitted: (value) => Navigator.pop(context, value.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    // Not disposed here: the dialog's closing animation still uses it.
+    if (title == null || title.isEmpty || title == source.title || !mounted) {
+      return;
+    }
+    await _db.updateSourceTitle(sourceId, title);
+    await _load();
+  }
+
   /// The Add source screen covers every kind (RSS, Twitter, Nostr).
   Future<void> _openAddSource() async {
     await Navigator.of(context).push(
@@ -943,6 +1018,8 @@ class _HomeScreenState extends State<HomeScreen>
             _feedSourceId = null;
             _feedAuthor = null;
           }),
+          onSourceLongPress: _showSourceChipMenu,
+          onSourceDoubleTap: _renameSource,
         ),
         // The selected source's last refresh failed: say why above its feed,
         // and — when the error is an auth problem that reconnecting actually
@@ -1121,6 +1198,13 @@ class _SourceFilterBar extends StatelessWidget {
   final ValueChanged<int?> onSelected;
   final ValueChanged<_FolderFilter> onFolderTap;
 
+  /// Long-press on a source chip (top row or a folder's row), with the
+  /// chip's global rect to anchor the options menu.
+  final void Function(int sourceId, Rect chip)? onSourceLongPress;
+
+  /// Double-tap on a source chip: rename it.
+  final ValueChanged<int>? onSourceDoubleTap;
+
   /// Author strip for a selected Twitter source (null = no second row).
   final List<_AuthorFilter>? authors;
   final String? selectedAuthor;
@@ -1137,6 +1221,8 @@ class _SourceFilterBar extends StatelessWidget {
     required this.errorSourceIds,
     required this.onSelected,
     required this.onFolderTap,
+    this.onSourceLongPress,
+    this.onSourceDoubleTap,
     this.authors,
     this.selectedAuthor,
     required this.onAuthorSelected,
@@ -1217,6 +1303,12 @@ class _SourceFilterBar extends StatelessWidget {
                 syncing: syncingSourceIds.contains(source.id),
                 error: errorSourceIds.contains(source.id),
                 onTap: () => onSelected(source.id),
+                onLongPress: onSourceLongPress == null
+                    ? null
+                    : (rect) => onSourceLongPress!(source.id, rect),
+                onDoubleTap: onSourceDoubleTap == null
+                    ? null
+                    : () => onSourceDoubleTap!(source.id),
               ),
           ]),
           if (activeFolder != null) ...[
@@ -1230,6 +1322,12 @@ class _SourceFilterBar extends StatelessWidget {
                   syncing: syncingSourceIds.contains(member.id),
                   error: errorSourceIds.contains(member.id),
                   onTap: () => onSelected(member.id),
+                  onLongPress: onSourceLongPress == null
+                      ? null
+                      : (rect) => onSourceLongPress!(member.id, rect),
+                  onDoubleTap: onSourceDoubleTap == null
+                      ? null
+                      : () => onSourceDoubleTap!(member.id),
                 ),
             ]),
           ],
@@ -1299,7 +1397,7 @@ class _MarkSeenBar extends StatelessWidget {
 
 /// Flat, e-ink friendly pill: solid black when selected, outlined otherwise,
 /// with a trailing unread count when there is one.
-class _SourceChip extends StatelessWidget {
+class _SourceChip extends StatefulWidget {
   final String label;
   final int count;
   final bool selected;
@@ -1316,6 +1414,10 @@ class _SourceChip extends StatelessWidget {
   final bool error;
   final VoidCallback onTap;
 
+  /// Long-press, given the chip's global rect (to anchor a menu under it).
+  final ValueChanged<Rect>? onLongPress;
+  final VoidCallback? onDoubleTap;
+
   const _SourceChip({
     required this.label,
     required this.count,
@@ -1324,13 +1426,55 @@ class _SourceChip extends StatelessWidget {
     required this.onTap,
     this.error = false,
     this.icon,
+    this.onLongPress,
+    this.onDoubleTap,
   });
 
   @override
+  State<_SourceChip> createState() => _SourceChipState();
+}
+
+class _SourceChipState extends State<_SourceChip> {
+  /// Running while a second tap would count as a double-tap. A plain
+  /// onDoubleTap would hold every single tap back ~300 ms to rule one out;
+  /// here the first tap selects at once and a quick second one renames.
+  Timer? _doubleTapWindow;
+
+  @override
+  void dispose() {
+    _doubleTapWindow?.cancel();
+    super.dispose();
+  }
+
+  void _handleTap() {
+    final onDoubleTap = widget.onDoubleTap;
+    if (onDoubleTap != null && (_doubleTapWindow?.isActive ?? false)) {
+      _doubleTapWindow!.cancel();
+      onDoubleTap();
+      return;
+    }
+    if (onDoubleTap != null) {
+      _doubleTapWindow = Timer(kDoubleTapTimeout, () {});
+    }
+    widget.onTap();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final selected = widget.selected;
+    final icon = widget.icon;
+    final label = widget.label;
+    final count = widget.count;
     final foreground = selected ? Colors.white : Colors.black;
+    final onLongPress = widget.onLongPress;
     return InkWell(
-      onTap: onTap,
+      onTap: _handleTap,
+      onLongPress: onLongPress == null
+          ? null
+          : () {
+              final box = context.findRenderObject() as RenderBox;
+              onLongPress(box.localToGlobal(Offset.zero) & box.size);
+            },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
@@ -1341,7 +1485,7 @@ class _SourceChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (error) ...[
+            if (widget.error) ...[
               Icon(Icons.warning_amber_rounded, size: 16, color: foreground),
               const SizedBox(width: 6),
             ],
@@ -1357,7 +1501,7 @@ class _SourceChip extends StatelessWidget {
                 color: foreground,
               ),
             ),
-            if (syncing) ...[
+            if (widget.syncing) ...[
               const SizedBox(width: 8),
               SizedBox(
                 width: 13,
