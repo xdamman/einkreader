@@ -1,5 +1,6 @@
-// Source chips in the feed act on the source in place: long-press opens a
-// menu (rename, move to another folder), double-tap renames. Run:
+// Source chips in the feed act on the source in place: long-press picks a
+// chip up to drop it on a folder (which lights up under it), double-tap
+// renames. Run:
 //
 //   flutter test test/screenshots/source_chip_shot_test.dart \
 //     --update-goldens --dart-define=screenshots=true
@@ -11,6 +12,7 @@ import 'package:einkreader/screens/home_screen.dart';
 import 'package:einkreader/services/archive_store.dart';
 import 'package:einkreader/services/sync_service.dart';
 import 'package:einkreader/theme.dart';
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,7 +42,7 @@ void main() {
     final now = DateTime.now().millisecondsSinceEpoch;
     const hour = 3600 * 1000;
     final news = await db.insertFolder('News');
-    await db.insertFolder('Tech');
+    final tech = await db.insertFolder('Tech');
     var n = 0;
     Future<void> add(String title, List<String> stories,
         {int? folderId}) async {
@@ -70,6 +72,8 @@ void main() {
       'The Apple Vision Pro, One Year Later',
       'Netflix and the Ads Tier Inflection',
     ]);
+    await add('Hacker News', ['Show HN: a reader for e-ink tablets'],
+        folderId: tech.id);
     await add('Daring Fireball', ['On the new iPad keyboard']);
     await add('Ars Technica', ['A closer look at e-ink refresh rates']);
     await add('Le Monde', ['La rentrée littéraire en dix livres'],
@@ -93,15 +97,21 @@ void main() {
       theme: buildEinkTheme(),
       home: const HomeScreen());
 
-  testWidgets('long-press a source chip', (tester) async {
+  testWidgets('drag a source chip onto a folder', (tester) async {
     eink(tester);
     await tester.pumpWidget(app());
     await settle(tester);
-    await tester.longPress(find.text('Ars Technica').first);
-    await settle(tester);
+    final from = tester.getCenter(find.text('Ars Technica').first);
+    final gesture = await tester.startGesture(from);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+    final to = tester.getCenter(find.text('Tech').first);
+    for (var i = 1; i <= 6; i++) {
+      await gesture.moveTo(Offset.lerp(from, to, i / 6)!);
+      await tester.pump();
+    }
     await expectLater(find.byType(MaterialApp),
-        matchesGoldenFile('goldens/source_chip_1_menu.png'));
-    await tester.tap(find.text('Move to "Tech"'));
+        matchesGoldenFile('goldens/source_chip_1_drag.png'));
+    await gesture.up();
     await settle(tester);
     await tester.tap(find.text('Tech'));
     await settle(tester);

@@ -50,8 +50,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _db = AppDatabase.instance;
   _HomeTab _tab = _HomeTab.feed;
 
@@ -84,6 +83,11 @@ class _HomeScreenState extends State<HomeScreen>
   int? _highlightsSourceId;
   List<Source> _sources = [];
   List<Folder> _folders = [];
+
+  /// Where the finger is while a source chip is being dragged (null when
+  /// none is): the top chip row scrolls when it nears an edge, so folders
+  /// scrolled out of view can still be reached.
+  final _chipDragPointer = ValueNotifier<Offset?>(null);
 
   /// The built-in Inbox (content emailed to name@einkreader.app): always
   /// in the chip strip, even empty, so its address is easy to find. Null
@@ -166,6 +170,7 @@ class _HomeScreenState extends State<HomeScreen>
     _progressSub?.cancel();
     _logSub?.cancel();
     _shareSub?.cancel();
+    _chipDragPointer.dispose();
     super.dispose();
   }
 
@@ -200,11 +205,13 @@ class _HomeScreenState extends State<HomeScreen>
     // A shared selection becomes a highlight: painted inline once the
     // article's content is downloaded, and listed under Highlights.
     if (link.quote != null) {
-      await _db.insertHighlightIfNew(Highlight(
-        articleId: saved.id!,
-        text: link.quote!,
-        createdAt: DateTime.now().millisecondsSinceEpoch,
-      ));
+      await _db.insertHighlightIfNew(
+        Highlight(
+          articleId: saved.id!,
+          text: link.quote!,
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
       try {
         await ArchiveStore.instance.writeHighlights(await _db.getHighlights());
       } catch (_) {
@@ -226,10 +233,11 @@ class _HomeScreenState extends State<HomeScreen>
     await _load();
     if (!mounted) return;
     showNotice(
-        context,
-        online
-            ? 'Saved to To Read — downloading'
-            : 'Saved to To Read — will download when back online');
+      context,
+      online
+          ? 'Saved to To Read — downloading'
+          : 'Saved to To Read — will download when back online',
+    );
   }
 
   bool _loading = false;
@@ -250,14 +258,15 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _loading = true;
     try {
-      final inbox = await PluginService.instance.emailActive
-          ? await _db.ensureEmailSource()
-          : null;
-      final hasInboxAddress = inbox != null &&
+      final inbox =
+          await PluginService.instance.emailActive
+              ? await _db.ensureEmailSource()
+              : null;
+      final hasInboxAddress =
+          inbox != null &&
           await ProfileService.instance.enabled &&
           await ProfileService.instance.nip05Address != null;
-      final articles =
-          await _db.getArticles(withContent: false, limit: null);
+      final articles = await _db.getArticles(withContent: false, limit: null);
       final highlights = await _db.getHighlights();
       final shares = await _db.getShares();
       final sources = await _db.getSources();
@@ -276,10 +285,12 @@ class _HomeScreenState extends State<HomeScreen>
         _sources = sources;
         _folders = folders;
         _inboxSourceId = inbox?.id;
-        _hasSomethingToSync = hasInboxAddress ||
-            sources.any((s) =>
-                s.type != SourceType.email &&
-                s.type != SourceType.savedLinks);
+        _hasSomethingToSync =
+            hasInboxAddress ||
+            sources.any(
+              (s) =>
+                  s.type != SourceType.email && s.type != SourceType.savedLinks,
+            );
         _sourceTitles = {for (final s in sources) s.id!: s.title};
         _developerMode = developerMode;
         _everLoaded = true;
@@ -333,8 +344,9 @@ class _HomeScreenState extends State<HomeScreen>
             tooltip: 'Search',
             icon: const Icon(Icons.search),
             onPressed: () async {
-              await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SearchScreen()));
+              await Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SearchScreen()));
               _load();
             },
           ),
@@ -342,67 +354,77 @@ class _HomeScreenState extends State<HomeScreen>
           // posted offline): a clear signal that work is waiting, with retry.
           ValueListenableBuilder<int>(
             valueListenable: OutboxService.instance.pending,
-            builder: (context, pending, _) => pending == 0
-                ? const SizedBox.shrink()
-                : IconButton(
-                    tooltip: 'Outbox ($pending waiting)',
-                    icon: Badge(
-                      label: Text('$pending'),
-                      backgroundColor: Colors.black,
-                      child: const Icon(Icons.outbox_outlined),
-                    ),
-                    onPressed: _showOutbox,
-                  ),
+            builder:
+                (context, pending, _) =>
+                    pending == 0
+                        ? const SizedBox.shrink()
+                        : IconButton(
+                          tooltip: 'Outbox ($pending waiting)',
+                          icon: Badge(
+                            label: Text('$pending'),
+                            backgroundColor: Colors.black,
+                            child: const Icon(Icons.outbox_outlined),
+                          ),
+                          onPressed: _showOutbox,
+                        ),
           ),
           // Public feedback on Nostr: read, post, reply, react. The badge
           // counts new replies and reactions to the reader's own feedback.
           ValueListenableBuilder<int>(
             valueListenable: FeedbackService.unseenCount,
-            builder: (context, unseen, _) => IconButton(
-              tooltip: unseen == 0
-                  ? 'Feedback'
-                  : 'Feedback ($unseen new)',
-              icon: Badge(
-                isLabelVisible: unseen > 0,
-                label: Text('$unseen'),
-                backgroundColor: Colors.black,
-                child: const Icon(Icons.forum_outlined),
-              ),
-              onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const FeedbackScreen())),
-            ),
+            builder:
+                (context, unseen, _) => IconButton(
+                  tooltip: unseen == 0 ? 'Feedback' : 'Feedback ($unseen new)',
+                  icon: Badge(
+                    isLabelVisible: unseen > 0,
+                    label: Text('$unseen'),
+                    backgroundColor: Colors.black,
+                    child: const Icon(Icons.forum_outlined),
+                  ),
+                  onPressed:
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const FeedbackScreen(),
+                        ),
+                      ),
+                ),
           ),
           // Hidden when there is nothing to sync (no source yet).
           if (_hasSomethingToSync || syncing)
             IconButton(
               tooltip: 'Update all sources',
-              icon: syncing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.sync),
+              icon:
+                  syncing
+                      ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : const Icon(Icons.sync),
               onPressed: syncing ? null : _sync,
             ),
           // Tap opens the active profile; long-press switches between
           // profiles or adds one (the last used profile is remembered).
           Builder(
-            builder: (iconContext) => GestureDetector(
-              onLongPress: () async {
-                await showProfileSwitcherMenu(iconContext);
-                _load();
-              },
-              child: IconButton(
-                tooltip: 'Profile',
-                icon: const Icon(Icons.account_circle_outlined),
-                onPressed: () async {
-                  await Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => const ProfileScreen()));
-                  _load();
-                },
-              ),
-            ),
+            builder:
+                (iconContext) => GestureDetector(
+                  onLongPress: () async {
+                    await showProfileSwitcherMenu(iconContext);
+                    _load();
+                  },
+                  child: IconButton(
+                    tooltip: 'Profile',
+                    icon: const Icon(Icons.account_circle_outlined),
+                    onPressed: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ProfileScreen(),
+                        ),
+                      );
+                      _load();
+                    },
+                  ),
+                ),
           ),
           IconButton(
             tooltip: 'Settings',
@@ -440,9 +462,8 @@ class _HomeScreenState extends State<HomeScreen>
         // Once read, a saved article is done: it moves to the Read tab (and
         // comes back here if marked unread).
         return ArticleFeed(
-          articles: _articles
-              .where((a) => a.readLater == 1 && a.read == 0)
-              .toList(),
+          articles:
+              _articles.where((a) => a.readLater == 1 && a.read == 0).toList(),
           sourceTitles: _sourceTitles,
           emptyMessage:
               'Nothing saved to read later.\n\nTap the bookmark '
@@ -453,20 +474,24 @@ class _HomeScreenState extends State<HomeScreen>
         // Most recently read first. Articles read before reading times
         // were recorded fall back to their publication date.
         int readTime(Article a) => a.readAt ?? a.publishedAt ?? a.createdAt;
-        final readAll = _articles
-            .where((a) =>
-                a.read == 1 && (!_readFavoritesOnly || a.favorite == 1))
-            .toList()
-          ..sort((a, b) => readTime(b).compareTo(readTime(a)));
+        final readAll =
+            _articles
+                .where(
+                  (a) =>
+                      a.read == 1 && (!_readFavoritesOnly || a.favorite == 1),
+                )
+                .toList()
+              ..sort((a, b) => readTime(b).compareTo(readTime(a)));
         final readCounts = <int, int>{};
         for (final a in readAll) {
           readCounts[a.sourceId] = (readCounts[a.sourceId] ?? 0) + 1;
         }
         final readSourceId =
             readCounts.containsKey(_readSourceId) ? _readSourceId : null;
-        final read = readSourceId == null
-            ? readAll
-            : readAll.where((a) => a.sourceId == readSourceId).toList();
+        final read =
+            readSourceId == null
+                ? readAll
+                : readAll.where((a) => a.sourceId == readSourceId).toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -474,15 +499,13 @@ class _HomeScreenState extends State<HomeScreen>
               decoration: const BoxDecoration(
                 border: Border(bottom: BorderSide(width: 1)),
               ),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
                   _ReadFilterChip(
                     label: 'All',
                     selected: !_readFavoritesOnly,
-                    onTap: () =>
-                        setState(() => _readFavoritesOnly = false),
+                    onTap: () => setState(() => _readFavoritesOnly = false),
                   ),
                   const SizedBox(width: 8),
                   _ReadFilterChip(
@@ -505,15 +528,17 @@ class _HomeScreenState extends State<HomeScreen>
                 // Everything here is read: no need to say so on each row.
                 showReadMark: false,
                 sourceTitles: _sourceTitles,
-                emptyMessage: _readFavoritesOnly
-                    ? 'No favorites yet.\n\nUse the favorite button at '
-                        'the end of an article.'
-                    : 'Nothing finished yet.\n\nArticles land here when '
-                        'you reach the bottom — or swipe one right in the '
-                        'feed to mark it read.',
-                rowAction: _readFavoritesOnly
-                    ? FeedRowAction.unfavorite
-                    : FeedRowAction.readLater,
+                emptyMessage:
+                    _readFavoritesOnly
+                        ? 'No favorites yet.\n\nUse the favorite button at '
+                            'the end of an article.'
+                        : 'Nothing finished yet.\n\nArticles land here when '
+                            'you reach the bottom — or swipe one right in the '
+                            'feed to mark it read.',
+                rowAction:
+                    _readFavoritesOnly
+                        ? FeedRowAction.unfavorite
+                        : FeedRowAction.readLater,
                 onChanged: _load,
               ),
             ),
@@ -533,12 +558,14 @@ class _HomeScreenState extends State<HomeScreen>
             highlightCounts.containsKey(_highlightsSourceId)
                 ? _highlightsSourceId
                 : null;
-        final highlights = highlightsSourceId == null
-            ? _highlights
-            : _highlights
-                .where(
-                    (h) => articleSource[h.articleId] == highlightsSourceId)
-                .toList();
+        final highlights =
+            highlightsSourceId == null
+                ? _highlights
+                : _highlights
+                    .where(
+                      (h) => articleSource[h.articleId] == highlightsSourceId,
+                    )
+                    .toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -548,8 +575,8 @@ class _HomeScreenState extends State<HomeScreen>
               onSelected: (id) => setState(() => _highlightsSourceId = id),
             ),
             Expanded(
-                child:
-                    HighlightList(highlights: highlights, onChanged: _load)),
+              child: HighlightList(highlights: highlights, onChanged: _load),
+            ),
           ],
         );
       case _HomeTab.shared:
@@ -565,84 +592,98 @@ class _HomeScreenState extends State<HomeScreen>
     if (!mounted) return;
     // A tweet refused for auth reasons says "reconnect Twitter": offer the
     // button right here rather than sending the reader to find it.
-    final offerReconnect = items.any((item) =>
-        item.kind != 'nostr' &&
-        item.kind != 'email' &&
-        needsTwitterReconnect(item.lastError));
+    final offerReconnect = items.any(
+      (item) =>
+          item.kind != 'nostr' &&
+          item.kind != 'email' &&
+          needsTwitterReconnect(item.lastError),
+    );
     final choice = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-        title: Text('Outbox — ${items.length} waiting'),
-        content: SizedBox(
-          width: 480,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final item in items)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(item.kind == 'nostr'
-                      ? Icons.cell_tower
-                      : Icons.alternate_email),
-                  title: Text(item.text,
-                      maxLines: 2, overflow: TextOverflow.ellipsis),
-                  subtitle: item.lastError == null
-                      ? null
-                      : Text(
-                          // Held items were refused for good: retrying
-                          // can't help, discarding is the only way out.
-                          '${item.held ? 'Not retried' : '${item.attempts} attempt'
-                              '${item.attempts == 1 ? '' : 's'}'} · '
-                          '${item.lastError!.replaceFirst(RegExp(r'^Exception:\s*'), '')}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                  trailing: IconButton(
-                    tooltip: 'Discard',
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () async {
-                      await OutboxService.instance.delete(item.id!);
-                      if (dialogContext.mounted) {
-                        Navigator.pop(dialogContext);
-                      }
-                    },
-                  ),
+      builder:
+          (dialogContext) => AlertDialog(
+            shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+            title: Text('Outbox — ${items.length} waiting'),
+            content: SizedBox(
+              width: 480,
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final item in items)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        item.kind == 'nostr'
+                            ? Icons.cell_tower
+                            : Icons.alternate_email,
+                      ),
+                      title: Text(
+                        item.text,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle:
+                          item.lastError == null
+                              ? null
+                              : Text(
+                                // Held items were refused for good: retrying
+                                // can't help, discarding is the only way out.
+                                '${item.held ? 'Not retried' : '${item.attempts} attempt'
+                                        '${item.attempts == 1 ? '' : 's'}'} · '
+                                '${item.lastError!.replaceFirst(RegExp(r'^Exception:\s*'), '')}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                      trailing: IconButton(
+                        tooltip: 'Discard',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () async {
+                          await OutboxService.instance.delete(item.id!);
+                          if (dialogContext.mounted) {
+                            Navigator.pop(dialogContext);
+                          }
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+              if (offerReconnect)
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, 'reconnect'),
+                  child: const Text('Reconnect Twitter'),
                 ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, 'retry'),
+                child: const Text('Retry now'),
+              ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Close')),
-          if (offerReconnect)
-            TextButton(
-                onPressed: () => Navigator.pop(dialogContext, 'reconnect'),
-                child: const Text('Reconnect Twitter')),
-          TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'retry'),
-              child: const Text('Retry now')),
-        ],
-      ),
     );
     if (!mounted) return;
     if (choice == 'reconnect') {
       // Reconnecting sends the outbox itself once connected.
       await reconnectTwitter(
-          messenger: ScaffoldMessenger.of(context),
-          navigator: Navigator.of(context));
+        messenger: ScaffoldMessenger.of(context),
+        navigator: Navigator.of(context),
+      );
       return;
     }
     if (choice != 'retry') return;
     final (sent, remaining) = await OutboxService.instance.flush();
     if (!mounted) return;
     showNotice(
-        context,
-        remaining == 0
-            ? 'Outbox sent ($sent item${sent == 1 ? '' : 's'})'
-            : 'Sent $sent — $remaining still waiting');
+      context,
+      remaining == 0
+          ? 'Outbox sent ($sent item${sent == 1 ? '' : 's'})'
+          : 'Sent $sent — $remaining still waiting',
+    );
   }
 
   /// Per-source breakdown chips for the Read and Highlights tabs (mirrors
@@ -657,7 +698,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (counts.length < 2) return const [];
     final entries = [
       for (final e in counts.entries)
-        (id: e.key, title: _sourceTitles[e.key] ?? 'Unknown', count: e.value)
+        (id: e.key, title: _sourceTitles[e.key] ?? 'Unknown', count: e.value),
     ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
     final total = counts.values.fold(0, (sum, value) => sum + value);
     return [
@@ -693,16 +734,22 @@ class _HomeScreenState extends State<HomeScreen>
     ];
   }
 
-  /// Long-press on a source chip: an options menu anchored under the chip
-  /// (Rename, then every folder it can move to), so filing or renaming a
-  /// source doesn't need a trip to Settings.
+  /// A source chip dropped on a folder chip (or on "All", [folderId] null:
+  /// back to the top level).
+  Future<void> _moveSource(int sourceId, int? folderId) async {
+    await _db.setSourceFolder(sourceId, folderId);
+    await _load();
+  }
+
+  /// A source chip held and let go without dragging it anywhere: an
+  /// options menu anchored under the chip (Rename, then every folder it can
+  /// move to), so filing or renaming a source doesn't need Settings.
   Future<void> _showSourceChipMenu(int sourceId, Rect chip) async {
     final source = _sources.where((s) => s.id == sourceId).firstOrNull;
     if (source == null) return;
-    final folders = [..._folders]..sort(
-        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final folders = [..._folders]
+      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final choice = await showMenu<String>(
       context: context,
       shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
@@ -718,8 +765,10 @@ class _HomeScreenState extends State<HomeScreen>
           if (folder.id != source.folderId)
             PopupMenuItem(
               value: '${folder.id}',
-              child: Text('Move to "${folder.title}"',
-                  overflow: TextOverflow.ellipsis),
+              child: Text(
+                'Move to "${folder.title}"',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
         if (source.folderId != null)
           const PopupMenuItem(value: 'top', child: Text('Move to top level')),
@@ -727,9 +776,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
     if (choice == null || !mounted) return;
     if (choice == 'rename') return _renameSource(sourceId);
-    final folderId = choice == 'top' ? null : int.parse(choice);
-    await _db.setSourceFolder(sourceId, folderId);
-    await _load();
+    await _moveSource(sourceId, choice == 'top' ? null : int.parse(choice));
   }
 
   /// Double-tap on a source chip (or Rename in its menu): edit its name in
@@ -740,24 +787,27 @@ class _HomeScreenState extends State<HomeScreen>
     final controller = TextEditingController(text: source.title);
     final title = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
-        title: const Text('Rename source'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Source name'),
-          onSubmitted: (value) => Navigator.pop(context, value.trim()),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('Save')),
-        ],
-      ),
+      builder:
+          (context) => AlertDialog(
+            shape: const RoundedRectangleBorder(side: BorderSide(width: 1.5)),
+            title: const Text('Rename source'),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(hintText: 'Source name'),
+              onSubmitted: (value) => Navigator.pop(context, value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, controller.text.trim()),
+                child: const Text('Save'),
+              ),
+            ],
+          ),
     );
     // Not disposed here: the dialog's closing animation still uses it.
     if (title == null || title.isEmpty || title == source.title || !mounted) {
@@ -769,16 +819,18 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// The Add source screen covers every kind (RSS, Twitter, Nostr).
   Future<void> _openAddSource() async {
-    await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AddSourceScreen()));
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const AddSourceScreen()));
     _load();
   }
 
   /// The suggested-reads picker, for readers who'd like to see the app
   /// with something in it before adding their own sources.
   Future<void> _addSuggestedSources() async {
-    await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => const SuggestedSourcesScreen()));
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SuggestedSourcesScreen()));
     await _load();
     // The feeds land over the next seconds; refresh as they do.
     Future.delayed(const Duration(seconds: 8), () {
@@ -797,8 +849,9 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() => _reconnectingTwitter = true);
     try {
       final connected = await reconnectTwitter(
-          messenger: ScaffoldMessenger.of(context),
-          navigator: Navigator.of(context));
+        messenger: ScaffoldMessenger.of(context),
+        navigator: Navigator.of(context),
+      );
       if (!connected) return;
       SyncService.instance.sourceErrors.remove(source.id);
       if (mounted) setState(() {});
@@ -850,49 +903,53 @@ class _HomeScreenState extends State<HomeScreen>
     if (_sourceTitles.keys.every((id) => id == inboxId) &&
         !total.containsKey(inboxId)) {
       return _EmptySourcesView(
-          onAdd: _openAddSource, onSuggested: _addSuggestedSources);
+        onAdd: _openAddSource,
+        onSuggested: _addSuggestedSources,
+      );
     }
     int compareFilters(_SourceFilter a, _SourceFilter b) =>
         a.title.toLowerCase().compareTo(b.title.toLowerCase());
 
     _SourceFilter filterFor(int id) => _SourceFilter(
-          id: id,
-          title: _sourceTitles[id] ?? 'Unknown',
-          unread: unread[id] ?? 0,
-          total: total[id] ?? 0,
-        );
+      id: id,
+      title: _sourceTitles[id] ?? 'Unknown',
+      unread: unread[id] ?? 0,
+      total: total[id] ?? 0,
+    );
 
     final folderOf = {for (final s in _sources) s.id!: s.folderId};
-    final topSources = {
-      ...total.keys,
-      if (inboxId != null) inboxId,
-    }.where((id) => folderOf[id] == null).map(filterFor).toList()
-      ..sort(compareFilters);
+    final topSources =
+        {
+            ...total.keys,
+            if (inboxId != null) inboxId,
+          }.where((id) => folderOf[id] == null).map(filterFor).toList()
+          ..sort(compareFilters);
     // The Inbox leads, right after All (before folders); the rest stay
     // alphabetical.
-    final inboxFilter =
-        topSources.where((f) => f.id == inboxId).firstOrNull;
+    final inboxFilter = topSources.where((f) => f.id == inboxId).firstOrNull;
     if (inboxFilter != null) topSources.remove(inboxFilter);
 
     // A folder appears once any of its sources has articles; its counts
     // aggregate over its members.
     final folders = <_FolderFilter>[];
     for (final folder in _folders) {
-      final memberIds = total.keys
-          .where((id) => folderOf[id] == folder.id)
-          .toList();
+      final memberIds =
+          total.keys.where((id) => folderOf[id] == folder.id).toList();
       if (memberIds.isEmpty) continue;
       final members = memberIds.map(filterFor).toList()..sort(compareFilters);
-      folders.add(_FolderFilter(
-        id: folder.id!,
-        title: folder.title,
-        unread: members.fold(0, (sum, m) => sum + m.unread),
-        total: members.fold(0, (sum, m) => sum + m.total),
-        members: members,
-      ));
+      folders.add(
+        _FolderFilter(
+          id: folder.id!,
+          title: folder.title,
+          unread: members.fold(0, (sum, m) => sum + m.unread),
+          total: members.fold(0, (sum, m) => sum + m.total),
+          members: members,
+        ),
+      );
     }
     folders.sort(
-        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+    );
 
     // Fall back to "All" if the selection no longer has any articles.
     final selectedId =
@@ -901,20 +958,22 @@ class _HomeScreenState extends State<HomeScreen>
             : null;
     final selectedFolderId =
         folders.any((f) => f.id == _feedFolderId) ? _feedFolderId : null;
-    var articles = selectedFolderId != null
-        ? _articles
-            .where((a) => folderOf[a.sourceId] == selectedFolderId)
-            .toList()
-        : selectedId == null
+    var articles =
+        selectedFolderId != null
+            ? _articles
+                .where((a) => folderOf[a.sourceId] == selectedFolderId)
+                .toList()
+            : selectedId == null
             ? _articles
             : _articles.where((a) => a.sourceId == selectedId).toList();
 
     // A Twitter source is a folder of accounts: selecting it reveals a
     // second chip row with every bookmarked author, alphabetical.
     List<_AuthorFilter>? authorRow;
-    final selectedSource = selectedId == null
-        ? null
-        : _sources.where((s) => s.id == selectedId).firstOrNull;
+    final selectedSource =
+        selectedId == null
+            ? null
+            : _sources.where((s) => s.id == selectedId).firstOrNull;
     // The Inbox likewise gets a row of senders.
     final isInbox = selectedSource?.type == SourceType.email;
     if (selectedSource != null &&
@@ -923,8 +982,7 @@ class _HomeScreenState extends State<HomeScreen>
       for (final article in articles) {
         final author = article.author;
         if (author == null || author.isEmpty) continue;
-        final counts =
-            byAuthor[author] ?? (unread: 0, total: 0);
+        final counts = byAuthor[author] ?? (unread: 0, total: 0);
         byAuthor[author] = (
           unread: counts.unread + (article.isNew ? 1 : 0),
           total: counts.total + 1,
@@ -937,10 +995,9 @@ class _HomeScreenState extends State<HomeScreen>
       var othersSet = <String>{};
       if (entries.length > 10) {
         othersSet = {
-          for (final e in entries.where((e) => e.value.total < 2)) e.key
+          for (final e in entries.where((e) => e.value.total < 2)) e.key,
         };
-        entries =
-            entries.where((e) => e.value.total >= 2).toList();
+        entries = entries.where((e) => e.value.total >= 2).toList();
       }
       // Twitter accounts are alphabetical; Inbox senders come by how much
       // they sent (most first), ties alphabetical.
@@ -953,37 +1010,42 @@ class _HomeScreenState extends State<HomeScreen>
       authorRow = [
         for (final entry in entries)
           _AuthorFilter(
-              name: entry.key,
-              label: entry.key,
-              unread: entry.value.unread)
+            name: entry.key,
+            label: entry.key,
+            unread: entry.value.unread,
+          ),
       ];
       if (othersSet.isNotEmpty) {
-        authorRow.add(_AuthorFilter(
-          name: _othersAuthor,
-          label: 'Others',
-          unread: othersSet.fold(
-              0, (sum, name) => sum + (byAuthor[name]?.unread ?? 0)),
-        ));
+        authorRow.add(
+          _AuthorFilter(
+            name: _othersAuthor,
+            label: 'Others',
+            unread: othersSet.fold(
+              0,
+              (sum, name) => sum + (byAuthor[name]?.unread ?? 0),
+            ),
+          ),
+        );
       }
       final requests = SyncService.instance.emailRequests;
       if (isInbox && requests.isNotEmpty) {
-        authorRow.add(_AuthorFilter(
-          name: _requestsAuthor,
-          label: 'Other senders',
-          unread: requests.length,
-        ));
+        authorRow.add(
+          _AuthorFilter(
+            name: _requestsAuthor,
+            label: 'Other senders',
+            unread: requests.length,
+          ),
+        );
       }
       final selectedAuthor = _feedAuthor;
       if (selectedAuthor == _requestsAuthor && isInbox && requests.isNotEmpty) {
         // Requests aren't articles yet: the header lists them.
         articles = const [];
       } else if (selectedAuthor == _othersAuthor && othersSet.isNotEmpty) {
-        articles =
-            articles.where((a) => othersSet.contains(a.author)).toList();
+        articles = articles.where((a) => othersSet.contains(a.author)).toList();
       } else if (selectedAuthor != null &&
           authorRow.any((a) => a.name == selectedAuthor)) {
-        articles =
-            articles.where((a) => a.author == selectedAuthor).toList();
+        articles = articles.where((a) => a.author == selectedAuthor).toList();
       }
     }
     final allUnread = unread.values.fold(0, (sum, value) => sum + value);
@@ -1006,20 +1068,23 @@ class _HomeScreenState extends State<HomeScreen>
           errorSourceIds: SyncService.instance.sourceErrors.keys.toSet(),
           authors: authorRow,
           selectedAuthor: _feedAuthor,
-          onAuthorSelected: (author) =>
-              setState(() => _feedAuthor = author),
-          onSelected: (id) => setState(() {
-            _feedSourceId = id;
-            _feedFolderId = null;
-            _feedAuthor = null;
-          }),
-          onFolderTap: (folder) => setState(() {
-            _feedFolderId = folder.id;
-            _feedSourceId = null;
-            _feedAuthor = null;
-          }),
-          onSourceLongPress: _showSourceChipMenu,
+          onAuthorSelected: (author) => setState(() => _feedAuthor = author),
+          onSelected:
+              (id) => setState(() {
+                _feedSourceId = id;
+                _feedFolderId = null;
+                _feedAuthor = null;
+              }),
+          onFolderTap:
+              (folder) => setState(() {
+                _feedFolderId = folder.id;
+                _feedSourceId = null;
+                _feedAuthor = null;
+              }),
+          onSourceHeld: _showSourceChipMenu,
           onSourceDoubleTap: _renameSource,
+          onSourceMoved: _moveSource,
+          dragPointer: _chipDragPointer,
         ),
         // The selected source's last refresh failed: say why above its feed,
         // and — when the error is an auth problem that reconnecting actually
@@ -1030,18 +1095,21 @@ class _HomeScreenState extends State<HomeScreen>
           _SourceErrorBanner(
             message: SyncService.instance.sourceErrors[selectedSource.id]!,
             busy: _reconnectingTwitter,
-            onReconnect: selectedSource.type == SourceType.twitterBookmarks &&
-                    needsTwitterReconnect(
-                        SyncService.instance.sourceErrors[selectedSource.id])
-                ? () => _reconnectTwitter(selectedSource)
-                : null,
+            onReconnect:
+                selectedSource.type == SourceType.twitterBookmarks &&
+                        needsTwitterReconnect(
+                          SyncService.instance.sourceErrors[selectedSource.id],
+                        )
+                    ? () => _reconnectTwitter(selectedSource)
+                    : null,
           ),
         if (isInbox)
           InboxHeader(
             // A new header when switching views, so it reloads.
             key: ValueKey('inbox-${_feedAuthor == _requestsAuthor}'),
             onChanged: _load,
-            showRequests: _feedAuthor == _requestsAuthor &&
+            showRequests:
+                _feedAuthor == _requestsAuthor &&
                 SyncService.instance.emailRequests.isNotEmpty,
           ),
         // Catching up without pretending to have read: marks what this view
@@ -1050,8 +1118,11 @@ class _HomeScreenState extends State<HomeScreen>
         if (articles.any((a) => a.isNew))
           _MarkSeenBar(
             count: articles.where((a) => a.isNew).length,
-            onPressed: () => _markSeen(
-                [for (final a in articles) if (a.isNew) a.id!]),
+            onPressed:
+                () => _markSeen([
+                  for (final a in articles)
+                    if (a.isNew) a.id!,
+                ]),
           ),
         if (currentReads.isNotEmpty)
           ResumeReadingSection(
@@ -1063,13 +1134,14 @@ class _HomeScreenState extends State<HomeScreen>
           child: ArticleFeed(
             articles: articles,
             sourceTitles: _sourceTitles,
-            emptyMessage: isInbox
-                ? (_feedAuthor == _requestsAuthor &&
-                        SyncService.instance.emailRequests.isNotEmpty
-                    ? ''
-                    : 'Nothing in your Inbox yet.')
-                : 'No articles yet.\n\nPull to sync, or manage sources '
-                    'in Settings.',
+            emptyMessage:
+                isInbox
+                    ? (_feedAuthor == _requestsAuthor &&
+                            SyncService.instance.emailRequests.isNotEmpty
+                        ? ''
+                        : 'Nothing in your Inbox yet.')
+                    : 'No articles yet.\n\nPull to sync, or manage sources '
+                        'in Settings.',
             onChanged: _load,
             onShown: (article) => _shownIds.add(article.id!),
           ),
@@ -1112,8 +1184,10 @@ class _EmptySourcesView extends StatelessWidget {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
               style: OutlinedButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 16,
+                ),
                 side: const BorderSide(width: 1.5),
               ),
               onPressed: onAdd,
@@ -1124,7 +1198,9 @@ class _EmptySourcesView extends StatelessWidget {
               child: const Text(
                 'Or start with suggested reads',
                 style: TextStyle(
-                    fontSize: 16, decoration: TextDecoration.underline),
+                  fontSize: 16,
+                  decoration: TextDecoration.underline,
+                ),
               ),
             ),
           ],
@@ -1174,8 +1250,11 @@ class _AuthorFilter {
   final String name;
   final String label;
   final int unread;
-  const _AuthorFilter(
-      {required this.name, required this.label, required this.unread});
+  const _AuthorFilter({
+    required this.name,
+    required this.label,
+    required this.unread,
+  });
 }
 
 /// Horizontally swipable strip of filter chips shown above the feed: "All"
@@ -1183,6 +1262,10 @@ class _AuthorFilter {
 /// Tapping a folder selects it and reveals a second row below with the
 /// folder's sources; a Twitter source likewise reveals a row of the
 /// bookmarked accounts.
+///
+/// Source chips can be picked up with a long press and dropped on a folder
+/// chip to move them there, or on "All" to take them out of their folder;
+/// a chip that would take the drop is drawn inverted with a thick border.
 class _SourceFilterBar extends StatelessWidget {
   /// The Inbox chip, placed first after "All" (before folders).
   final _SourceFilter? inbox;
@@ -1198,12 +1281,20 @@ class _SourceFilterBar extends StatelessWidget {
   final ValueChanged<int?> onSelected;
   final ValueChanged<_FolderFilter> onFolderTap;
 
-  /// Long-press on a source chip (top row or a folder's row), with the
-  /// chip's global rect to anchor the options menu.
-  final void Function(int sourceId, Rect chip)? onSourceLongPress;
+  /// A source chip held and let go where it was (no drag): given the
+  /// chip's global rect to anchor an options menu under it.
+  final void Function(int sourceId, Rect chip)? onSourceHeld;
 
   /// Double-tap on a source chip: rename it.
   final ValueChanged<int>? onSourceDoubleTap;
+
+  /// A source chip dropped on a folder chip, or on "All" (folder null).
+  /// Null turns dragging off.
+  final void Function(int sourceId, int? folderId)? onSourceMoved;
+
+  /// Fed with the finger's global position while a chip is dragged, so the
+  /// top row can scroll towards folders out of view.
+  final ValueNotifier<Offset?>? dragPointer;
 
   /// Author strip for a selected Twitter source (null = no second row).
   final List<_AuthorFilter>? authors;
@@ -1221,8 +1312,10 @@ class _SourceFilterBar extends StatelessWidget {
     required this.errorSourceIds,
     required this.onSelected,
     required this.onFolderTap,
-    this.onSourceLongPress,
+    this.onSourceHeld,
     this.onSourceDoubleTap,
+    this.onSourceMoved,
+    this.dragPointer,
     this.authors,
     this.selectedAuthor,
     required this.onAuthorSelected,
@@ -1240,19 +1333,48 @@ class _SourceFilterBar extends StatelessWidget {
     return null;
   }
 
-  Widget _chipRow(List<Widget> chips) => SizedBox(
-        height: 52,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          children: [
-            for (var i = 0; i < chips.length; i++) ...[
-              if (i > 0) const SizedBox(width: 8),
-              chips[i],
-            ],
-          ],
-        ),
-      );
+  bool _inAFolder(int sourceId) =>
+      folders.any((f) => f.members.any((m) => m.id == sourceId));
+
+  Widget _sourceChip(_SourceFilter source) {
+    final chip = _SourceChip(
+      label: source.title,
+      count: source.unread,
+      selected: selectedId == source.id,
+      syncing: syncingSourceIds.contains(source.id),
+      error: errorSourceIds.contains(source.id),
+      onTap: () => onSelected(source.id),
+      onDoubleTap:
+          onSourceDoubleTap == null
+              ? null
+              : () => onSourceDoubleTap!(source.id),
+    );
+    if (onSourceMoved == null) return chip;
+    return _DraggableSourceChip(
+      sourceId: source.id,
+      chip: chip,
+      onHeld:
+          onSourceHeld == null
+              ? null
+              : (rect) => onSourceHeld!(source.id, rect),
+      dragPointer: dragPointer,
+    );
+  }
+
+  /// [chip] built with `highlighted` true while a source it would take is
+  /// dragged over it; [accepts] says which sources it takes.
+  Widget _dropTarget({
+    required bool Function(int sourceId) accepts,
+    required ValueChanged<int> onDrop,
+    required Widget Function(bool highlighted) chip,
+  }) {
+    if (onSourceMoved == null) return chip(false);
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (details) => accepts(details.data),
+      onAcceptWithDetails: (details) => onDrop(details.data),
+      builder: (context, candidates, _) => chip(candidates.isNotEmpty),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1263,96 +1385,274 @@ class _SourceFilterBar extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _chipRow([
-            _SourceChip(
-              label: 'All',
-              count: allUnread,
-              selected: selectedId == null && selectedFolderId == null,
-              syncing: false,
-              onTap: () => onSelected(null),
-            ),
-            if (inbox != null)
-              _SourceChip(
-                label: inbox!.title,
-                count: inbox!.unread,
-                selected: selectedId == inbox!.id,
-                syncing: syncingSourceIds.contains(inbox!.id),
-                error: errorSourceIds.contains(inbox!.id),
-                onTap: () => onSelected(inbox!.id),
+          _ChipRow(
+            dragPointer: dragPointer,
+            chips: [
+              _dropTarget(
+                accepts: _inAFolder,
+                onDrop: (id) => onSourceMoved!(id, null),
+                chip:
+                    (highlighted) => _SourceChip(
+                      label: 'All',
+                      count: allUnread,
+                      selected: selectedId == null && selectedFolderId == null,
+                      highlighted: highlighted,
+                      syncing: false,
+                      onTap: () => onSelected(null),
+                    ),
               ),
-            for (final folder in folders)
-              _SourceChip(
-                label: folder.title,
-                icon: Icons.folder_outlined,
-                count: folder.unread,
-                // Selected for the folder itself or a source inside it,
-                // whose chip lives in the second row.
-                selected: selectedFolderId == folder.id ||
-                    folder.members.any((m) => m.id == selectedId),
-                syncing: folder.members
-                    .any((m) => syncingSourceIds.contains(m.id)),
-                error: folder.members
-                    .any((m) => errorSourceIds.contains(m.id)),
-                onTap: () => onFolderTap(folder),
-              ),
-            for (final source in sources)
-              _SourceChip(
-                label: source.title,
-                count: source.unread,
-                selected: selectedId == source.id,
-                syncing: syncingSourceIds.contains(source.id),
-                error: errorSourceIds.contains(source.id),
-                onTap: () => onSelected(source.id),
-                onLongPress: onSourceLongPress == null
-                    ? null
-                    : (rect) => onSourceLongPress!(source.id, rect),
-                onDoubleTap: onSourceDoubleTap == null
-                    ? null
-                    : () => onSourceDoubleTap!(source.id),
-              ),
-          ]),
+              if (inbox != null)
+                _SourceChip(
+                  label: inbox!.title,
+                  count: inbox!.unread,
+                  selected: selectedId == inbox!.id,
+                  syncing: syncingSourceIds.contains(inbox!.id),
+                  error: errorSourceIds.contains(inbox!.id),
+                  onTap: () => onSelected(inbox!.id),
+                ),
+              for (final folder in folders)
+                _dropTarget(
+                  accepts:
+                      (id) =>
+                          id != inbox?.id &&
+                          !folder.members.any((m) => m.id == id),
+                  onDrop: (id) => onSourceMoved!(id, folder.id),
+                  chip:
+                      (highlighted) => _SourceChip(
+                        label: folder.title,
+                        icon:
+                            highlighted
+                                ? Icons.folder_open
+                                : Icons.folder_outlined,
+                        count: folder.unread,
+                        // Selected for the folder itself or a source inside it,
+                        // whose chip lives in the second row.
+                        selected:
+                            selectedFolderId == folder.id ||
+                            folder.members.any((m) => m.id == selectedId),
+                        highlighted: highlighted,
+                        syncing: folder.members.any(
+                          (m) => syncingSourceIds.contains(m.id),
+                        ),
+                        error: folder.members.any(
+                          (m) => errorSourceIds.contains(m.id),
+                        ),
+                        onTap: () => onFolderTap(folder),
+                      ),
+                ),
+              for (final source in sources) _sourceChip(source),
+            ],
+          ),
           if (activeFolder != null) ...[
             const Divider(height: 1),
-            _chipRow([
-              for (final member in activeFolder.members)
-                _SourceChip(
-                  label: member.title,
-                  count: member.unread,
-                  selected: selectedId == member.id,
-                  syncing: syncingSourceIds.contains(member.id),
-                  error: errorSourceIds.contains(member.id),
-                  onTap: () => onSelected(member.id),
-                  onLongPress: onSourceLongPress == null
-                      ? null
-                      : (rect) => onSourceLongPress!(member.id, rect),
-                  onDoubleTap: onSourceDoubleTap == null
-                      ? null
-                      : () => onSourceDoubleTap!(member.id),
-                ),
-            ]),
+            _ChipRow(
+              chips: [
+                for (final member in activeFolder.members) _sourceChip(member),
+              ],
+            ),
           ],
           if (authors != null && authors!.isNotEmpty) ...[
             const Divider(height: 1),
-            _chipRow([
-              _SourceChip(
-                label: 'All',
-                count: authors!.fold(0, (sum, a) => sum + a.unread),
-                selected: selectedAuthor == null,
-                syncing: false,
-                onTap: () => onAuthorSelected(null),
-              ),
-              for (final author in authors!)
+            _ChipRow(
+              chips: [
                 _SourceChip(
-                  label: author.label,
-                  count: author.unread,
-                  selected: selectedAuthor == author.name,
+                  label: 'All',
+                  count: authors!.fold(0, (sum, a) => sum + a.unread),
+                  selected: selectedAuthor == null,
                   syncing: false,
-                  onTap: () => onAuthorSelected(author.name),
+                  onTap: () => onAuthorSelected(null),
                 ),
-            ]),
+                for (final author in authors!)
+                  _SourceChip(
+                    label: author.label,
+                    count: author.unread,
+                    selected: selectedAuthor == author.name,
+                    syncing: false,
+                    onTap: () => onAuthorSelected(author.name),
+                  ),
+              ],
+            ),
           ],
         ],
       ),
+    );
+  }
+}
+
+/// One horizontally scrolling row of chips. Given a [dragPointer], it
+/// steps sideways while a dragged chip is held near its left or right end,
+/// to bring folders scrolled out of view under the finger. It jumps rather
+/// than glides: smooth scrolling smears on e-ink.
+class _ChipRow extends StatefulWidget {
+  final List<Widget> chips;
+  final ValueNotifier<Offset?>? dragPointer;
+
+  const _ChipRow({required this.chips, this.dragPointer});
+
+  @override
+  State<_ChipRow> createState() => _ChipRowState();
+}
+
+class _ChipRowState extends State<_ChipRow> {
+  static const _edge = 48.0;
+  static const _step = 72.0;
+
+  final _scroll = ScrollController();
+  Timer? _autoScroll;
+  int _direction = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.dragPointer?.addListener(_onPointer);
+  }
+
+  @override
+  void didUpdateWidget(_ChipRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dragPointer != widget.dragPointer) {
+      oldWidget.dragPointer?.removeListener(_onPointer);
+      widget.dragPointer?.addListener(_onPointer);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.dragPointer?.removeListener(_onPointer);
+    _autoScroll?.cancel();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onPointer() {
+    final pointer = widget.dragPointer?.value;
+    final box = context.findRenderObject() as RenderBox?;
+    var direction = 0;
+    if (pointer != null && box != null && box.hasSize) {
+      final rect = box.localToGlobal(Offset.zero) & box.size;
+      // Only near this row, not anywhere down the screen's sides.
+      if ((pointer.dy - rect.center.dy).abs() < rect.height) {
+        if (pointer.dx < rect.left + _edge) direction = -1;
+        if (pointer.dx > rect.right - _edge) direction = 1;
+      }
+    }
+    if (direction == _direction) return;
+    _direction = direction;
+    _autoScroll?.cancel();
+    _autoScroll = null;
+    if (direction == 0) return;
+    void step() {
+      if (!_scroll.hasClients) return;
+      final position = _scroll.position;
+      _scroll.jumpTo(
+        (position.pixels + _direction * _step).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    }
+
+    step();
+    _autoScroll = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => step(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = widget.chips;
+    return SizedBox(
+      height: 52,
+      child: ListView(
+        controller: _scroll,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        children: [
+          for (var i = 0; i < chips.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            chips[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A source chip that lifts off the strip on a long press and follows the
+/// finger, leaving a faint outline in its place, until dropped on a folder
+/// chip (see [_SourceFilterBar]). Let go without moving it, and [onHeld]
+/// opens its options menu instead.
+class _DraggableSourceChip extends StatefulWidget {
+  final int sourceId;
+  final _SourceChip chip;
+  final ValueChanged<Rect>? onHeld;
+  final ValueNotifier<Offset?>? dragPointer;
+
+  const _DraggableSourceChip({
+    required this.sourceId,
+    required this.chip,
+    this.onHeld,
+    this.dragPointer,
+  });
+
+  @override
+  State<_DraggableSourceChip> createState() => _DraggableSourceChipState();
+}
+
+class _DraggableSourceChipState extends State<_DraggableSourceChip> {
+  /// How far the finger may travel and still count as "not dragged".
+  static const _stillSlop = 24.0;
+
+  /// The lifted chip floats this far below the finger, so the folder
+  /// under the finger, and its highlight, stay in sight.
+  static const _below = 28.0;
+
+  /// The chip's global rect and the finger's position when it was picked
+  /// up (kept in state: the strip may rebuild while the chip is held).
+  Rect? _origin;
+  Offset? _startPointer;
+  Offset _anchor = Offset.zero;
+
+  Offset _anchorBelowFinger(
+    Draggable<Object> draggable,
+    BuildContext context,
+    Offset position,
+  ) {
+    final box = context.findRenderObject() as RenderBox;
+    _origin = box.localToGlobal(Offset.zero) & box.size;
+    _startPointer = position;
+    // The point of the lifted chip that sits under the finger: its middle,
+    // a little above its top edge.
+    return _anchor = Offset(box.size.width / 2, -_below);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chip = widget.chip;
+    final dragPointer = widget.dragPointer;
+    return LongPressDraggable<int>(
+      data: widget.sourceId,
+      dragAnchorStrategy: _anchorBelowFinger,
+      onDragUpdate: (details) => dragPointer?.value = details.globalPosition,
+      onDragEnd: (_) => dragPointer?.value = null,
+      onDraggableCanceled: (_, offset) {
+        final origin = _origin;
+        final start = _startPointer;
+        final onHeld = widget.onHeld;
+        if (origin == null || start == null || onHeld == null || !mounted) {
+          return;
+        }
+        // offset is where the lifted chip ended up; the finger is at its
+        // anchor.
+        if ((offset + _anchor - start).distance < _stillSlop) onHeld(origin);
+      },
+      feedback: Material(
+        type: MaterialType.transparency,
+        child: chip.copyWith(lifted: true),
+      ),
+      childWhenDragging: Opacity(opacity: 0.25, child: chip),
+      child: chip,
     );
   }
 }
@@ -1414,9 +1714,14 @@ class _SourceChip extends StatefulWidget {
   final bool error;
   final VoidCallback onTap;
 
-  /// Long-press, given the chip's global rect (to anchor a menu under it).
-  final ValueChanged<Rect>? onLongPress;
   final VoidCallback? onDoubleTap;
+
+  /// A dragged source hovers over this chip and would drop here: drawn
+  /// inverted with a thick border, readable at a glance on e-ink.
+  final bool highlighted;
+
+  /// The copy following the finger while the chip is dragged.
+  final bool lifted;
 
   const _SourceChip({
     required this.label,
@@ -1426,9 +1731,23 @@ class _SourceChip extends StatefulWidget {
     required this.onTap,
     this.error = false,
     this.icon,
-    this.onLongPress,
     this.onDoubleTap,
+    this.highlighted = false,
+    this.lifted = false,
   });
+
+  _SourceChip copyWith({bool? lifted}) => _SourceChip(
+    label: label,
+    count: count,
+    selected: selected,
+    syncing: syncing,
+    onTap: onTap,
+    error: error,
+    icon: icon,
+    onDoubleTap: onDoubleTap,
+    highlighted: highlighted,
+    lifted: lifted ?? this.lifted,
+  );
 
   @override
   State<_SourceChip> createState() => _SourceChipState();
@@ -1465,66 +1784,101 @@ class _SourceChipState extends State<_SourceChip> {
     final icon = widget.icon;
     final label = widget.label;
     final count = widget.count;
-    final foreground = selected ? Colors.white : Colors.black;
-    final onLongPress = widget.onLongPress;
+    final highlighted = widget.highlighted;
+    final dark = selected || highlighted;
+    final foreground = dark ? Colors.white : Colors.black;
+    // A drop target under a dragged chip: a black pill inside a ring, so it
+    // can't be mistaken for a selected chip. Same outer size either way:
+    // nothing shifts under the finger as the hover comes and goes.
     return InkWell(
       onTap: _handleTap,
-      onLongPress: onLongPress == null
-          ? null
-          : () {
-              final box = context.findRenderObject() as RenderBox;
-              onLongPress(box.localToGlobal(Offset.zero) & box.size);
-            },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        height: 36,
+        padding:
+            highlighted
+                ? const EdgeInsets.all(2)
+                : EdgeInsets.symmetric(horizontal: widget.lifted ? 12.5 : 14),
         decoration: BoxDecoration(
-          color: selected ? Colors.black : Colors.white,
-          border: Border.all(width: 1.5),
+          color:
+              highlighted
+                  ? Colors.white
+                  : dark
+                  ? Colors.black
+                  : Colors.white,
+          border: Border.all(
+            width:
+                widget.lifted
+                    ? 3
+                    : highlighted
+                    ? 2
+                    : 1.5,
+          ),
           borderRadius: BorderRadius.circular(18),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (widget.error) ...[
-              Icon(Icons.warning_amber_rounded, size: 16, color: foreground),
-              const SizedBox(width: 6),
-            ],
-            if (icon != null) ...[
-              Icon(icon, size: 16, color: foreground),
-              const SizedBox(width: 6),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: foreground,
-              ),
-            ),
-            if (widget.syncing) ...[
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 13,
-                height: 13,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: foreground,
-                ),
-              ),
-            ] else if (count > 0) ...[
-              const SizedBox(width: 6),
-              Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: foreground,
-                ),
-              ),
-            ],
-          ],
-        ),
+        child: _inner(highlighted, foreground, icon, label, count),
       ),
+    );
+  }
+
+  Widget _inner(
+    bool highlighted,
+    Color foreground,
+    IconData? icon,
+    String label,
+    int count,
+  ) {
+    final row = _row(foreground, icon, label, count);
+    if (!highlighted) return row;
+    return Container(
+      // Ring (2) + gap (2) + this = the plain chip's border + padding.
+      padding: const EdgeInsets.symmetric(horizontal: 11.5),
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: row,
+    );
+  }
+
+  Widget _row(Color foreground, IconData? icon, String label, int count) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.error) ...[
+          Icon(Icons.warning_amber_rounded, size: 16, color: foreground),
+          const SizedBox(width: 6),
+        ],
+        if (icon != null) ...[
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 6),
+        ],
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: foreground,
+          ),
+        ),
+        if (widget.syncing) ...[
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 13,
+            height: 13,
+            child: CircularProgressIndicator(strokeWidth: 2, color: foreground),
+          ),
+        ] else if (count > 0) ...[
+          const SizedBox(width: 6),
+          Text(
+            '$count',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: foreground,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -1578,13 +1932,17 @@ class _SourceErrorBanner extends StatelessWidget {
               onPressed: busy ? null : onReconnect,
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(width: 1.5),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 10,
+                ),
               ),
               child: Text(
                 busy ? 'Reconnecting…' : 'Reconnect Twitter',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -1688,11 +2046,14 @@ class _DebugLogViewState extends State<_DebugLogView> {
     // Case-insensitive substring filter, e.g. "twitter" for the whole story
     // of a post attempt.
     final query = _query.trim().toLowerCase();
-    final visible = _entries
-        .where((e) =>
-            (!_problemsOnly || e.level == 'warn' || e.level == 'error') &&
-            (query.isEmpty || e.message.toLowerCase().contains(query)))
-        .toList();
+    final visible =
+        _entries
+            .where(
+              (e) =>
+                  (!_problemsOnly || e.level == 'warn' || e.level == 'error') &&
+                  (query.isEmpty || e.message.toLowerCase().contains(query)),
+            )
+            .toList();
     final filtered = query.isNotEmpty || _problemsOnly;
     return Column(
       children: [
@@ -1716,15 +2077,16 @@ class _DebugLogViewState extends State<_DebugLogView> {
                     hintText: 'Search logs… (e.g. twitter)',
                     isDense: true,
                     border: const OutlineInputBorder(),
-                    suffixIcon: _query.isEmpty
-                        ? const Icon(Icons.search)
-                        : IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _query = '');
-                            },
-                          ),
+                    suffixIcon:
+                        _query.isEmpty
+                            ? const Icon(Icons.search)
+                            : IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _query = '');
+                              },
+                            ),
                   ),
                   onChanged: (value) => setState(() => _query = value),
                 ),
@@ -1734,8 +2096,10 @@ class _DebugLogViewState extends State<_DebugLogView> {
                 !filtered
                     ? '${_entries.length}'
                     : '${visible.length}/${_entries.length}',
-                style:
-                    const TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
               const SizedBox(width: 8),
               OutlinedButton(
@@ -1788,8 +2152,11 @@ class _ReadFilterChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  const _ReadFilterChip(
-      {required this.label, required this.selected, required this.onTap});
+  const _ReadFilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1802,11 +2169,14 @@ class _ReadFilterChip extends StatelessWidget {
           border: Border.all(width: 1.5),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                color: selected ? Colors.white : Colors.black)),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : Colors.black,
+          ),
+        ),
       ),
     );
   }
