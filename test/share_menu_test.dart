@@ -466,7 +466,54 @@ void main() {
       expect(body, {'text': 'Great thread', 'quote_tweet_id': '1234567890'});
     });
 
-    test('a refused quote is resent with a screenshot of the stored post',
+    const quoteRefusal =
+        '{"detail":"You can only reply to or quote posts where you '
+        'are mentioned or are the author.","status":403}';
+    const stored = QuotedTweet(
+        id: '42',
+        authorName: 'Patrick Collison',
+        username: 'patrickc',
+        text: 'Brothers Karamazov was Einstein\'s favorite novel');
+
+    test('a refused quote is resent with a link to the post', () async {
+      final posts = <Map<String, dynamic>>[];
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async {
+          expect(request.url.path, '/2/tweets');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          posts.add(body);
+          if (body.containsKey('quote_tweet_id')) {
+            return http.Response(quoteRefusal, 403);
+          }
+          return http.Response('{"data": {"id": "1"}}', 201);
+        }),
+      );
+      await twitter.postTweet('So true', quoted: stored);
+      expect(posts, [
+        {'text': 'So true', 'quote_tweet_id': '42'},
+        {'text': 'So true\n\nhttps://x.com/patrickc/status/42'},
+      ]);
+    });
+
+    test('with only an id, the link points at the post by id', () async {
+      final posts = <Map<String, dynamic>>[];
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          posts.add(body);
+          if (body.containsKey('quote_tweet_id')) {
+            return http.Response(quoteRefusal, 403);
+          }
+          return http.Response('{"data": {"id": "1"}}', 201);
+        }),
+      );
+      await twitter.postTweet('Look', quoteTweetId: '42');
+      expect(posts.last, {'text': 'Look\n\nhttps://x.com/i/status/42'});
+    });
+
+    test('a refused link post falls back to a screenshot of the stored post',
         () async {
       final calls = <String>[];
       Map<String, dynamic>? tweet;
@@ -481,36 +528,37 @@ void main() {
           }
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body.containsKey('quote_tweet_id')) {
+            return http.Response(quoteRefusal, 403);
+          }
+          if (!body.containsKey('media')) {
             return http.Response(
-                '{"detail":"You can only reply to or quote posts where you '
-                'are mentioned or are the author.","status":403}',
-                403);
+                '{"detail":"This post links to a restricted post."}', 403);
           }
           tweet = body;
           return http.Response('{"data": {"id": "1"}}', 201);
         }),
       );
-      await twitter.postTweet('So true',
-          quoted: const QuotedTweet(
-              id: '42',
-              authorName: 'Patrick Collison',
-              username: 'patrickc',
-              text: 'Brothers Karamazov was Einstein\'s favorite novel'));
-      // Quote first; no lookup needed: the stored post is drawn.
-      expect(calls,
-          ['POST /2/tweets', 'POST /2/media/upload', 'POST /2/tweets']);
-      // The screenshot comes with a link to the original post.
+      await twitter.postTweet('So true', quoted: stored);
+      // Quote, then link, then screenshot; no lookup: the stored post is
+      // drawn.
+      expect(calls, [
+        'POST /2/tweets',
+        'POST /2/tweets',
+        'POST /2/media/upload',
+        'POST /2/tweets',
+      ]);
       expect(tweet, {
-        'text': 'So true\n\nhttps://x.com/patrickc/status/42',
+        'text': 'So true',
         'media': {
           'media_ids': ['777']
         },
       });
     });
 
-    test('a refused quote is retried as a screenshot of the looked-up post',
-        () async {
+    test("a link that doesn't fit goes straight to a screenshot of the "
+        'looked-up post', () async {
       final calls = <String>[];
+      final note = 'a' * 270;
       final twitter = TwitterService(
         accessToken: () async => 'token',
         client: MockClient((request) async {
@@ -537,25 +585,44 @@ void main() {
           }
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body.containsKey('quote_tweet_id')) {
-            return http.Response(
-                '{"detail":"You can only reply to or quote posts where you '
-                'are mentioned or are the author.","status":403}',
-                403);
+            return http.Response(quoteRefusal, 403);
           }
           expect(body['media'], {
             'media_ids': ['9']
           });
-          expect(body['text'], 'Look\n\nhttps://x.com/someone/status/42');
+          expect(body['text'], note);
           return http.Response('{"data": {"id": "1"}}', 201);
         }),
       );
-      await twitter.postTweet('Look', quoteTweetId: '42');
+      await twitter.postTweet(note, quoteTweetId: '42');
       expect(calls, [
         'POST /2/tweets',
         'GET /2/tweets/42',
         'POST /2/media/upload',
         'POST /2/tweets',
       ]);
+    });
+
+    test('a link post refused as a duplicate sends no screenshot', () async {
+      final calls = <String>[];
+      final twitter = TwitterService(
+        accessToken: () async => 'token',
+        client: MockClient((request) async {
+          calls.add('${request.method} ${request.url.path}');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body.containsKey('quote_tweet_id')) {
+            return http.Response(quoteRefusal, 403);
+          }
+          return http.Response(
+              '{"detail":"You are not allowed to create a Tweet with '
+              'duplicate content."}',
+              403);
+        }),
+      );
+      await expectLater(twitter.postTweet('So true', quoted: stored),
+          throwsA(isA<TwitterPostRefused>()
+              .having((e) => e.permanent, 'permanent', true)));
+      expect(calls, ['POST /2/tweets', 'POST /2/tweets']);
     });
 
     test('the link to the original post only goes in when it fits', () {

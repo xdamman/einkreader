@@ -533,11 +533,12 @@ class TwitterService {
   /// the debug screen's search surfaces the whole story of a post.
   ///
   /// The quote is always tried first. When X refuses it (the author limits
-  /// who may quote, or the API's own limits apply), the post goes out again
-  /// with a screenshot of the quoted post attached instead, drawn from
-  /// [quoted] or, without it, from the post looked up by id, and a link to
-  /// the original post after the text (when it fits the character budget),
-  /// so readers can still open it.
+  /// who may quote, or the API's own limits apply), the quoted post is
+  /// treated like any other source: the text goes out again with a link to
+  /// it (X previews it). Only when the link doesn't fit the character
+  /// budget, or X refuses that post too, does a screenshot of the quoted
+  /// post go out attached instead, drawn from [quoted] or, without it, from
+  /// the post looked up by id.
   Future<void> postTweet(String text,
       {String? quoteTweetId, QuotedTweet? quoted}) async {
     quoteTweetId ??= quoted?.id;
@@ -558,17 +559,33 @@ class TwitterService {
         'text': text,
         if (quoteTweetId != null) 'quote_tweet_id': quoteTweetId,
       });
+      return;
     } on _QuoteNotAllowed {
-      await AppLogService.instance.info(
-          'Twitter: X refused to quote $quoteTweetId; attaching a '
-          'screenshot of it instead');
-      final card = quoted ?? await _quotedFromApi(quoteTweetId!);
-      await _postWithScreenshot(
-          token,
-          withLinkTo(text, card.url,
-              maxLength: _cachedTweetMaxLength ?? 280),
-          card);
+      await AppLogService.instance
+          .info('Twitter: X refused to quote $quoteTweetId; linking to it');
     }
+    final url = quoted?.url ?? 'https://x.com/i/status/$quoteTweetId';
+    final linked =
+        withLinkTo(text, url, maxLength: _cachedTweetMaxLength ?? 280);
+    if (linked.contains(url)) {
+      try {
+        await _createTweet(token, {'text': linked});
+        return;
+      } on TwitterPostRefused catch (e) {
+        // A duplicate means this exact post already went out: sending the
+        // screenshot too would post it twice.
+        if (e.duplicate) rethrow;
+        await AppLogService.instance.info(
+            'Twitter: X refused the post with a link ($e); attaching a '
+            'screenshot instead');
+      }
+    } else {
+      await AppLogService.instance.info(
+          "Twitter: the link to $quoteTweetId doesn't fit; attaching a "
+          'screenshot instead');
+    }
+    final card = quoted ?? await _quotedFromApi(quoteTweetId!);
+    await _postWithScreenshot(token, text, card);
   }
 
   /// X counts every link as this many characters (t.co shortening).
@@ -637,7 +654,8 @@ class TwitterService {
       await AppLogService.instance
           .error('Twitter: post refused (403): ${response.body}');
       throw TwitterPostRefused(refusalMessage(response.body),
-          permanent: isPermanentRefusal(response.body));
+          permanent: isPermanentRefusal(response.body),
+          duplicate: response.body.toLowerCase().contains('duplicate'));
     }
     if (response.statusCode != 201) {
       await _throwApiError(response, 'posting a tweet');
@@ -841,7 +859,11 @@ class TwitterPostRefused implements Exception {
   final String message;
   final bool permanent;
 
-  const TwitterPostRefused(this.message, {this.permanent = false});
+  /// X refused it as a duplicate of a post already made.
+  final bool duplicate;
+
+  const TwitterPostRefused(this.message,
+      {this.permanent = false, this.duplicate = false});
 
   @override
   String toString() => message;

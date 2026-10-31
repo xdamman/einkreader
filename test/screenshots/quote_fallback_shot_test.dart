@@ -1,7 +1,7 @@
 // What goes out on X when sharing a note on a post X won't let us quote:
-// the note, then a link to the original post, with a screenshot of the post
-// attached. The text is the one TwitterService.postTweet actually sends
-// (against a fake API that refuses the quote). Run:
+// first the note with a link to the original post; when X refuses that too,
+// the note with a screenshot of the post attached. The texts are the ones
+// TwitterService.postTweet actually sends (against a fake API). Run:
 //
 //   flutter test test/screenshots/quote_fallback_shot_test.dart \
 //     --update-goldens --dart-define=screenshots=true
@@ -29,76 +29,110 @@ const _quoted = QuotedTweet(
       'slowly, on paper or on e-ink.',
 );
 
+/// Posts [note] quoting [_quoted] against a fake X that refuses the quote,
+/// and the link post too when [refuseLink]; returns what went out.
+Future<Map<String, dynamic>> _post(String note,
+    {required bool refuseLink}) async {
+  Map<String, dynamic>? posted;
+  final twitter = TwitterService(
+    accessToken: () async => 'token',
+    client: MockClient((request) async {
+      if (request.url.path == '/2/media/upload') {
+        return http.Response('{"data": {"id": "7"}}', 200);
+      }
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      if (body.containsKey('quote_tweet_id')) {
+        return http.Response(
+            '{"detail":"You can only reply to or quote posts where you '
+            'are mentioned or are the author.","status":403}',
+            403);
+      }
+      if (refuseLink && !body.containsKey('media')) {
+        return http.Response('{"detail":"Not allowed."}', 403);
+      }
+      posted = body;
+      return http.Response('{"data": {"id": "1"}}', 201);
+    }),
+  );
+  await twitter.postTweet(note, quoted: _quoted);
+  return posted!;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  String? posted;
+  const note = 'Adding this one to my reading list.';
+  late Map<String, dynamic> linked;
+  late Map<String, dynamic> withScreenshot;
   late Uint8List png;
 
   setUpAll(() async {
     if (!_enabled) return;
     SharedPreferences.setMockInitialValues({});
     await _loadFonts();
-    final twitter = TwitterService(
-      accessToken: () async => 'token',
-      client: MockClient((request) async {
-        if (request.url.path == '/2/media/upload') {
-          return http.Response('{"data": {"id": "7"}}', 200);
-        }
-        final body = jsonDecode(request.body) as Map<String, dynamic>;
-        if (body.containsKey('quote_tweet_id')) {
-          return http.Response(
-              '{"detail":"You can only reply to or quote posts where you '
-              'are mentioned or are the author.","status":403}',
-              403);
-        }
-        posted = body['text'] as String;
-        return http.Response('{"data": {"id": "1"}}', 201);
-      }),
-    );
-    await twitter.postTweet('Adding this one to my reading list.',
-        quoted: _quoted);
+    linked = await _post(note, refuseLink: false);
+    withScreenshot = await _post(note, refuseLink: true);
     png = await renderTweetCard(_quoted);
   });
 
-  testWidgets('quote refused: note, link and screenshot', (tester) async {
+  Future<void> shoot(WidgetTester tester, String title,
+      Map<String, dynamic> posted, String golden) async {
     tester.view.physicalSize = const Size(600, 800) * 2.0;
     tester.view.devicePixelRatio = 2.0;
     addTearDown(tester.view.reset);
+    final hasImage = posted.containsKey('media');
 
     await tester.pumpWidget(MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: buildEinkTheme(),
       home: Scaffold(
-        appBar: AppBar(title: const Text('Posted on X')),
+        appBar: AppBar(title: Text(title)),
         body: Padding(
           padding: const EdgeInsets.all(20),
           child: Container(
+            width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(border: Border.all(width: 1.5)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(posted!, style: const TextStyle(fontSize: 17)),
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.memory(png),
-                ),
+                Text(posted['text'] as String,
+                    style: const TextStyle(fontSize: 17)),
+                if (hasImage) ...[
+                  const SizedBox(height: 14),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.memory(png),
+                  ),
+                ],
               ],
             ),
           ),
         ),
       ),
     ));
-    await tester.runAsync(() async {
-      await precacheImage(MemoryImage(png),
-          tester.element(find.byType(Scaffold)));
-    });
+    if (hasImage) {
+      await tester.runAsync(() async {
+        await precacheImage(MemoryImage(png),
+            tester.element(find.byType(Scaffold)));
+      });
+    }
     await tester.pumpAndSettle();
-    await expectLater(find.byType(MaterialApp),
-        matchesGoldenFile('goldens/quote_fallback.png'));
+    await expectLater(
+        find.byType(MaterialApp), matchesGoldenFile('goldens/$golden'));
+  }
+
+  testWidgets('quote refused: note and link', (tester) async {
+    expect(linked.containsKey('media'), isFalse);
+    await shoot(tester, 'Quote refused: posted with a link', linked,
+        'quote_fallback_link.png');
+  }, skip: !_enabled);
+
+  testWidgets('link refused too: note and screenshot', (tester) async {
+    expect(withScreenshot['text'], note);
+    await shoot(tester, 'Link refused too: posted with a screenshot',
+        withScreenshot, 'quote_fallback_screenshot.png');
   }, skip: !_enabled);
 }
 
