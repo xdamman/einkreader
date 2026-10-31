@@ -28,6 +28,10 @@ import 'reconnect_twitter.dart';
 /// it leads the tweet / email and is published as a note on the article.
 ///
 /// When sharing, the channels start as they were last time (remembered).
+///
+/// The note is kept as a draft while it's typed ([NoteDrafts]): closing the
+/// overlay by mistake loses nothing — reopening "Add note" or "Share…" on
+/// the same highlight(s) brings the text back. Save / Share clears it.
 class ShareNoteDialog extends StatefulWidget {
   final Article article;
 
@@ -95,6 +99,14 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   bool _toTwitter = false;
   bool _sharing = false;
 
+  /// True when the note field was prefilled from an unsaved draft.
+  bool _draftRestored = false;
+
+  String get _draftKey => NoteDrafts.keyFor(widget.article, widget.highlights);
+
+  /// What the field holds when there's no draft: the saved note.
+  String get _savedText => _single?.comment ?? '';
+
   /// The one highlight of the classic flow; null when sharing several.
   Highlight? get _single =>
       widget.highlights.length == 1 ? widget.highlights.first : null;
@@ -102,7 +114,29 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
   @override
   void initState() {
     super.initState();
+    _comment.addListener(_keepDraft);
     _load();
+  }
+
+  String? _lastDraft;
+
+  /// Writes the draft on every edit; an unchanged note is no draft.
+  void _keepDraft() {
+    if (!_loaded || _sharing) return;
+    final text = _comment.text;
+    if (text == _lastDraft) return;
+    _lastDraft = text;
+    unawaited(
+      text.trim() == _savedText.trim()
+          ? NoteDrafts.clear(_draftKey)
+          : NoteDrafts.save(_draftKey, text),
+    );
+  }
+
+  void _discardDraft() {
+    _comment.text = _savedText;
+    unawaited(NoteDrafts.clear(_draftKey));
+    setState(() => _draftRestored = false);
   }
 
   @override
@@ -120,7 +154,14 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     final profileUrl =
         hasProfile ? await ProfileService.instance.profileUrl : null;
     final prefs = await SharedPreferences.getInstance();
+    final draft = await NoteDrafts.load(_draftKey);
     if (!mounted) return;
+    if (!_loaded && draft != null && draft.trim() != _savedText.trim()) {
+      _lastDraft = draft;
+      _comment.text = draft;
+      _comment.selection = TextSelection.collapsed(offset: draft.length);
+      _draftRestored = true;
+    }
     setState(() {
       _hasProfile = hasProfile;
       _profileUrl = profileUrl;
@@ -256,6 +297,8 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
     if (_sharing) return;
     setState(() => _sharing = true);
     final highlights = await _withComment();
+    // Saved for real (the share itself queues in the outbox if offline).
+    await NoteDrafts.clear(_draftKey);
     final toProfile = _toProfile && _hasProfile;
     final toTwitter = _toTwitter && _twitterConnected;
     final note = _groupNote;
@@ -508,13 +551,23 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
                 style: const TextStyle(fontSize: 15, height: 1.4),
                 decoration: InputDecoration(
                   labelText: 'Your note (optional)',
-                  helperText: single == null
+                  helperText: _draftRestored
+                      ? 'Draft restored — not saved yet'
+                      : single == null
                       ? 'Shared with these highlights'
                       : 'Stays private unless you share it',
                   border: const OutlineInputBorder(),
                   alignLabelWithHint: true,
                 ),
               ),
+              if (_draftRestored)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _discardDraft,
+                    child: const Text('Discard draft'),
+                  ),
+                ),
               const SizedBox(height: 14),
               if (_hasProfile)
                 _checkRow(
@@ -614,4 +667,29 @@ class _ShareNoteDialogState extends State<ShareNoteDialog> {
       ),
     );
   }
+}
+
+/// Unsaved notes, kept while typing so an overlay closed by mistake loses
+/// nothing. One draft per highlight (or per combined share of an article's
+/// highlights), per reading profile.
+class NoteDrafts {
+  NoteDrafts._();
+
+  static const _prefix = 'note_draft:';
+
+  static String keyFor(Article article, List<Highlight> highlights) {
+    final profile = AppDatabase.instance.activeProfile;
+    return highlights.length == 1
+        ? '$_prefix$profile:h${highlights.first.id}'
+        : '$_prefix$profile:a${article.id}';
+  }
+
+  static Future<String?> load(String key) async =>
+      (await SharedPreferences.getInstance()).getString(key);
+
+  static Future<void> save(String key, String text) async =>
+      (await SharedPreferences.getInstance()).setString(key, text);
+
+  static Future<void> clear(String key) async =>
+      (await SharedPreferences.getInstance()).remove(key);
 }
