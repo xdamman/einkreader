@@ -7,7 +7,6 @@
 //     --update-goldens --dart-define=screenshots=true
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:einkreader/services/tweet_card.dart';
 import 'package:einkreader/services/twitter_service.dart';
