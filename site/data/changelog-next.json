@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.35",
+    "date": "2026-10-31",
+    "title": "Notes keep a draft",
+    "changes": [
+      "While you write in \"Add note\" or \"Share…\", your text is saved as a draft with every keystroke.",
+      "Closed the window by mistake? Open \"Add note\" or \"Share…\" again on the same highlight and your text comes back, marked \"Draft restored — not saved yet\".",
+      "A \"Discard draft\" button lets you start over. Saving or sharing clears the draft.",
+      "Drafts also work when you share several highlights together, and each reading profile keeps its own drafts."
+    ],
+    "feedback": [
+      {
+        "id": "67eda8bdcf0b286adb5ade8f455d5340170ba3e80f729a52f84ee19903412954",
+        "title": "Save draft note"
+      }
+    ]
+  },
+  {
     "version": "0.6.34",
     "date": "2026-10-31",
     "title": "Release notes in Feedback",
