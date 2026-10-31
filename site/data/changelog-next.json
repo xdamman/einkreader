@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.37",
+    "date": "2026-10-31",
+    "title": "Drag a source onto a folder",
+    "changes": [
+      "In the feed, long-press a source chip to lift it, then drag it onto a folder chip: the folder you hover gets a ring, and dropping the chip moves the source there.",
+      "Drop it on \"All\" to take the source out of its folder. Near the edge of the row, the chips scroll so you can reach folders off screen.",
+      "Long-press and let go without moving to get a small menu: Rename, or Move to one of your folders.",
+      "Double-tap a source chip to rename it. A single tap still filters the feed right away."
+    ],
+    "feedback": [
+      {
+        "id": "9c8f1ccfd12b7689753d42a727e55b71f6e778e0bbc69b0e5a177414eb670649",
+        "title": "Long press on a source chip to move it to another folder"
+      }
+    ]
+  },
+  {
     "version": "0.6.36",
     "date": "2026-10-31",
     "title": "Sharing an X post with a note links to it",
