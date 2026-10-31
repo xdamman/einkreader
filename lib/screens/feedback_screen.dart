@@ -41,8 +41,11 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   bool _canPost = false;
   String? _error;
 
-  /// A refresh from the relays is running (the app-bar icon spins).
+  /// A refresh from the relays is running (the spinner by the title shows).
   bool _loading = false;
+
+  /// New feedback being sent (images uploaded, then the note published).
+  int _posting = 0;
 
   /// Only feedback tagged with this kind; null shows all.
   FeedbackKind? _kind;
@@ -123,9 +126,17 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     final posting = await openNewFeedback(context, service: _service);
     if (posting == null || !mounted) return;
     final draft = posting.draft;
-    setState(() => _notes = [draft, ...?_notes]);
+    setState(() {
+      _notes = [draft, ...?_notes];
+      _posting++;
+    });
     // The draft becomes the real note (openable, reactable) once sent.
-    final sent = await posting.sent;
+    final ({FeedbackNote note, bool queued}) sent;
+    try {
+      sent = await posting.sent;
+    } finally {
+      if (mounted) setState(() => _posting--);
+    }
     if (!mounted) return;
     setState(() => _notes = [
           for (final n in _notes ?? const <FeedbackNote>[])
@@ -161,9 +172,10 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
         : all?.where(_kind!.matches).toList();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Feedback'),
         // No refresh button: the list fetches what's new on opening and
-        // every minute while open.
+        // every minute while open (or on pull down); the spinner next to
+        // the title shows it, and new feedback going out.
+        title: FeedbackTitle('Feedback', loading: _loading || _posting > 0),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -223,7 +235,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
             if (_error != null)
               Padding(padding: const EdgeInsets.all(24), child: Text(_error!))
             else if (notes == null || (notes.isEmpty && _loading))
-              // Loading is shown by the app-bar icon, not a big spinner.
+              // Loading is shown next to the title, not a big spinner.
               const SizedBox.shrink()
             else if (notes.isEmpty)
               Padding(
@@ -441,39 +453,22 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
     }
   }
 
-  /// Opens the thread in the reader's Nostr app (Primal, Amethyst…) to reply
-  /// or react there; without one, in the browser, which offers them all.
-  Future<void> _openInNostrApp() async {
-    final note = NostrService.noteEncode(widget.root.id);
-    try {
-      if (await launchUrl(Uri.parse('nostr:$note'),
-          mode: LaunchMode.externalApplication)) {
-        return;
-      }
-    } catch (_) {}
-    await launchUrl(Uri.parse('https://njump.me/$note'),
-        mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Feedback thread'),
-        actions: [
-          IconButton(
-            tooltip: 'Open in a Nostr app',
-            icon: const Icon(Icons.open_in_new),
-            onPressed: _openInNostrApp,
-          ),
-          RefreshAction(loading: _loading, onPressed: _load),
-        ],
+        // Pull down to refresh; the spinner next to the title shows it,
+        // and replies being sent.
+        title: FeedbackTitle('Feedback thread', loading: _loading || _sending),
       ),
       body: Column(
         children: [
           Expanded(
-            child: ListView(
-              children: [
+            child: RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
                 for (final note in _notes) ...[
                   Padding(
                     // Answers to a reply (not to the root) sit indented.
@@ -507,7 +502,8 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
                   ),
                   const Divider(height: 1),
                 ],
-              ],
+                ],
+              ),
             ),
           ),
           _composer(),
@@ -1580,27 +1576,41 @@ String plainPreview(String markdown) => markdown
     .trim();
 
 
-/// The app-bar refresh button, doubling as the loading indicator: it spins
-/// while a refresh runs (same as the home screen's sync icon) instead of a
-/// large spinner in the middle of the page.
-class RefreshAction extends StatelessWidget {
+/// The app-bar title with the loading indicator right next to it: a small
+/// spinner shows while the screen fetches from the relays ([loading]) or
+/// while anything is being sent to them (a note, a reply, a reaction), so
+/// it's always in the same place, top left.
+class FeedbackTitle extends StatelessWidget {
+  final String title;
   final bool loading;
-  final VoidCallback onPressed;
 
-  const RefreshAction(
-      {super.key, required this.loading, required this.onPressed});
+  const FeedbackTitle(this.title, {super.key, required this.loading});
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: loading ? 'Refreshing…' : 'Refresh',
-      icon: loading
-          ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2))
-          : const Icon(Icons.sync),
-      onPressed: loading ? null : onPressed,
+    return ValueListenableBuilder<int>(
+      valueListenable: FeedbackService.publishing,
+      builder: (context, publishing, _) {
+        final busy = loading || publishing > 0;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(child: Text(title, overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 12),
+            // Same room either way, so nothing shifts when it appears.
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: busy
+                  ? Semantics(
+                      label: publishing > 0 ? 'Sending…' : 'Loading…',
+                      child: const CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : null,
+            ),
+          ],
+        );
+      },
     );
   }
 }

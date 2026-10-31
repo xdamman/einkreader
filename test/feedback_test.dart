@@ -1,6 +1,7 @@
 // In-app feedback on Nostr: notes addressed to the official account, threads
 // of replies (NIP-10), emoji reactions (NIP-25) with the reader's favorite
 // emojis first, and native profiles opened from any avatar or name.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:einkreader/db/app_database.dart';
@@ -81,6 +82,24 @@ class _OfflineRelay extends _FakeRelay {
   Future<int> publish(Map<String, dynamic> event,
           {Duration timeout = const Duration(seconds: 8)}) async =>
       0;
+}
+
+/// Holds every publish until [release] is called (a slow relay).
+class _SlowRelay extends _FakeRelay {
+  Completer<void> gate = Completer<void>();
+
+  void release() {
+    if (!gate.isCompleted) gate.complete();
+  }
+
+  @override
+  Future<int> publish(Map<String, dynamic> event,
+      {Duration timeout = const Duration(seconds: 8)}) async {
+    // Awaited only while held: an already completed gate from the test's
+    // fake-async zone would never wake a publish running in real async.
+    if (!gate.isCompleted) await gate.future;
+    return super.publish(event);
+  }
 }
 
 /// Uploads nowhere: returns a fixed URL for the screenshot.
@@ -323,7 +342,6 @@ void main() {
         theme: buildEinkTheme(),
         home: FeedbackThreadScreen(root: note, service: service)));
     await settle(tester);
-    expect(find.byTooltip('Open in a Nostr app'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'Thanks @ad');
     await tester.pump();
@@ -854,6 +872,75 @@ void main() {
         findsOneWidget,
         reason: 'retried automatically — no reload tap needed');
     expect(find.text('No feedback yet — be the first.'), findsNothing);
+  });
+
+  testWidgets('the thread: no Nostr link, the spinner sits by the title '
+      'while loading and while a reply or reaction goes out', (tester) async {
+    final slow = _SlowRelay();
+    final slowService = FeedbackService(nostr: slow);
+    await tester.runAsync(() => ProfileService.instance.createIdentity());
+    slow.release();
+    final note = (await tester.runAsync(() => slowService.post('Night mode')))!;
+    slow.gate = Completer<void>();
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(),
+        home: FeedbackThreadScreen(root: note, service: slowService)));
+    final titleSpinner = find.descendant(
+        of: find.byType(FeedbackTitle),
+        matching: find.byType(CircularProgressIndicator));
+    expect(titleSpinner, findsOneWidget, reason: 'fetching the thread');
+    await settle(tester);
+    expect(titleSpinner, findsNothing);
+    expect(find.byTooltip('Open in a Nostr app'), findsNothing);
+    expect(find.byTooltip('Refresh'), findsNothing);
+    expect(find.descendant(
+            of: find.byType(AppBar), matching: find.byType(IconButton)),
+        findsNothing,
+        reason: 'no buttons in the app bar (opened as home: no back '
+            'button either)');
+
+    await tester.enterText(find.byType(TextField), 'Me too');
+    await tester.tap(find.byTooltip('Send'));
+    for (var i = 0; i < 5; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(titleSpinner, findsOneWidget, reason: 'the reply is going out');
+    expect(FeedbackService.publishing.value, 1);
+    slow.release();
+    await settle(tester);
+    expect(titleSpinner, findsNothing);
+    expect(FeedbackService.publishing.value, 0);
+    expect(find.textContaining('Me too', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('the list: the spinner by the title shows a reaction going out',
+      (tester) async {
+    final slow = _SlowRelay()..release();
+    final slowService = FeedbackService(nostr: slow);
+    await tester.runAsync(() => ProfileService.instance.createIdentity());
+    final note = (await tester.runAsync(() => slowService.post('Night mode')))!;
+    await tester.pumpWidget(MaterialApp(
+        theme: buildEinkTheme(), home: FeedbackScreen(service: slowService)));
+    final titleSpinner = find.descendant(
+        of: find.byType(FeedbackTitle),
+        matching: find.byType(CircularProgressIndicator));
+    await settle(tester);
+    expect(titleSpinner, findsNothing);
+
+    slow.gate = Completer<void>();
+    final reacting = slowService.react(note, '👍');
+    for (var i = 0; i < 5; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(titleSpinner, findsOneWidget);
+    slow.release();
+    await tester.runAsync(() => reacting);
+    await tester.pump();
+    expect(titleSpinner, findsNothing);
   });
 
   group('notifications for replies to my feedback', () {

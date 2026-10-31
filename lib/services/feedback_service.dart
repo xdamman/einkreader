@@ -477,6 +477,19 @@ class FeedbackService {
   /// on the note itself. Updated by [unseenByThread].
   static final ValueNotifier<int> unseenCount = ValueNotifier(0);
 
+  /// How many notes, replies or reactions are being sent to the relays
+  /// right now: the feedback screens show their loading spinner meanwhile.
+  static final ValueNotifier<int> publishing = ValueNotifier(0);
+
+  Future<int> _publishTracked(Map<String, dynamic> event) async {
+    publishing.value++;
+    try {
+      return await _nostr.publish(event);
+    } finally {
+      publishing.value--;
+    }
+  }
+
   static const _kSeenBaseline = 'feedback_seen_baseline';
   static const _kThreadSeen = 'feedback_thread_seen';
 
@@ -650,7 +663,7 @@ class FeedbackService {
       final description = 'Feedback: "${draft.subject ?? draft.displayText}"';
       try {
         await _remember(event);
-        final accepted = await _nostr.publish(event);
+        final accepted = await _publishTracked(event);
         await AppLogService.instance.info(
             'Feedback: note ${event['id']} accepted by $accepted relay(s)');
         if (accepted > 0) return (note: note, queued: false);
@@ -811,7 +824,7 @@ class FeedbackService {
   Future<bool> _sendOrQueue(Map<String, dynamic> event,
       {required String description}) async {
     try {
-      final accepted = await _nostr.publish(event);
+      final accepted = await _publishTracked(event);
       await AppLogService.instance.info(
           'Feedback: event ${event['id']} accepted by $accepted relay(s)');
       if (accepted > 0) return false;

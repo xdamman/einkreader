@@ -4,6 +4,7 @@
 //
 //   flutter test test/screenshots/feedback_shot_test.dart \
 //     --update-goldens --dart-define=screenshots=true
+import 'dart:async';
 import 'dart:io';
 
 import 'package:einkreader/db/app_database.dart';
@@ -36,9 +37,13 @@ class _Relay extends NostrService {
   final events = <Map<String, dynamic>>[];
   bool offline = false;
 
+  /// While set, publishing waits for it (a slow relay).
+  Completer<void>? hold;
+
   @override
   Future<int> publish(Map<String, dynamic> event,
       {Duration timeout = const Duration(seconds: 8)}) async {
+    await hold?.future;
     if (offline) return 0;
     events.add(event);
     return 1;
@@ -371,6 +376,49 @@ void main() {
     }
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/feedback_12_release_note.png'));
+  }, skip: !_enabled);
+
+  testWidgets('the spinner next to the title while a reply goes out',
+      (tester) async {
+    phone(tester);
+    await tester.pumpWidget(app());
+    await settle(tester);
+    relay.hold = Completer<void>();
+    await tester.enterText(find.byType(TextField), 'Same here, thanks!');
+    await tester.tap(find.byTooltip('Send'));
+    for (var i = 0; i < 5; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_13_thread_sending.png'));
+    relay.hold!.complete();
+    relay.hold = null;
+    await settle(tester);
+  }, skip: !_enabled);
+
+  testWidgets('the spinner next to the title while a reaction goes out',
+      (tester) async {
+    phone(tester);
+    await tester.pumpWidget(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: _withEmoji(buildEinkTheme()),
+        home: FeedbackScreen(service: service)));
+    await settle(tester);
+    relay.hold = Completer<void>();
+    final reacting = service.react(root, '👍');
+    for (var i = 0; i < 5; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/feedback_14_list_sending.png'));
+    relay.hold!.complete();
+    relay.hold = null;
+    await tester.runAsync(() => reacting);
+    await settle(tester);
   }, skip: !_enabled);
 
   testWidgets('tagging new feedback', (tester) async {
