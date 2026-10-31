@@ -459,7 +459,7 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
       appBar: AppBar(
         // Pull down to refresh; the spinner next to the title shows it,
         // and replies being sent.
-        title: FeedbackTitle('Feedback thread', loading: _loading || _sending),
+        title: FeedbackTitle(widget.root.title, loading: _loading || _sending),
       ),
       body: Column(
         children: [
@@ -597,12 +597,8 @@ class _FeedbackThreadScreenState extends State<FeedbackThreadScreen> {
                 ),
                 IconButton(
                   tooltip: 'Send',
-                  icon: _sending
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.send),
+                  // Greyed out while sending: the spinner is by the title.
+                  icon: const Icon(Icons.send),
                   onPressed: _sending ? null : _send,
                 ),
               ],

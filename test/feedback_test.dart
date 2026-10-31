@@ -874,6 +874,17 @@ void main() {
     expect(find.text('No feedback yet — be the first.'), findsNothing);
   });
 
+  test('a thread title: the subject, else the first line of the text', () {
+    FeedbackNote note(String content, {String? subject}) => FeedbackNote(
+        id: 'x', pubkey: 'p', content: content, createdAt: DateTime(2026),
+        subject: subject);
+    expect(note('Night mode\n\nPlease add it', subject: 'Night mode').title,
+        'Night mode');
+    expect(note('\n  Bigger fonts please  \nIn the reader').title,
+        'Bigger fonts please');
+    expect(note('').title, 'Feedback');
+  });
+
   testWidgets('the thread: no Nostr link, the spinner sits by the title '
       'while loading and while a reply or reaction goes out', (tester) async {
     final slow = _SlowRelay();
@@ -891,6 +902,12 @@ void main() {
     expect(titleSpinner, findsOneWidget, reason: 'fetching the thread');
     await settle(tester);
     expect(titleSpinner, findsNothing);
+    expect(
+        find.descendant(
+            of: find.byType(FeedbackTitle), matching: find.text('Night mode')),
+        findsOneWidget,
+        reason: 'the title bar shows the thread subject');
+    expect(find.text('Feedback thread'), findsNothing);
     expect(find.byTooltip('Open in a Nostr app'), findsNothing);
     expect(find.byTooltip('Refresh'), findsNothing);
     expect(find.descendant(
@@ -907,6 +924,8 @@ void main() {
       await tester.pump();
     }
     expect(titleSpinner, findsOneWidget, reason: 'the reply is going out');
+    expect(find.byType(CircularProgressIndicator), findsOneWidget,
+        reason: 'only by the title, not on the send button');
     expect(FeedbackService.publishing.value, 1);
     slow.release();
     await settle(tester);

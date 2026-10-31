@@ -144,6 +144,18 @@ class FeedbackNote {
     return text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
   }
 
+  /// A one-line title for the note's thread: its subject, else the first
+  /// line of its text (mentions shown as names are left to the caller).
+  String get title {
+    final s = subject?.trim() ?? '';
+    if (s.isNotEmpty) return s;
+    final first = displayText
+        .split('\n')
+        .map((l) => l.trim())
+        .firstWhere((l) => l.isNotEmpty, orElse: () => '');
+    return first.isEmpty ? 'Feedback' : first;
+  }
+
   static FeedbackNote fromEvent(Map<String, dynamic> event) {
     String? root;
     String? reply;
