@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.6.39",
+    "date": "2026-11-01",
+    "title": "Feedback threads show their subject",
+    "changes": [
+      "A feedback thread's title bar now shows the start of its subject instead of \"Feedback thread\". Long subjects end with \"…\".",
+      "The Nostr link at the top right of a thread is gone. Pull the thread down to refresh it.",
+      "On the feedback list and in threads, a small spinner right after the title shows when new posts are loading or when your feedback, reply or reaction is being sent. The send button just greys out while your reply goes out."
+    ],
+    "feedback": [
+      {
+        "id": "ddec1f539965df4993bf6950920e37e5f379c7e3c830abfd544cce0757e53fb8",
+        "title": "Thread screen improvements"
+      }
+    ]
+  },
+  {
     "version": "0.6.38",
     "date": "2026-10-31",
     "title": "\"New\" in Feedback means new replies",
