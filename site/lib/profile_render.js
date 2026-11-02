@@ -101,3 +101,15 @@ export function storyForQuote(groups, qid) {
   }
   return null;
 }
+
+/// A note's text as HTML paragraphs: one <p> per block separated by a blank
+/// line, single line breaks kept as <br>. [esc] escapes the text and
+/// [attrs] goes on each <p> (a class or a style).
+export function paragraphs(text, esc, attrs = '') {
+  const open = attrs ? `<p ${attrs}>` : '<p>';
+  return String(text ?? '').trim().split(/\n\s*\n/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block) => `${open}${esc(block).replaceAll('\n', '<br>')}</p>`)
+      .join('');
+}

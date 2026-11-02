@@ -1,6 +1,6 @@
 // The weekly email digest of a profile's shared highlights: pure rendering
 // (HTML and plain text), grouped by story exactly like the public page.
-import { groupStories } from './profile_render.js';
+import { groupStories, paragraphs } from './profile_render.js';
 
 const sharedOn = (seconds) =>
     new Date(seconds * 1000).toLocaleDateString('en-US',
@@ -34,10 +34,10 @@ export function buildDigest({ name, displayName, about, events,
         <a href="${base}/s/${g.id}" style="color:#111;text-decoration:none">${esc(g.title)}</a></h2>
       ${g.url ? `<div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#888;margin-bottom:8px">
         <a href="${esc(g.url)}" style="color:#888">${esc(g.domain ?? 'original')}</a></div>` : ''}
-      ${g.note ? `<p style="font-size:16px;margin:6px 0 0">${esc(g.note)}</p>` : ''}
+      ${g.note ? paragraphs(g.note, esc, 'style="font-size:16px;margin:10px 0 0"') : ''}
       ${g.quotes.map((q) => `
       <blockquote style="border-left:3px solid #111;margin:12px 0 6px;padding:2px 0 2px 14px;font-style:italic;font-size:17px;color:#333">${esc(q.text)}</blockquote>
-      ${q.comment ? `<p style="font-size:16px;margin:6px 0 0">${esc(q.comment)}</p>` : ''}`).join('')}
+      ${q.comment ? paragraphs(q.comment, esc, 'style="font-size:16px;margin:10px 0 0"') : ''}`).join('')}
     </div>`).join('');
 
   const html = `<!doctype html><html><body style="margin:0;background:#fff">

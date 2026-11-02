@@ -7,7 +7,7 @@
 // Story titles link to the LOCAL story permalink; the source domain under
 // them links to the original. Quotes render as blockquotes with the
 // reader's commentary after each; a quote without a comment stands alone.
-import { byMonth, groupStories, monthName, storyForQuote }
+import { byMonth, groupStories, monthName, paragraphs, storyForQuote }
   from '../lib/profile_render.js';
 import { background, cacheProfileResponse, eventsFor, invalidateProfile,
   profileMeta } from '../lib/profile_cache.js';
@@ -75,6 +75,7 @@ const page = (title, body, { name, displayName, feedTitle }) => `<!doctype html>
   blockquote .q-perma a { color:#bbb; text-decoration:none; }
   blockquote .q-perma a:hover { color:#111; }
   .say { font-size:16px; margin:8px 0 0; }
+  .say + .say, .story .note + .note { margin-top:14px; }
   .dots { text-align:center; color:#999; letter-spacing:.6em;
           margin:26px 0 0 .6em; }
   :target { background:#f0f0f0; transition: background 1.2s; }
@@ -186,7 +187,7 @@ function storyHtml(name, group, { headingLink = true, year = true } = {}) {
       <blockquote id="${anchor}"><span class="q-perma"><a
         href="/${esc(name)}/q/${String(quote.id ?? '').slice(0, 12)}"
         title="Permalink to this quote">#</a></span>${esc(quote.text)}</blockquote>
-      ${quote.comment ? `<p class="say">${esc(quote.comment)}</p>` : ''}`;
+      ${quote.comment ? paragraphs(quote.comment, esc, 'class="say"') : ''}`;
   }).join('\n');
   // When the reader shared it (newest quote in the story), shown above the
   // title so it can't be mistaken for the source's publication date.
@@ -201,7 +202,7 @@ function storyHtml(name, group, { headingLink = true, year = true } = {}) {
     ${date ? `<div class="date">${date}</div>` : ''}
     <h2>${title}</h2>
     ${source ? `<div class="meta">${source}</div>` : ''}
-    ${group.note ? `<p class="note">${esc(group.note)}</p>` : ''}
+    ${group.note ? paragraphs(group.note, esc, 'class="note"') : ''}
     ${quotes}
   </article>`;
 }

@@ -1,7 +1,7 @@
 // RSS feed of a profile's shared highlights: /:name/feed.xml
 // One item per story (the same grouping as the page), quotes + comments in
 // the description, linking to the local story permalink.
-import { groupStories } from '../lib/profile_render.js';
+import { groupStories, paragraphs } from '../lib/profile_render.js';
 import { background, cacheProfileResponse, eventsFor, invalidateProfile,
   profileMeta } from '../lib/profile_cache.js';
 import { loadRegistry, pubkeyOf } from '../lib/registry.js';
@@ -25,10 +25,10 @@ export default async function handler(req, res) {
   const base = `https://einkreader.app/${name}`;
 
   const items = groupStories(events).slice(0, 30).map((group) => {
-    const description = (group.note ? `<p>${esc(group.note)}</p>` : '') +
+    const description = (group.note ? paragraphs(group.note, esc) : '') +
         group.quotes.map((quote) =>
         `<blockquote>${esc(quote.text)}</blockquote>` +
-        (quote.comment ? `<p>${esc(quote.comment)}</p>` : '')).join('');
+        (quote.comment ? paragraphs(quote.comment, esc) : '')).join('');
     const source = group.url
         ? `<p>From <a href="${esc(group.url)}">${esc(group.domain ?? group.url)}</a></p>`
         : '';

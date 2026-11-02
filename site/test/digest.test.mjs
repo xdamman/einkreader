@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { schnorr } from '@noble/curves/secp256k1';
 import { bytesToHex } from '@noble/hashes/utils';
 import { buildDigest, highlightsSince } from '../lib/digest.js';
+import { paragraphs } from '../lib/profile_render.js';
 import { mergeEvents, profileMeta, validEvent } from '../lib/profile_cache.js';
 import { eventId } from '../lib/registry.js';
 import { actionUrl, checkToken, decryptEmail, digestDue, encryptEmail,
@@ -100,5 +101,14 @@ const meta = profileMeta([{ kind: 0, created_at: 1, tags: [
 content: JSON.stringify({ name: 'Xavier', website: 'https://xavierdamman.com' }) }]);
 assert.deepEqual(meta.links, ['https://xavierdamman.com', 'https://x.com/xdamman']);
 assert.deepEqual(profileMeta([]).links, []);
+
+// A note keeps its paragraphs on the web: blank lines split them, a single
+// line break stays one.
+const escLt = (s) => s.replaceAll('<', '&lt;');
+assert.equal(paragraphs('One.\n\nTwo\nlines.\n\n\n<Three>', escLt, 'class="say"'),
+    '<p class="say">One.</p><p class="say">Two<br>lines.</p>'
+    + '<p class="say">&lt;Three></p>');
+assert.equal(paragraphs('  Just one.  ', escLt), '<p>Just one.</p>');
+assert.equal(paragraphs('', escLt), '');
 
 console.log('digest tests passed');
