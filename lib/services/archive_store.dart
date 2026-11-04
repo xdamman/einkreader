@@ -177,13 +177,26 @@ class ArchiveStore {
     }
   }
 
+  /// The reference for an image stored at [rel] from [url]. An embedded
+  /// (`data:`) image keeps no address: it is the page's text itself, often
+  /// tens of kilobytes, and only downloading the article again restores it.
+  static String _refFor(String rel, String url) =>
+      url.startsWith('data:') ? '$scheme$rel' : _ref(rel, url);
+
   static String _ref(String rel, String url) =>
       '$scheme$rel#${Uri.encodeComponent(url).replaceAll('(', '%28').replaceAll(')', '%29')}';
 
-  /// Whether [markdown] has images still on the web, not on the device.
+  /// Whether [markdown] has images not stored on the device yet: still on
+  /// the web, or embedded in the text itself (`data:` URIs).
   static bool hasRemoteImages(String markdown) => _imageMarkdown
       .allMatches(markdown)
-      .any((m) => (m.group(2) ?? '').startsWith('http'));
+      .any((m) => _storable(m.group(2) ?? ''));
+
+  /// Whether [url] is an image [localizeMarkdown] can store: a web address,
+  /// or an image embedded in the page as a base64 `data:` URI (some blogs
+  /// inline every picture that way).
+  static bool _storable(String url) =>
+      url.startsWith('http') || url.startsWith('data:image/');
 
   /// The archive-relative paths of the images [markdown] has on the device.
   static Set<String> localImages(String markdown) => {
@@ -274,7 +287,7 @@ class ArchiveStore {
   }) async {
     final urls = <String>{
       for (final m in _imageMarkdown.allMatches(markdown))
-        if ((m.group(2) ?? '').startsWith('http')) m.group(2)!,
+        if (_storable(m.group(2) ?? '')) m.group(2)!,
     };
     if (urls.isEmpty) return markdown;
 
@@ -312,23 +325,33 @@ class ArchiveStore {
       // caller is reprocessing and wants a possibly-broken file replaced.
       if (!overwrite) {
         final cached = await _findCached(p.join(base, imagesRel), hash);
-        if (cached != null) return _ref('$imagesRel/$cached', url);
+        if (cached != null) return _refFor('$imagesRel/$cached', url);
       }
-      final response = await _client
-          .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
-          .timeout(const Duration(seconds: 25));
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
+      final Uint8List bytes;
+      final String type;
+      if (url.startsWith('data:')) {
+        // Embedded in the page: nothing to download, just decode it.
+        final data = UriData.parse(url);
+        bytes = data.contentAsBytes();
+        type = data.mimeType;
+      } else {
+        final response = await _client
+            .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
+            .timeout(const Duration(seconds: 25));
+        if (response.statusCode != 200) {
+          throw Exception('HTTP ${response.statusCode}');
+        }
+        bytes = response.bodyBytes;
+        type = response.headers['content-type'] ?? '';
       }
-      final bytes = response.bodyBytes;
       final resize = bytes.length > _maxBytes;
       // Decoding + re-encoding a large photo takes seconds of pure CPU, so it
       // runs on a background isolate to keep the UI responsive during sync.
       final stored =
           resize ? await Isolate.run(() => _resize(bytes, maxDimension)) : bytes;
-      final ext = resize ? 'jpg' : _extensionFor(response, url);
+      final ext = resize ? 'jpg' : _extensionFor(type, url);
       final name = '$hash.$ext';
-      final ref = _ref('$imagesRel/$name', url);
+      final ref = _refFor('$imagesRel/$name', url);
       final file = File(p.join(base, imagesRel, name));
       await file.parent.create(recursive: true);
       await file.writeAsBytes(stored, flush: true);
@@ -339,7 +362,8 @@ class ArchiveStore {
       );
       return ref;
     } catch (e) {
-      await AppLogService.instance.warn('Could not store image <$url>: $e');
+      final shown = url.length > 80 ? '${url.substring(0, 80)}…' : url;
+      await AppLogService.instance.warn('Could not store image <$shown>: $e');
       return null;
     }
   }
@@ -356,12 +380,12 @@ class ArchiveStore {
     return null;
   }
 
-  static String _extensionFor(http.Response response, String url) {
-    final type = response.headers['content-type'] ?? '';
+  static String _extensionFor(String type, String url) {
     if (type.contains('png')) return 'png';
     if (type.contains('gif')) return 'gif';
     if (type.contains('webp')) return 'webp';
     if (type.contains('jpeg') || type.contains('jpg')) return 'jpg';
+    if (url.startsWith('data:')) return 'jpg';
     final ext = p.extension(Uri.parse(url).path).replaceFirst('.', '');
     return RegExp(r'^[a-z0-9]{1,5}$').hasMatch(ext.toLowerCase())
         ? ext.toLowerCase()

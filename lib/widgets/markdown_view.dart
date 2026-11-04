@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -287,9 +289,13 @@ class _MarkdownViewState extends State<MarkdownView> {
       case _BlockType.image:
         // No caption below the image: alt text is usually a filename or other
         // noise. It still serves as the placeholder when the image can't load.
+        // Centered at its own size: the column stretches its children, and
+        // a picture narrower than the text used to get a box as wide as the
+        // column (and as tall as that width implies), mostly blank. Wider
+        // ones still shrink to fit.
         return Padding(
           padding: const EdgeInsets.only(bottom: 14),
-          child: _image(block),
+          child: Center(child: _image(block)),
         );
       case _BlockType.table:
         return Padding(
@@ -373,9 +379,38 @@ class _MarkdownViewState extends State<MarkdownView> {
     if (local != null) {
       return Image.file(local, errorBuilder: (_, __, ___) => caption());
     }
+    // An image embedded in the page itself (a base64 `data:` URI), not yet
+    // stored on the device: decode it in place.
+    if (url.startsWith('data:')) {
+      final bytes = _dataBytes(url);
+      if (bytes == null) return caption();
+      return Image.memory(bytes, errorBuilder: (_, __, ___) => caption());
+    }
     // Images that were not downloaded (e.g. failed) still try the network.
     return Image.network(url, errorBuilder: (_, __, ___) => caption());
   }
+
+  /// Decoded `data:` images, so a rebuild doesn't decode tens of KB again.
+  static final _dataCache = <String, Uint8List>{};
+
+  static Uint8List? _dataBytes(String url) {
+    final cached = _dataCache[url];
+    if (cached != null) return cached;
+    try {
+      final bytes = UriData.parse(url).contentAsBytes();
+      if (_dataCache.length > 32) _dataCache.clear();
+      return _dataCache[url] = bytes;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// A line of only images, side by side (`![a](x)![b](y)`): each one is
+  /// shown as its own picture, one under the other.
+  static final _imagesOnly = RegExp(
+      r'^(?:!\[[^\]]*\]\([^)\s]+(?:\s+"[^"]*")?\)\s*){2,}$');
+  static final _oneImage =
+      RegExp(r'!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)');
 
   static final _imageOnly =
       RegExp(r'^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"[^"]*")?\s*\)$');
@@ -455,6 +490,15 @@ class _MarkdownViewState extends State<MarkdownView> {
       if (RegExp(r'^([*\-_])(?:\s*\1){2,}$').hasMatch(trimmed)) {
         flushParagraph();
         blocks.add(_Block(_BlockType.rule, ''));
+        continue;
+      }
+
+      if (_imagesOnly.hasMatch(trimmed)) {
+        flushParagraph();
+        for (final m in _oneImage.allMatches(trimmed)) {
+          blocks.add(_Block(_BlockType.image, m.group(1) ?? '',
+              url: m.group(2)));
+        }
         continue;
       }
 
