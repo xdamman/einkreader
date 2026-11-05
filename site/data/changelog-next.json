@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.6.40",
+    "date": "2026-11-05",
+    "title": "Pictures embedded in the page",
+    "changes": [
+      "Some blogs put their pictures right inside the page's text instead of linking to image files. Those pictures used to come out blank; now they show up.",
+      "These pictures are saved on your device when the article syncs, so they also work offline. Articles you've already saved get them back when you open them.",
+      "Pictures that sit side by side on the page now show one under the other.",
+      "Small pictures are centered at their real size instead of leaving a tall blank gap."
+    ],
+    "feedback": [
+      {
+        "id": "34ea23364b544a5c0c84f84304d0f71b001a8f3bab1ba7e87b68200b71511b17",
+        "title": "Images not loading"
+      }
+    ]
+  },
+  {
     "version": "0.6.39",
     "date": "2026-11-01",
     "title": "Feedback threads show their subject",
